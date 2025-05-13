@@ -341,7 +341,12 @@ if(WIN32)
 
 	target_compile_definitions(McBetaCpp PRIVATE MC_WIN32)
 elseif(APPLE)
-	message(FATAL_ERROR "MacOS is not supported yet.")
+	#message(FATAL_ERROR "MacOS is not supported yet.")
+	target_sources(McBetaCpp PRIVATE
+		"src/pc/linux/java/File.cpp"
+		"src/pc/linux/java/Resource.cpp"
+		"src/pc/linux/java/Runtime.cpp"
+	)
 elseif(UNIX)
 	target_sources(McBetaCpp PRIVATE
 		"src/pc/linux/java/File.cpp"

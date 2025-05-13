@@ -185,5 +185,5 @@ bool ChunkCache::shouldSave()
 jstring ChunkCache::gatherStats()
 {
 	// TODO
-	return u"ChunkCache: " + String::toString(chunks.size());
+	return u"ChunkCache: " + String::toString((int)chunks.size());
 }
