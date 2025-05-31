@@ -1215,7 +1215,7 @@ void Level::extinguishFire(int_t x, int_t y, int_t z, Facing f)
 
 jstring Level::gatherStats()
 {
-	return u"All: " + String::toString(entities.size());
+	return u"All: " + String::toString((int)entities.size());
 }
 
 jstring Level::gatherChunkSourceStats()

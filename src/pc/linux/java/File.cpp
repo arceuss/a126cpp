@@ -17,6 +17,10 @@
 #include <fcntl.h>
 #include <dirent.h>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 #include "util/Memory.h"
 
 static std::string ToPath(const jstring &path)
@@ -105,7 +109,15 @@ public:
 		if (::stat(u8path.c_str(), &buffer) != 0)
 			return false;
 		
-		return buffer.st_mtim.tv_sec * 1000LL + buffer.st_mtim.tv_nsec / 1000000LL;
+    /* We check that st_mtime is a macro here in order to give us confidence
+     * that struct stat has a struct timespec st_mtim member. We need this
+     * check because there are some platforms that claim to be POSIX 2008
+     * compliant but which do not have st_mtim... */
+	#if (PLATFORM_POSIX_VERSION >= 200809L) && defined(st_mtime)
+        return buffer.st_mtim.tv_sec * 1000LL + buffer.st_mtim.tv_nsec / 1000000LL;
+	#else
+		return buffer.st_mtime * 1000LL + buffer.st_mtimespec.tv_nsec / 1000000LL;
+	#endif
 	}
 
 	long_t length() const override
@@ -189,8 +201,17 @@ File *File::open(const File &parent, const jstring &child)
 File *File::openResourceDirectory()
 {
 	// Get the path to the executable
-	char path[PATH_MAX];
-	ssize_t length = ::readlink("/proc/self/exe", path, sizeof(path) - 1);
+	char (*path) = (char*)malloc(PATH_MAX);
+	uint32_t length = PATH_MAX;
+	#ifdef __APPLE__
+	if (_NSGetExecutablePath(path, &length) != 0)
+	{
+	  	// Buffer size is too small.
+		length = -1;
+	}
+	#else
+	length = ::readlink("/proc/self/exe", path, sizeof(path) - 1);
+	#endif
 	if (length == -1)
 		return new File_Impl(u"");
 
@@ -205,7 +226,9 @@ File *File::openResourceDirectory()
 		return new File_Impl(u"");
 
 	// Return resource directory
-	return new File_Impl(u16str.substr(0, pos) + u"/resource");
+	File* file = new File_Impl(u16str.substr(0, pos) + u"/resource");
+	free(path);
+	return file;
 }
 
 File *File::openWorkingDirectory(const jstring &name)
