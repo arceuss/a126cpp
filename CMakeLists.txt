@@ -1077,9 +1077,11 @@ set_target_properties(Alpha126Cpp PROPERTIES
 )
 
 # Copy resource folder to output directory next to executable
+# Use copy_directory_if_different to avoid errors if directory doesn't exist
 add_custom_command(TARGET Alpha126Cpp POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:Alpha126Cpp>"
 	COMMAND ${CMAKE_COMMAND} -E copy_directory
-	"${CMAKE_SOURCE_DIR}/resource"
-	"$<TARGET_FILE_DIR:Alpha126Cpp>/resource"
+		"${CMAKE_SOURCE_DIR}/resource"
+		"$<TARGET_FILE_DIR:Alpha126Cpp>/resource"
 	COMMENT "Copying resource folder to output directory"
 )
