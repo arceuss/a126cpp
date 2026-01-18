@@ -1043,35 +1043,31 @@ target_include_directories(Alpha126Cpp PRIVATE "external/cpp-httplib")
 target_include_directories(Alpha126Cpp PRIVATE "external/miniaudio")
 
 # OpenAL-Soft library - build from source
+# On Windows, the target is "OpenAL32", on other platforms it's "openal"
 add_subdirectory("external/openal-soft" EXCLUDE_FROM_ALL)
 
 # Link against the built OpenAL library
-# The target name depends on how OpenAL-Soft's CMakeLists.txt defines it
-# For the 2013 version, it's typically "OpenAL" or "OpenAL32"
-if(TARGET OpenAL)
-	target_link_libraries(Alpha126Cpp PRIVATE OpenAL)
-elseif(TARGET OpenAL32)
-	target_link_libraries(Alpha126Cpp PRIVATE OpenAL32)
-else()
-	# Fallback: try to find the library target
-	find_package(OpenAL QUIET)
-	if(OpenAL_FOUND)
-		target_link_libraries(Alpha126Cpp PRIVATE OpenAL::OpenAL)
-	else()
-		message(WARNING "OpenAL target not found. Please check OpenAL-Soft CMakeLists.txt")
-	endif()
-endif()
-
-# Copy DLL to output directory for runtime (Windows only)
-if(WIN32 AND TARGET OpenAL)
-	get_target_property(OPENAL_LOCATION OpenAL LOCATION)
-	if(OPENAL_LOCATION)
+# OpenAL-Soft's CMakeLists.txt creates a target named ${LIBNAME}
+# which is "OpenAL32" on Windows and "openal" on other platforms
+if(WIN32)
+	if(TARGET OpenAL32)
+		target_link_libraries(Alpha126Cpp PRIVATE OpenAL32)
+		
+		# Copy DLL to output directory for runtime (Windows only)
 		add_custom_command(TARGET Alpha126Cpp POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
-			"${OPENAL_LOCATION}"
+			"$<TARGET_FILE:OpenAL32>"
 			"$<TARGET_FILE_DIR:Alpha126Cpp>/OpenAL32.dll"
 			COMMENT "Copying OpenAL32.dll to output directory"
 		)
+	else()
+		message(WARNING "OpenAL32 target not found. Please check OpenAL-Soft CMakeLists.txt")
+	endif()
+else()
+	if(TARGET openal)
+		target_link_libraries(Alpha126Cpp PRIVATE openal)
+	else()
+		message(WARNING "openal target not found. Please check OpenAL-Soft CMakeLists.txt")
 	endif()
 endif()
 
