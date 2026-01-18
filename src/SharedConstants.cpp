@@ -22,7 +22,9 @@ static jstring readAcceptableChars()
 	return String::fromUTF8(result);
 }
 
-const int NETWORK_PROTOCOL_VERSION = 8;
+// Alpha 1.2.6 uses protocol version 2000 in Packet1Login (specialized for alphaplace server)
+// This value is sent as protocolVersion in login packet and used as entity ID
+const int NETWORK_PROTOCOL_VERSION = 2000;
 const int maxChatLength = 100;
 const jstring acceptableLetters = readAcceptableChars();
 

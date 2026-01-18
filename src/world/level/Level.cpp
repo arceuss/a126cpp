@@ -1,11 +1,33 @@
 #include "world/level/Level.h"
 
 #include <algorithm>
+#include <iostream>
+
+#include "world/level/ChunkPos.h"
+#include "world/level/LightLayer.h"
+#include "util/Mth.h"
 
 #include "nbt/NbtIo.h"
 
 #include "world/level/chunk/ChunkCache.h"
 #include "world/level/material/GasMaterial.h"
+#include "world/level/NextTickListEntry.h"
+#include "world/level/MobSpawner.h"
+#include "world/level/tile/Tile.h"
+#include "world/level/tile/FluidTile.h"
+#include "world/level/tile/FluidFlowingTile.h"
+#include "world/level/tile/FluidStationaryTile.h"
+#include "world/level/tile/FireTile.h"
+#include "world/level/tile/FarmTile.h"
+#include "world/phys/Vec3.h"
+#include "world/entity/Entity.h"
+#include "world/entity/MobCategory.h"
+#include "world/entity/monster/Monster.h"
+#include "world/entity/animal/Animal.h"
+#include "world/level/tile/StoneSlabTile.h"
+#include "world/level/pathfinder/Path.h"
+#include "world/level/pathfinder/PathFinder.h"
+#include "world/level/Explosion.h"
 
 #include "java/File.h"
 #include "java/IOUtil.h"
@@ -196,7 +218,14 @@ Level::Level(File *workingDirectory, const jstring &name, long_t seed, int_t dim
 
 ChunkSource *Level::createChunkSource(std::shared_ptr<File> dir)
 {
-	return new ChunkCache(*this, dimension->createStorage(dir), dimension->createRandomLevelSource());
+	// Handle null dir (e.g., for multiplayer levels that don't use file storage)
+	// Also handle null dimension (shouldn't happen, but prevents crash)
+	if (dimension == nullptr)
+	{
+		throw std::runtime_error("Dimension is null in createChunkSource");
+	}
+	ChunkStorage* storage = (dir != nullptr) ? dimension->createStorage(dir) : nullptr;
+	return new ChunkCache(*this, storage, dimension->createRandomLevelSource());
 }
 
 void Level::validateSpawn()
@@ -213,7 +242,8 @@ int_t Level::getTopTile(int_t x, int_t z)
 
 void Level::clearLoadedPlayerData()
 {
-
+	// newb12: clearLoadedPlayerData() - clears loaded player tag so respawn uses spawn point (Level.java:286-287)
+	loadedPlayerTag = nullptr;
 }
 
 void Level::loadPlayer(std::shared_ptr<Player> player)
@@ -445,6 +475,42 @@ bool Level::setTileAndData(int_t x, int_t y, int_t z, int_t tile, int_t data)
 	return false;
 }
 
+// Beta: Level.mayPlace() - checks if block can be placed (Level.java:1833-1848)
+bool Level::mayPlace(int_t tileId, int_t x, int_t y, int_t z, bool flag)
+{
+	// Beta: int var6 = this.getTile(var2, var3, var4) (Level.java:1834)
+	int_t var6 = getTile(x, y, z);
+	
+	// Beta: Tile var7 = Tile.tiles[var6] (Level.java:1835)
+	Tile *var7 = Tile::tiles[var6];
+	
+	// Beta: Tile var8 = Tile.tiles[var1] (Level.java:1836)
+	Tile *var8 = Tile::tiles[tileId];
+	if (var8 == nullptr)
+		return false;
+	
+	// Beta: AABB var9 = var8.getAABB(this, var2, var3, var4) (Level.java:1837)
+	AABB *var9 = var8->getAABB(*this, x, y, z);
+	
+	// Beta: if (var5) var9 = null (Level.java:1838-1839)
+	if (flag)
+		var9 = nullptr;
+	
+	// Beta: if (var9 != null && !this.isUnobstructed(var9)) return false (Level.java:1842-1843)
+	if (var9 != nullptr && !isUnobstructed(*var9))
+		return false;
+	
+	// Beta: return var7 == Tile.water || var7 == Tile.calmWater || var7 == Tile.lava || var7 == Tile.calmLava || var7 == Tile.fire || var7 == Tile.topSnow ? true : var1 > 0 && var7 == null && var8.mayPlace(this, var2, var3, var4) (Level.java:1845-1847)
+	// Note: In C++, we compare by ID since pointer types differ (Tile* vs FluidFlowingTile*)
+	// Tile IDs: water=8, calmWater=9, lava=10, calmLava=11, snow=78 (from Tile.cpp)
+	// Note: Tile::fire doesn't exist in C++ yet, so we skip that check for now
+	if (var6 == 8 || var6 == 9 || var6 == 10 || var6 == 11 || var6 == 78)
+		return true;
+	
+	// Beta: var1 > 0 && var7 == null && var8.mayPlace(this, var2, var3, var4) (Level.java:1847)
+	return tileId > 0 && var7 == nullptr && var8->mayPlace(*this, x, y, z);
+}
+
 void Level::sendTileUpdated(int_t x, int_t y, int_t z)
 {
 	for (auto &l : listeners)
@@ -503,13 +569,74 @@ void Level::updateNeighborsAt(int_t x, int_t y, int_t z, int_t tile)
 	neighborChanged(x, y, z + 1, tile);
 }
 
+bool Level::getDirectSignal(int_t x, int_t y, int_t z, int_t facing)
+{
+	// Beta: Level.getDirectSignal() - gets direct redstone signal (Level.java:1885-1888)
+	int_t tileId = getTile(x, y, z);
+	return tileId == 0 ? false : Tile::tiles[tileId]->getDirectSignal(*this, x, y, z, facing);
+}
+
+bool Level::getSignal(int_t x, int_t y, int_t z, int_t facing)
+{
+	// Beta: Level.getSignal() - gets redstone signal strength (Level.java:1904-1912)
+	if (isSolidTile(x, y, z))
+	{
+		// Beta: return this.hasDirectSignal(var1, var2, var3) (Level.java:1906)
+		// hasDirectSignal checks all 6 directions for direct signals
+		if (getDirectSignal(x, y - 1, z, 0)) return true;
+		if (getDirectSignal(x, y + 1, z, 1)) return true;
+		if (getDirectSignal(x, y, z - 1, 2)) return true;
+		if (getDirectSignal(x, y, z + 1, 3)) return true;
+		if (getDirectSignal(x - 1, y, z, 4)) return true;
+		if (getDirectSignal(x + 1, y, z, 5)) return true;
+		return false;
+	}
+	else
+	{
+		int_t tileId = getTile(x, y, z);
+		return tileId == 0 ? false : Tile::tiles[tileId]->getSignal(*this, x, y, z, facing);
+	}
+}
+
+bool Level::hasNeighborSignal(int_t x, int_t y, int_t z)
+{
+	// Beta: Level.hasNeighborSignal() - checks if any neighbor has signal (Level.java:1913-1925)
+	if (getSignal(x, y - 1, z, 0))
+	{
+		return true;
+	}
+	else if (getSignal(x, y + 1, z, 1))
+	{
+		return true;
+	}
+	else if (getSignal(x, y, z - 1, 2))
+	{
+		return true;
+	}
+	else if (getSignal(x, y, z + 1, 3))
+	{
+		return true;
+	}
+	else
+	{
+		return getSignal(x - 1, y, z, 4) ? true : getSignal(x + 1, y, z, 5);
+	}
+}
+
 void Level::neighborChanged(int_t x, int_t y, int_t z, int_t tile)
 {
-	if (noNeighborUpdate || isOnline)
-		return;
-	Tile *ptile = Tile::tiles[getTile(x, y, z)];
-	if (ptile != nullptr)
-		ptile->neighborChanged(*this, x, y, z, tile);
+	// Beta: Level.neighborChanged() (Level.java:582-588)
+	// Beta: if (!this.noNeighborUpdate && !this.isOnline) (Level.java:583)
+	if (!noNeighborUpdate && !isOnline)
+	{
+		// Beta: Tile var5 = Tile.tiles[this.getTile(var1, var2, var3)] (Level.java:584)
+		Tile *ptile = Tile::tiles[getTile(x, y, z)];
+		// Beta: if (var5 != null) var5.neighborChanged(this, var1, var2, var3, var4) (Level.java:585-586)
+		if (ptile != nullptr)
+		{
+			ptile->neighborChanged(*this, x, y, z, tile);
+		}
+	}
 }
 
 bool Level::canSeeSky(int_t x, int_t y, int_t z)
@@ -530,8 +657,23 @@ int_t Level::getRawBrightness(int_t x, int_t y, int_t z, bool neighbors)
 	if (neighbors)
 	{
 		int_t tile = getTile(x, y, z);
-		// TODO
-		// stoneSlabHalf farmland
+		// Beta: Special light handling for stoneSlabHalf and farmland (Level.java:603-626)
+		// Both use the same lighting logic - check brightness from above and sides, return maximum
+		if (tile == Tile::stoneSlabHalf.id || tile == Tile::farmland.id)
+		{
+			int_t brightness = getRawBrightness(x, y + 1, z, false);
+			int_t bpx = getRawBrightness(x + 1, y, z, false);
+			int_t bnx = getRawBrightness(x - 1, y, z, false);
+			int_t bpz = getRawBrightness(x, y, z + 1, false);
+			int_t bnz = getRawBrightness(x, y, z - 1, false);
+			
+			if (bpx > brightness) brightness = bpx;
+			if (bnx > brightness) brightness = bnx;
+			if (bpz > brightness) brightness = bpz;
+			if (bnz > brightness) brightness = bnz;
+			
+			return brightness;
+		}
 	}
 
 	if (y < 0)
@@ -758,17 +900,25 @@ bool Level::addEntity(std::shared_ptr<Entity> entity)
 	int_t cz = Mth::floor(entity->z / 16.0);
 	bool isPlayer = entity->isPlayer();
 
-	if (!isPlayer && !hasChunk(cx, cz))
-		return false;
-
+	// Step 3: Always add to global entity list first (Alpha behavior)
+	// This ensures drops cannot be rejected during active gameplay
+	entities.emplace(entity);
+	
 	if (isPlayer)
 	{
 		players.push_back(std::static_pointer_cast<Player>(entity));
 		std::cout << "Player count: " << players.size() << '\n';
 	}
 
-	getChunk(cx, cz)->addEntity(entity);
-	entities.emplace(entity);
+	// Step 3: Only add to chunk if it's loaded (best-effort chunk bookkeeping)
+	// If chunk is not loaded, skip chunk insertion but don't fail
+	if (hasChunk(cx, cz))
+	{
+		getChunk(cx, cz)->addEntity(entity);
+	}
+	// If chunk not loaded, entity is still in global list and will be added to chunk
+	// when it moves into a loaded chunk during tick (see Level::tick entity chunk update)
+
 	entityAdded(entity);
 
 	return true;
@@ -794,14 +944,22 @@ void Level::removeEntity(std::shared_ptr<Entity> entity)
 		entity->ride(nullptr);
 	entity->remove();
 	if (entity->isPlayer())
-		;//players.erase(std::static_pointer_cast<Player>(entity));
+	{
+		// newb12: Remove player from players list (Level.java:953-955)
+		std::shared_ptr<Player> player = std::static_pointer_cast<Player>(entity);
+		players.erase(std::remove(players.begin(), players.end(), player), players.end());
+	}
 }
 
 void Level::removeEntityImmediately(std::shared_ptr<Entity> entity)
 {
 	entity->remove();
 	if (entity->isPlayer())
-		;//players.erase(std::static_pointer_cast<Player>(entity));
+	{
+		// newb12: Remove player from players list (Level.java:960-962)
+		std::shared_ptr<Player> player = std::static_pointer_cast<Player>(entity);
+		players.erase(std::remove(players.begin(), players.end(), player), players.end());
+	}
 	int_t cx = entity->xChunk;
 	int_t cz = entity->zChunk;
 	if (entity->inChunk && hasChunk(cx, cz))
@@ -831,15 +989,30 @@ const std::vector<AABB *> &Level::getCubes(Entity &entity, AABB &bb)
 	int_t z0 = Mth::floor(bb.z0);
 	int_t z1 = Mth::floor(bb.z1 + 1.0);
 
+	// Beta: Level.getCubes() - iterate x and z first, then y from var5 - 1 to var6 (Level.java:991-1000)
 	for (int_t x = x0; x < x1; x++)
 	{
-		for (int_t y = y0; y < y1; y++)
+		for (int_t z = z0; z < z1; z++)
 		{
-			for (int_t z = z0; z < z1; z++)
+			// Beta: Check if chunk exists (Level.java:993)
+			if (hasChunkAt(x, 64, z))
 			{
-				Tile *tile = Tile::tiles[getTile(x, y, z)];
-				if (tile != nullptr)
-					tile->addAABBs(*this, x, y, z, bb, boxes);
+				// Beta: for (int var11 = var5 - 1; var11 < var6; var11++) (Level.java:994)
+				// Check one block below for step-up mechanics (fences, stairs, etc.)
+				// Ensure y doesn't go below 0 or above DEPTH-1 to avoid array bounds errors
+				int_t yStart = (y0 - 1 >= 0) ? (y0 - 1) : 0;
+				int_t yEnd = (y1 < DEPTH) ? y1 : DEPTH;
+				for (int_t y = yStart; y < yEnd; y++)
+				{
+					int_t tileId = getTile(x, y, z);
+					// Beta: Check bounds before accessing Tile::tiles array (0-255)
+					if (tileId >= 0 && tileId < 256)
+					{
+						Tile *tile = Tile::tiles[tileId];
+						if (tile != nullptr)
+							tile->addAABBs(*this, x, y, z, bb, boxes);
+					}
+				}
 			}
 		}
 	}
@@ -1022,9 +1195,58 @@ float Level::getStarBrightness(float a)
 	return curve * curve * 0.5f;
 }
 
+// Alpha: World.scheduleBlockUpdate() (World.java:1117-1138)
+void Level::scheduleBlockUpdate(int_t x, int_t y, int_t z, int_t blockID)
+{
+	// Alpha: If instaTick (field_4214_a), tick immediately instead of scheduling
+	if (instaTick)
+	{
+		// Immediate tick: verify chunks exist and block matches, then tick
+		byte_t rad = 8;
+		if (hasChunksAt(x - rad, y - rad, z - rad, x + rad, y + rad, z + rad))
+		{
+			int_t currentBlockID = getTile(x, y, z);
+			if (currentBlockID == blockID && currentBlockID > 0 && Tile::tiles[currentBlockID] != nullptr)
+			{
+				Tile::tiles[currentBlockID]->tick(*this, x, y, z, random);
+			}
+		}
+		return;
+	}
+
+	// Normal scheduling: create entry and add to queue
+	NextTickListEntry entry(x, y, z, blockID);
+	
+	// Alpha: Set scheduledTime = worldTime + Block.tickRate() (World.java:1129)
+	if (blockID > 0 && Tile::tiles[blockID] != nullptr)
+	{
+		int_t tickRate = Tile::tiles[blockID]->getTickDelay();
+		entry.scheduledTime = time + tickRate;
+	}
+
+	// Alpha: Check chunks exist before scheduling (World.java:1127)
+	byte_t rad = 8;
+	if (!hasChunksAt(x - rad, y - rad, z - rad, x + rad, y + rad, z + rad))
+		return;
+
+	// Alpha: Only add if not already in set (World.java:1132-1135)
+	if (scheduledTickSet.find(entry) == scheduledTickSet.end())
+	{
+		scheduledTickSet.insert(entry);
+		scheduledTickTreeSet.insert(entry);
+		
+		#ifdef DEBUG_FLUID_TICKS
+		std::cout << "Scheduled block tick: (" << x << "," << y << "," << z << ") blockID=" << blockID 
+		          << " at time=" << entry.scheduledTime << " (delay=" << entry.scheduledTime - time << ")\n";
+		#endif
+	}
+}
+
 void Level::addToTickNextTick(int_t x, int_t y, int_t z, int_t delay)
 {
-
+	// Legacy method - for now, just schedule with the delay as blockID (caller should pass blockID)
+	// TODO: This method signature is ambiguous - check if it's actually used
+	scheduleBlockUpdate(x, y, z, delay);
 }
 
 void Level::tickEntities()
@@ -1074,8 +1296,7 @@ void Level::tickEntities()
 			int_t zc = entity->zChunk;
 			if (entity->inChunk && hasChunk(xc, zc))
 				getChunk(xc, zc)->removeEntity(entity);
-			entities.erase(entity);
-
+			
 			it = entities.erase(it);
 			entityRemoved(entity);
 			continue;
@@ -1157,17 +1378,19 @@ void Level::tick(std::shared_ptr<Entity> entity, bool ai)
 		}
 	}
 
-	// Tick rider
+	// Beta 1.2: Tick rider - matches newb12 Level.java:1265-1272 exactly
 	if (ai && entity->inChunk && entity->rider != nullptr)
 	{
-		if (entity->rider->removed || entity->rider->riding != entity)
+		// Beta: if (!var1.rider.removed && var1.rider.riding == var1) { this.tick(var1.rider); } else { ... } (Level.java:1266-1271)
+		if (!entity->rider->removed && entity->rider->riding == entity)
 		{
-			entity->rider->riding = nullptr;
-			entity->rider = nullptr;
+			tick(entity->rider);  // Beta: this.tick(var1.rider) (Level.java:1267)
 		}
 		else
 		{
-			tick(entity->rider);
+			// Beta: var1.rider.riding = null; var1.rider = null; (Level.java:1269-1270)
+			entity->rider->riding = nullptr;
+			entity->rider = nullptr;
 		}
 	}
 }
@@ -1185,13 +1408,128 @@ bool Level::isUnobstructed(AABB &bb)
 
 bool Level::containsAnyLiquid(AABB &bb)
 {
-	// TODO
+	// Beta: Level.containsAnyLiquid() - checks if AABB contains any liquid material (Level.java:1289-1318)
+	int_t x0 = Mth::floor(bb.x0);
+	int_t x1 = Mth::floor(bb.x1 + 1.0);
+	int_t y0 = Mth::floor(bb.y0);
+	int_t y1 = Mth::floor(bb.y1 + 1.0);
+	int_t z0 = Mth::floor(bb.z0);
+	int_t z1 = Mth::floor(bb.z1 + 1.0);
+	
+	// Beta: Handle negative coordinates (Level.java:1296-1306)
+	if (bb.x0 < 0.0)
+		x0--;
+	if (bb.y0 < 0.0)
+		y0--;
+	if (bb.z0 < 0.0)
+		z0--;
+	
+	for (int_t x = x0; x < x1; x++)
+	{
+		for (int_t y = y0; y < y1; y++)
+		{
+			for (int_t z = z0; z < z1; z++)
+			{
+				Tile *tile = Tile::tiles[getTile(x, y, z)];
+				if (tile != nullptr && tile->material.isLiquid())
+				{
+					return true;
+				}
+			}
+		}
+	}
+	
 	return false;
 }
 
+// Beta: Level.checkAndHandleWater() - checks for water material and applies flow physics (Level.java:1345-1383)
+bool Level::checkAndHandleWater(AABB &bb, const Material &material, Entity *entity)
+{
+	int_t x0 = Mth::floor(bb.x0);
+	int_t x1 = Mth::floor(bb.x1 + 1.0);
+	int_t y0 = Mth::floor(bb.y0);
+	int_t y1 = Mth::floor(bb.y1 + 1.0);
+	int_t z0 = Mth::floor(bb.z0);
+	int_t z1 = Mth::floor(bb.z1 + 1.0);
+	
+	if (!hasChunksAt(x0, y0, z0, x1, y1, z1))
+		return false;
+	
+	bool found = false;
+	Vec3 *motion = Vec3::newTemp(0.0, 0.0, 0.0);
+	
+	for (int_t x = x0; x < x1; x++)
+	{
+		for (int_t y = y0; y < y1; y++)
+		{
+			for (int_t z = z0; z < z1; z++)
+			{
+				Tile *tile = Tile::tiles[getTile(x, y, z)];
+				if (tile != nullptr && &tile->material == &material)
+				{
+					double waterHeight = y + 1 - FluidTile::getHeight(getData(x, y, z));
+					if (y1 >= waterHeight)
+					{
+						found = true;
+						// Beta: Call handleEntityInside to accumulate flow vector (Level.java:1366)
+						FluidTile *fluidTile = dynamic_cast<FluidTile*>(tile);
+						if (fluidTile != nullptr)
+						{
+							fluidTile->handleEntityInside(*this, x, y, z, entity, *motion);
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// Beta: Apply flow vector to entity motion (Level.java:1373-1379)
+	if (motion->length() > 0.0)
+	{
+		Vec3 *normalized = motion->normalize();
+		double flowStrength = 0.004;
+		if (entity != nullptr)
+		{
+			entity->xd = entity->xd + normalized->x * flowStrength;
+			entity->yd = entity->yd + normalized->y * flowStrength;
+			entity->zd = entity->zd + normalized->z * flowStrength;
+		}
+	}
+	
+	return found;
+}
+
+// Beta: containsFireTile() - checks if AABB contains fire, lava, or calmLava tiles (Level.java:1322-1341)
 bool Level::containsFireTile(AABB &bb)
 {
-	// TODO
+	int_t x0 = Mth::floor(bb.x0);
+	int_t x1 = Mth::floor(bb.x1 + 1.0);
+	int_t y0 = Mth::floor(bb.y0);
+	int_t y1 = Mth::floor(bb.y1 + 1.0);
+	int_t z0 = Mth::floor(bb.z0);
+	int_t z1 = Mth::floor(bb.z1 + 1.0);
+	
+	// Beta: Check if chunks exist (Level.java:1329)
+	if (hasChunksAt(x0, y0, z0, x1, y1, z1))
+	{
+		// Beta: Iterate through all blocks in AABB (Level.java:1330-1338)
+		for (int_t x = x0; x < x1; x++)
+		{
+			for (int_t y = y0; y < y1; y++)
+			{
+				for (int_t z = z0; z < z1; z++)
+				{
+					int_t tileId = getTile(x, y, z);
+					// Beta: Check if tile is fire, lava, or calmLava (Level.java:1334)
+					if (tileId == Tile::fire.id || tileId == Tile::lava.id || tileId == Tile::calmLava.id)
+					{
+						return true;
+					}
+				}
+			}
+		}
+	}
+	
 	return false;
 }
 
@@ -1308,7 +1646,10 @@ void Level::updateLight(int_t layer, int_t x0, int_t y0, int_t z0, int_t x1, int
 	}
 
 	if (getChunkAt(xm, zm)->isEmpty())
+	{
+		maxLoop--;
 		return;
+	}
 
 	int_t updates = lightUpdates.size();
 	if (checkExpansion)
@@ -1357,7 +1698,9 @@ void Level::setSpawnSettings(bool spawnEnemies, bool spawnFriendlies)
 
 void Level::tick()
 {
-	// TODO MobSpawner
+	// newb12: MobSpawner.tick() - spawn entities
+	// Reference: newb12/net/minecraft/world/level/Level.java:1632
+	MobSpawner::tick(*this, spawnEnemies, spawnFriendlies);
 
 	chunkSource->tick();
 
@@ -1379,18 +1722,161 @@ void Level::tick()
 
 void Level::tickTiles()
 {
-	// TODO
+	// newb12: Level.tickTiles() - random tile ticking and ambient sounds
+	// Reference: newb12/net/minecraft/world/level/Level.java:1652-1706
+	chunksToPoll.clear();
+
+	for (size_t i = 0; i < players.size(); i++)
+	{
+		std::shared_ptr<Player> player = players[i];
+		int_t chunkX = Mth::floor(player->x / 16.0);
+		int_t chunkZ = Mth::floor(player->z / 16.0);
+		byte_t radius = 9;
+
+		for (int_t dx = -radius; dx <= radius; dx++)
+		{
+			for (int_t dz = -radius; dz <= radius; dz++)
+			{
+				chunksToPoll.insert(ChunkPos(dx + chunkX, dz + chunkZ));
+			}
+		}
+	}
+
+	if (delayUntilNextMoodSound > 0)
+	{
+		delayUntilNextMoodSound--;
+	}
+
+	for (const ChunkPos &chunkPos : chunksToPoll)
+	{
+		int_t worldX = chunkPos.x * 16;
+		int_t worldZ = chunkPos.z * 16;
+		std::shared_ptr<LevelChunk> chunk = getChunk(chunkPos.x, chunkPos.z);
+		if (delayUntilNextMoodSound == 0)
+		{
+			randValue = randValue * 3 + addend;
+			int_t randResult = randValue >> 2;
+			int_t localX = randResult & 15;
+			int_t localZ = (randResult >> 8) & 15;
+			int_t y = (randResult >> 16) & 127;
+			int_t tileId = chunk->getTile(localX, y, localZ);
+			int_t blockX = localX + worldX;
+			int_t blockZ = localZ + worldZ;
+			if (tileId == 0 && getRawBrightness(blockX, y, blockZ) <= random.nextInt(8) && getBrightness(LightLayer::Sky, blockX, y, blockZ) <= 0)
+			{
+				std::shared_ptr<Player> nearestPlayer = getNearestPlayer(blockX + 0.5, y + 0.5, blockZ + 0.5, 8.0);
+				if (nearestPlayer != nullptr && nearestPlayer->distanceToSqr(blockX + 0.5, y + 0.5, blockZ + 0.5) > 4.0)
+				{
+					playSound(blockX + 0.5, y + 0.5, blockZ + 0.5, u"ambient.cave.cave", 0.7f, 0.8f + random.nextFloat() * 0.2f);
+					delayUntilNextMoodSound = random.nextInt(12000) + 6000;
+				}
+			}
+		}
+
+		for (int_t i = 0; i < 80; i++)
+		{
+			randValue = randValue * 3 + addend;
+			int_t randResult = randValue >> 2;
+			int_t localX = randResult & 15;
+			int_t localZ = (randResult >> 8) & 15;
+			int_t y = (randResult >> 16) & 127;
+			ubyte_t tileId = chunk->blocks[(localX << 11) | (localZ << 7) | y];
+			if (Tile::shouldTick[tileId])
+			{
+				Tile::tiles[tileId]->tick(*this, localX + worldX, y, localZ + worldZ, random);
+			}
+		}
+	}
 }
 
+// Alpha: World.func_700_a() / tickPendingTicks (World.java:1705-1736)
 bool Level::tickPendingTicks(bool unknown)
 {
-	// TODO
-	return false;
+	int_t tickCount = scheduledTickTreeSet.size();
+	
+	// Alpha: Verify TreeSet and HashSet are in sync (World.java:1710-1712)
+	if (tickCount != scheduledTickSet.size())
+	{
+		// Out of sync - clear and rebuild (shouldn't happen, but safety check)
+		scheduledTickTreeSet.clear();
+		scheduledTickSet.clear();
+		return false;
+	}
+
+	// Alpha: Process up to 1000 ticks per call (World.java:1713-1715)
+	if (tickCount > 1000)
+		tickCount = 1000;
+
+	int_t processedCount = 0;
+	
+	#ifdef DEBUG_FLUID_TICKS
+	int_t fluidUpdateCount = 0;
+	#endif
+
+	for (int_t i = 0; i < tickCount && !scheduledTickTreeSet.empty(); ++i)
+	{
+		// Alpha: Get first entry (earliest scheduled time) (World.java:1718)
+		NextTickListEntry entry = *scheduledTickTreeSet.begin();
+		
+		// Alpha: If not forcing (unknown=false) and scheduledTime > worldTime, stop (World.java:1719-1721)
+		if (!unknown && entry.scheduledTime > time)
+			break;
+
+		// Remove from both sets
+		scheduledTickTreeSet.erase(scheduledTickTreeSet.begin());
+		scheduledTickSet.erase(entry);
+
+		// Alpha: Verify chunks exist before ticking (World.java:1726)
+		byte_t rad = 8;
+		if (!hasChunksAt(entry.xCoord - rad, entry.yCoord - rad, entry.zCoord - rad,
+		                  entry.xCoord + rad, entry.yCoord + rad, entry.zCoord + rad))
+			continue;
+
+		// Alpha: Verify block ID still matches before ticking (World.java:1727-1730)
+		int_t currentBlockID = getTile(entry.xCoord, entry.yCoord, entry.zCoord);
+		if (currentBlockID == entry.blockID && currentBlockID > 0 && Tile::tiles[currentBlockID] != nullptr)
+		{
+			Tile::tiles[currentBlockID]->tick(*this, entry.xCoord, entry.yCoord, entry.zCoord, random);
+			processedCount++;
+			
+			#ifdef DEBUG_FLUID_TICKS
+			// Count fluid updates (water=8,9 or lava=10,11)
+			if (currentBlockID == 8 || currentBlockID == 9 || currentBlockID == 10 || currentBlockID == 11)
+				fluidUpdateCount++;
+			#endif
+		}
+	}
+
+	#ifdef DEBUG_FLUID_TICKS
+	if (fluidUpdateCount > 0 || processedCount > 0)
+	{
+		std::cout << "Tick processed: " << processedCount << " updates (" << fluidUpdateCount << " fluids) "
+		          << "remaining: " << scheduledTickTreeSet.size() << "\n";
+	}
+	#endif
+
+	// Alpha: Return true if more ticks pending (World.java:1734)
+	return !scheduledTickTreeSet.empty();
 }
 
 void Level::animateTick(int_t x, int_t y, int_t z)
 {
-	// TODO
+	// newb12: Level.animateTick() - random tile animation
+	// Reference: newb12/net/minecraft/world/level/Level.java:1738-1751
+	byte_t radius = 16;
+	Random localRandom;
+
+	for (int_t i = 0; i < 1000; i++)
+	{
+		int_t blockX = x + random.nextInt(radius) - random.nextInt(radius);
+		int_t blockY = y + random.nextInt(radius) - random.nextInt(radius);
+		int_t blockZ = z + random.nextInt(radius) - random.nextInt(radius);
+		int_t tileId = getTile(blockX, blockY, blockZ);
+		if (tileId > 0)
+		{
+			Tile::tiles[tileId]->animateTick(*this, blockX, blockY, blockZ, localRandom);
+		}
+	}
 }
 
 const std::vector<std::shared_ptr<Entity>> &Level::getEntities(Entity *ignore, AABB &aabb)
@@ -1404,7 +1890,8 @@ const std::vector<std::shared_ptr<Entity>> &Level::getEntities(Entity *ignore, A
 
 	for (int_t cx = x0; cx <= x1; cx++)
 		for (int_t cz = z0; cz <= z1; cz++)
-			getChunk(cx, cz)->getEntities(ignore, aabb, es);
+			if (hasChunk(cx, cz))  // Beta: Check if chunk exists before accessing (Level.java:1762)
+				getChunk(cx, cz)->getEntities(ignore, aabb, es);
 
 	return es;
 }
@@ -1461,7 +1948,8 @@ void Level::removeEntities(const std::unordered_set<std::shared_ptr<Entity>> &en
 
 void Level::disconnect()
 {
-
+	// Base implementation - no-op for single-player
+	// MultiPlayerLevel overrides this to send disconnect packet
 }
 
 void Level::checkSession()
@@ -1473,6 +1961,45 @@ void Level::checkSession()
 
 	if (IOUtil::readLong(*is) != sessionId)
 		throw std::runtime_error("The save is being accessed from another location, aborting");
+}
+
+// Beta: playSound() methods - forward to listeners (Level.java:880-889)
+void Level::playSound(Entity *entity, const jstring &name, float volume, float pitch)
+{
+	// Beta: Forward to all listeners at entity position (Level.java:880-883)
+	for (LevelListener *listener : listeners)
+	{
+		listener->playSound(name, entity->x, entity->y - entity->heightOffset, entity->z, volume, pitch);
+	}
+}
+
+void Level::playSound(double x, double y, double z, const jstring &name, float volume, float pitch)
+{
+	// Beta: Forward to all listeners at specified position (Level.java:886-889)
+	for (LevelListener *listener : listeners)
+	{
+		listener->playSound(name, x, y, z, volume, pitch);
+	}
+}
+
+// Beta: addParticle() method - forward to listeners (Level.java:891-894)
+void Level::addParticle(const jstring &name, double x, double y, double z, double xa, double ya, double za)
+{
+	// Beta: Forward to all listeners (Level.java:891-894)
+	for (LevelListener *listener : listeners)
+	{
+		listener->addParticle(name, x, y, z, xa, ya, za);
+	}
+}
+
+// Beta: playStreamingMusic() method - forward to listeners (Level.java:892-895)
+void Level::playStreamingMusic(const jstring &name, int_t x, int_t y, int_t z)
+{
+	// Beta: Forward to all listeners (Level.java:892-895)
+	for (LevelListener *listener : listeners)
+	{
+		listener->playStreamingMusic(name, x, y, z);
+	}
 }
 
 void Level::setTime(long_t time)
@@ -1509,4 +2036,123 @@ void Level::broadcastEntityEvent(std::shared_ptr<Entity> entity, byte_t event)
 std::shared_ptr<ChunkSource> Level::getChunkSource()
 {
 	return chunkSource;
+}
+
+// newb12: Level.getNearestPlayer() - finds nearest player within distance
+// Reference: newb12/net/minecraft/world/level/Level.java:1931-1945
+std::shared_ptr<Player> Level::getNearestPlayer(double x, double y, double z, double distance)
+{
+	double closestDistSqr = -1.0;
+	std::shared_ptr<Player> closest = nullptr;
+
+	for (auto &player : players)
+	{
+		double distSqr = player->distanceToSqr(x, y, z);
+		if ((distance < 0.0 || distSqr < distance * distance) && (closestDistSqr == -1.0 || distSqr < closestDistSqr))
+		{
+			closestDistSqr = distSqr;
+			closest = player;
+		}
+	}
+
+	return closest;
+}
+
+// newb12: Level.getNearestPlayer() - helper that takes Entity
+// Reference: newb12/net/minecraft/world/level/Level.java:1927-1929
+std::shared_ptr<Player> Level::getNearestPlayer(Entity &entity, double distance)
+{
+	return getNearestPlayer(entity.x, entity.y, entity.z, distance);
+}
+
+// newb12: Level.findPath() - pathfinding
+// Reference: newb12/net/minecraft/world/level/Level.java:1855-1881
+std::unique_ptr<pathfinder::Path> Level::findPath(Entity &entity, Entity &target, float distance)
+{
+	if (pathFinder == nullptr)
+	{
+		pathFinder = std::make_unique<PathFinder>(this);
+	}
+	return pathFinder->findPath(entity, target, distance);
+}
+
+std::unique_ptr<pathfinder::Path> Level::findPath(Entity &entity, int_t x, int_t y, int_t z, float distance)
+{
+	if (pathFinder == nullptr)
+	{
+		pathFinder = std::make_unique<PathFinder>(this);
+	}
+	return pathFinder->findPath(entity, x, y, z, distance);
+}
+
+// newb12: Helper to count entities by MobCategory (replaces Java's countInstanceOf(getBaseClass()))
+// Reference: newb12/net/minecraft/world/level/MobSpawner.java:50
+int_t Level::countInstanceOf(MobCategory category) const
+{
+	switch (category)
+	{
+	case MobCategory::monster:
+		return countInstanceOf<Monster>();
+	case MobCategory::creature:
+		return countInstanceOf<Animal>();
+	case MobCategory::waterCreature:
+		// WaterAnimal not yet implemented
+		return 0;
+	default:
+		return 0;
+	}
+}
+
+std::shared_ptr<Explosion> Level::explode(Entity *source, double x, double y, double z, float radius)
+{
+	return explode(source, x, y, z, radius, false);
+}
+
+std::shared_ptr<Explosion> Level::explode(Entity *source, double x, double y, double z, float radius, bool fire)
+{
+	std::shared_ptr<Explosion> explosion = Util::make_shared<Explosion>(*this, source, x, y, z, radius);
+	explosion->fire = fire;
+	explosion->explode();
+	explosion->addParticles();
+	return explosion;
+}
+
+double Level::getSeenPercent(Vec3 &from, AABB &to)
+{
+	// Beta: Level.getSeenPercent() - calculates visibility percentage (Level.java:1562-1580)
+	// Samples points across the AABB and checks line of sight from 'from' to each point
+	double var3 = 1.0 / ((to.x1 - to.x0) * 2.0 + 1.0);  // Beta: double var3 = 1.0D / ((var2.x1 - var2.x0) * 2.0D + 1.0D) (Level.java:1563)
+	double var5 = 1.0 / ((to.y1 - to.y0) * 2.0 + 1.0);  // Beta: double var5 = 1.0D / ((var2.y1 - var2.y0) * 2.0D + 1.0D) (Level.java:1564)
+	double var7 = 1.0 / ((to.z1 - to.z0) * 2.0 + 1.0);  // Beta: double var7 = 1.0D / ((var2.z1 - var2.z0) * 2.0D + 1.0D) (Level.java:1565)
+	int_t var9 = 0;  // Beta: int var9 = 0 (Level.java:1566) - visible count
+	int_t var10 = 0;  // Beta: int var10 = 0 (Level.java:1567) - total count
+	
+	// Beta: Sample points across the AABB volume (Level.java:1569-1582)
+	for (float var11 = 0.0f; var11 <= 1.0f; var11 = (float)((double)var11 + var3))  // Beta: for(float var11 = 0.0F; var11 <= 1.0F; var11 = (float)((double)var11 + var3)) (Level.java:1569)
+	{
+		for (float var12 = 0.0f; var12 <= 1.0f; var12 = (float)((double)var12 + var5))  // Beta: for(float var12 = 0.0F; var12 <= 1.0F; var12 = (float)((double)var12 + var5)) (Level.java:1570)
+		{
+			for (float var13 = 0.0f; var13 <= 1.0f; var13 = (float)((double)var13 + var7))  // Beta: for(float var13 = 0.0F; var13 <= 1.0F; var13 = (float)((double)var13 + var7)) (Level.java:1571)
+			{
+				// Beta: Calculate sample point within AABB (Level.java:1572-1574)
+				double var14 = to.x0 + (to.x1 - to.x0) * (double)var11;  // Beta: double var14 = var2.x0 + (var2.x1 - var2.x0) * (double)var11 (Level.java:1572)
+				double var16 = to.y0 + (to.y1 - to.y0) * (double)var12;  // Beta: double var16 = var2.y0 + (var2.y1 - var2.y0) * (double)var12 (Level.java:1573)
+				double var18 = to.z0 + (to.z1 - to.z0) * (double)var13;  // Beta: double var18 = var2.z0 + (var2.z1 - var2.z0) * (double)var13 (Level.java:1574)
+				
+				// Beta: Check line of sight - clip returns null if no hit (clear visibility) (Level.java:1575-1577)
+				// Java: this.clip(Vec3.newTemp(var14, var16, var18), var1) - checks from samplePoint to from
+				// If clip returns null (no hit), the path is clear (visible)
+				Vec3 samplePoint(var14, var16, var18);  // Beta: Vec3.newTemp(var14, var16, var18) (Level.java:1575)
+				HitResult hit = clip(samplePoint, from);  // Beta: this.clip(Vec3.newTemp(var14, var16, var18), var1) (Level.java:1575)
+				if (hit.type == HitResult::Type::NONE)  // Beta: if(this.clip(...) == null) (Level.java:1575)
+				{
+					var9++;  // Beta: ++var9 (Level.java:1576)
+				}
+				
+				var10++;  // Beta: ++var10 (Level.java:1579)
+			}
+		}
+	}
+	
+	return (double)var9 / (double)var10;  // Beta: return (float)var9 / (float)var10 (Level.java:1584)
 }

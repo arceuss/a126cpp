@@ -25,6 +25,18 @@ HitResult::HitResult(std::shared_ptr<Entity> &entity)
 	this->type = Type::ENTITY;
 }
 
+HitResult::HitResult(Entity *entity)
+{
+	if (entity != nullptr)
+	{
+		// Create a shared_ptr from the raw pointer (assuming entity is managed elsewhere)
+		// This is a temporary solution - ideally entities should be passed as shared_ptr
+		this->entity = std::shared_ptr<Entity>(entity, [](Entity*) {});  // Non-owning shared_ptr
+		this->pos = Vec3::newTemp(entity->x, entity->y, entity->z);
+		this->type = Type::ENTITY;
+	}
+}
+
 double HitResult::distanceTo(std::shared_ptr<Entity> &entity) const
 {
 	double dx = entity->x - pos->x;

@@ -1,4 +1,5 @@
 #include "world/level/dimension/Dimension.h"
+#include "world/level/dimension/HellDimension.h"
 
 #include "world/level/Level.h"
 
@@ -119,7 +120,7 @@ Dimension *Dimension::getNew(Level &level, int_t id)
 {
 	if (id == 0)
 		return new Dimension(level);
-	// if (id == -1)
-	// 	return new HellDimension(level);
+	if (id == -1)
+		return new HellDimension(level);
 	return nullptr;
 }

@@ -17,6 +17,8 @@ Options::Option::Element Options::Option::ANAGLYPH = { false, true, u"options.an
 Options::Option::Element Options::Option::LIMIT_FRAMERATE = { false, true, u"options.limitFramerate" };
 Options::Option::Element Options::Option::DIFFICULTY = { false, false, u"options.difficulty" };
 Options::Option::Element Options::Option::GRAPHICS = { false, false, u"options.graphics" };
+Options::Option::Element Options::Option::FOV = { true, false, u"options.fov" };
+Options::Option::Element Options::Option::GUI_SCALE = { false, false, u"options.guiScale" };
 
 const char16_t *Options::RENDER_DISTANCE_NAMES[] = {
 	u"options.renderDistance.far",
@@ -68,6 +70,8 @@ void Options::set(Option::Element &option, float value)
 		sound = value;
 	else if (&option == &Option::SENSITIVITY)
 		mouseSensitivity = value;
+	else if (&option == &Option::FOV)
+		fovSetting = value;
 }
 
 void Options::toggle(Option::Element &option, int_t add)
@@ -92,6 +96,8 @@ void Options::toggle(Option::Element &option, int_t add)
 		fancyGraphics = !fancyGraphics;
 		minecraft.levelRenderer.allChanged();
 	}
+	else if (&option == &Option::GUI_SCALE)
+		guiScale = (guiScale + add) & 3;
 
 	save();
 }
@@ -104,6 +110,8 @@ float Options::getProgressValue(Option::Element &option)
 		return sound;
 	else if (&option == &Option::SENSITIVITY)
 		return mouseSensitivity;
+	else if (&option == &Option::FOV)
+		return fovSetting;
 	return 0.0f;
 }
 
@@ -123,6 +131,21 @@ bool Options::getBooleanValue(Option::Element &option)
 jstring Options::getMessage(Option::Element &option)
 {
 	Language &l = Language::getInstance();
+	
+	// Handle FOV first (special case - it's progress but has custom display)
+	if (&option == &Option::FOV)
+	{
+		if (fovSetting == 0.0f)
+			return u"FOV: Normal";
+		else if (fovSetting == 1.0f)
+			return u"FOV: Quake Pro";
+		else
+		{
+			int_t fovValue = static_cast<int_t>(70.0f + fovSetting * 40.0f);
+			return u"FOV: " + String::fromUTF8(std::to_string(fovValue));
+		}
+	}
+	
 	jstring result = l.getElement(option.captionId) + u": ";
 
 	if (option.isProgress)
@@ -167,6 +190,11 @@ jstring Options::getMessage(Option::Element &option)
 			return result + l.getElement(u"options.graphics.fancy");
 		else
 			return result + l.getElement(u"options.graphics.fast");
+	}
+	else if (&option == &Option::GUI_SCALE)
+	{
+		const char16_t *scaleNames[] = { u"Auto", u"Small", u"Normal", u"Large" };
+		return u"GUI Scale: " + jstring(scaleNames[guiScale]);
 	}
 
 	return result;
@@ -214,8 +242,14 @@ void Options::load()
 			difficulty = std::stoi(value);
 		if (key == "fancyGraphics")
 			fancyGraphics = value == "true";
+		if (key == "fov")
+			fovSetting = readFloat(value);
+		if (key == "guiScale")
+			guiScale = std::stoi(value);
 		if (key == "skin")
 			skin = String::fromUTF8(value);
+		if (key == "username")
+			username = String::fromUTF8(value);
 		if (key == "lastServer")
 			lastMpIp = String::fromUTF8(value);
 
@@ -255,7 +289,10 @@ void Options::save()
 	*os << "limitFramerate:" << limitFramerate << '\n';
 	*os << "difficulty:" << difficulty << '\n';
 	*os << "fancyGraphics:" << fancyGraphics << '\n';
+	*os << "fov:" << fovSetting << '\n';
+	*os << "guiScale:" << guiScale << '\n';
 	*os << "skin:" << String::toUTF8(skin) << '\n';
+	*os << "username:" << String::toUTF8(username) << '\n';
 	*os << "lastServer:" << String::toUTF8(lastMpIp) << '\n';
 
 	for (int_t i = 0; i < keyMappings.size(); i++)

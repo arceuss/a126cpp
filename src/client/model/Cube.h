@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include "client/model/Vertex.h"
 #include "client/model/Polygon.h"
 
@@ -8,7 +10,7 @@
 class Cube
 {
 private:
-	std::array<Polygon, 6> polygons;
+	std::array<Poly, 6> polygons;
 	int_t xTexOffs = 0;
 	int_t yTexOffs = 0;
 
@@ -30,7 +32,7 @@ private:
 
 public:
 	Cube(int_t xTexOffs, int_t yTexOffs);
-	
+
 	void setTexOffs(int_t xTexOffs, int_t yTexOffs);
 	void addBox(float x0, float y0, float z0, int_t w, int_t h, int_t d);
 	void addBox(float x0, float y0, float z0, int_t w, int_t h, int_t d, float g);

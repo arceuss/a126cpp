@@ -24,3 +24,9 @@ bool TransparentTile::blocksLight()
 {
 	return false;
 }
+
+bool TransparentTile::isTranslucent()
+{
+	// Alpha: Transparent blocks let light through (for lighting calculations)
+	return true;
+}

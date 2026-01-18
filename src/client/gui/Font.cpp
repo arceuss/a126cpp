@@ -100,8 +100,11 @@ Font::Font(Options &options, const jstring &name, Textures &textures)
 			b /= 4;
 		}
 
+		// Alpha 1.2.6: Color code display lists store RGB colors
+		// Java: this.field_22009_h[var7] = (var9 & 255) << 16 | (var10 & 255) << 8 | var11 & 255;
+		// The alpha is preserved from the original color parameter (this.alpha)
 		glNewList(listPos + 256 + j, GL_COMPILE);
-		glColor3f(r / 255.0f, g / 255.0f, b / 255.0f);
+		glColor3f(r / 255.0f, g / 255.0f, b / 255.0f);  // RGB only, alpha preserved from glColor4f call
 		glEndList();
 	}
 }
@@ -119,44 +122,122 @@ void Font::draw(const jstring &str, int_t x, int_t y, int_t color)
 
 void Font::draw(const jstring &str, int_t x, int_t y, int_t color, bool darken)
 {
+	// Alpha 1.2.6: Match Java's exact order of operations
+	// Java: if((var4 & -16777216) == 0) { var4 |= -16777216; }
+	//       if(var5) { var4 = (var4 & 16579836) >> 2 | var4 & -16777216; }
+	//       this.alpha = (float)(var4 >> 24 & 255) / 255.0F;
+	//       GL11.glColor4f(..., this.alpha);
+	// Order: 1) Set default alpha if needed, 2) Darken if needed, 3) Extract alpha, 4) Set glColor4f
+	
+	// Step 1: Java sets default alpha if alpha bits are 0
+	// -16777216 = 0xFF000000 (all alpha bits set)
+	// IMPORTANT: This must happen BEFORE darken, as darken preserves alpha
+	if ((color & 0xFF000000) == 0 && color != 0)
+	{
+		// This is a legacy color without alpha bits (like 0xFFFFFF)
+		// OR chat color with var9=0 (0x00FFFFFF) - but these are skipped anyway
+		color |= 0xFF000000;  // Set alpha to 255 (matching Java: var4 |= -16777216)
+	}
+	
+	// Step 2: Java darkens RGB but preserves alpha
+	// Java: if(var5) { var4 = (var4 & 16579836) >> 2 | var4 & -16777216; }
+	// 16579836 = 0xFCFCFC (RGB mask), -16777216 = 0xFF000000 (alpha mask)
 	if (darken)
 	{
-		int_t oldAlpha = color & 0xFF000000;
-		color = (color & 0xFCFCFC) >> 2;
-		color += oldAlpha;
+		color = (color & 0xFCFCFC) >> 2 | (color & 0xFF000000);
+	}
+	
+	// Step 3: Extract alpha after all modifications
+	// Java: this.alpha = (float)(var4 >> 24 & 255) / 255.0F;
+	// newb12: float a = (color >> 24 & 0xFF) / 255.0F; if (a == 0.0F) { a = 1.0F; }
+	float alpha = ((color >> 24) & 0xFF) / 255.0f;
+	// newb12 also sets default alpha if extracted alpha is 0 (after darken operation)
+	if (alpha == 0.0f)
+	{
+		alpha = 1.0f;  // Default to fully opaque
 	}
 
 	glBindTexture(GL_TEXTURE_2D, fontTexture);
 
+	// Alpha 1.2.6: Set initial color (Java sets this.alpha and initial glColor4f)
+	// Java: GL11.glColor4f((float)(var4 >> 16 & 255) / 255.0F, (float)(var4 >> 8 & 255) / 255.0F, (float)(var4 & 255) / 255.0F, this.alpha);
 	float r = ((color >> 16) & 0xFF) / 255.0f;
 	float g = ((color >> 8) & 0xFF) / 255.0f;
 	float b = (color & 0xFF) / 255.0f;
-	float a = ((color >> 24) & 0xFF) / 255.0f;
-	if (a == 0.0f) a = 1.0f;
-
-	glColor4f(r, g, b, a);
+	glColor4f(r, g, b, alpha);
 
 	ib.clear();
 	glPushMatrix();
 	glTranslatef(x, y, 0.0f);
 
+	// Alpha 1.2.6: Parse color codes (Java uses character 167 = 0xA7 = §)
+	// Java: renderStringImpl() processes each character individually and renders immediately
+	// Java: if(var4 == 167 && var3 + 1 < var1.length()) {
+	//     var5 = "0123456789abcdef".indexOf(var1.toLowerCase().charAt(var3 + 1));
+	//     ...
+	//     int var7 = this.field_22009_h[var5];
+	//     GL11.glColor4f((float)(var7 >> 16) / 255.0F, (float)(var7 >> 8 & 255) / 255.0F, (float)(var7 & 255) / 255.0F, this.alpha);
+	//     ++var3;
+	// }
+	// To match Java behavior: render characters in segments when color codes change
+	static const jstring colorCodes = u"0123456789abcdef";
+	
 	for (int_t i = 0; i < str.length(); i++)
 	{
-		while (str[i] == 223 && str.length() > i + 1)
+		char_t ch = str[i];
+		if (ch == 167 && i + 1 < str.length())  // 167 = 0xA7 = § (section symbol)
 		{
-			static const std::string codes = "0123456789abcdef";
-			int_t cc = codes.find(std::tolower(str[i]));
-			if (cc == jstring::npos || cc > 15) cc = 15;
-			ib.push_back(listPos + 256 + cc + (darken ? 16 : 0));
-			i += 2;
+			// Render accumulated characters before changing color
+			if (!ib.empty())
+			{
+				glCallLists(ib.size(), GL_UNSIGNED_INT, ib.data());
+				ib.clear();
+			}
+			
+			char_t codeChar = str[i + 1];
+			// Convert to lowercase for comparison
+			char_t lowerCode = codeChar;
+			if (codeChar >= u'A' && codeChar <= u'F')
+				lowerCode = codeChar + (u'a' - u'A');
+			else if (codeChar >= u'a' && codeChar <= u'f')
+				lowerCode = codeChar;
+			else if (codeChar >= u'0' && codeChar <= u'9')
+				lowerCode = codeChar;
+			
+			int_t codeIndex = colorCodes.find(lowerCode);
+			if (codeIndex == jstring::npos || codeIndex > 15)
+				codeIndex = 15;
+			
+			// Set color using display list (color codes are in listPos + 256 + codeIndex)
+			// For shadow, add 16 to get darker version
+			// Java: if(var2) { var5 += 16; }
+			// Java: int var7 = this.field_22009_h[var5];
+			//       GL11.glColor4f((float)(var7 >> 16) / 255.0F, (float)(var7 >> 8 & 255) / 255.0F, (float)(var7 & 255) / 255.0F, this.alpha);
+			// Java explicitly sets alpha when processing color codes, preserving this.alpha from the original color.
+			// Our display list calls glColor3f (RGB only), which preserves the current alpha.
+			// Since we already set glColor4f with alpha at the start, glColor3f will preserve it.
+			// However, to ensure alpha is correct (especially for chat fading), we restore it explicitly.
+			int_t colorListIndex = listPos + 256 + codeIndex + (darken ? 16 : 0);
+			glCallList(colorListIndex);  // This calls glColor3f, setting RGB but preserving alpha
+			// Restore alpha explicitly to ensure it's correct for fading
+			// Get current RGB from OpenGL state, then restore alpha
+			GLfloat currentColor[4];
+			glGetFloatv(GL_CURRENT_COLOR, currentColor);
+			glColor4f(currentColor[0], currentColor[1], currentColor[2], alpha);
+			
+			i++;  // Skip the color code character
 		}
-
-		int_t ch = SharedConstants::acceptableLetters.find(str[i]);
-		if (ch != jstring::npos)
-			ib.push_back(listPos + ch + 32);
+		else
+		{
+			int_t chIndex = SharedConstants::acceptableLetters.find(ch);
+			if (chIndex != jstring::npos)
+				ib.push_back(listPos + chIndex + 32);
+		}
 	}
 
-	glCallLists(ib.size(), GL_UNSIGNED_INT, ib.data());
+	// Render any remaining accumulated characters
+	if (!ib.empty())
+		glCallLists(ib.size(), GL_UNSIGNED_INT, ib.data());
 	glPopMatrix();
 }
 
@@ -167,8 +248,12 @@ int_t Font::width(const jstring &str)
 	for (int_t i = 0; i < str.length(); i++)
 	{
 		char_t c = str[i];
-		if (c == 223)
-			i++;
+		// Alpha 1.2.6: Skip color codes (167 = 0xA7 = §)
+		// Java: if(var4 == 167 && var3 + 1 < var1.length()) { ++var3; }
+		if (c == 167 && i + 1 < str.length())
+		{
+			i++;  // Skip the color code character
+		}
 		else
 		{
 			int_t ch = SharedConstants::acceptableLetters.find(c);
@@ -178,6 +263,76 @@ int_t Font::width(const jstring &str)
 	}
 
 	return len;
+}
+
+jstring Font::trimStringToWidth(const jstring &str, int_t width, bool reverse)
+{
+	if (reverse)
+	{
+		jstring result;
+		int_t len = 0;
+		for (int_t i = str.length() - 1; i >= 0; i--)
+		{
+			char_t c = str[i];
+			// Alpha 1.2.6: Skip color codes (167 = 0xA7 = §)
+			if (c == 167 && i > 0)
+			{
+				i--;  // Skip the color code character
+				continue;
+			}
+			
+			int_t charWidth = 0;
+			if (c == 223 && i > 0)
+			{
+				i--;
+				charWidth = charWidths[223];
+			}
+			else
+			{
+				int_t ch = SharedConstants::acceptableLetters.find(c);
+				if (ch != jstring::npos)
+					charWidth = charWidths.at(ch + 32);
+			}
+			if (len + charWidth > width)
+				break;
+			len += charWidth;
+			result.insert(0, 1, c);
+		}
+		return result;
+	}
+	else
+	{
+		jstring result;
+		int_t len = 0;
+		for (int_t i = 0; i < str.length(); i++)
+		{
+			char_t c = str[i];
+			// Alpha 1.2.6: Skip color codes (167 = 0xA7 = §)
+			if (c == 167 && i + 1 < str.length())
+			{
+				i++;  // Skip the color code character
+				continue;
+			}
+			
+			int_t charWidth = 0;
+			if (c == 223 && i + 1 < str.length())
+			{
+				i++;
+				charWidth = charWidths[223];
+			}
+			else
+			{
+				int_t ch = SharedConstants::acceptableLetters.find(c);
+				if (ch != jstring::npos)
+					charWidth = charWidths.at(ch + 32);
+			}
+			if (len + charWidth > width)
+				break;
+			len += charWidth;
+			result.push_back(c);
+		}
+		return result;
+	}
 }
 
 jstring Font::sanitize(const jstring &str)

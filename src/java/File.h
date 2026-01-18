@@ -39,7 +39,7 @@ public:
 	virtual bool mkdir() const = 0;
 	bool mkdirs() const;
 
-	jstring getName() const;
+	virtual jstring getName() const;
 	jstring toString() const;
 	jstring toURL() const;
 

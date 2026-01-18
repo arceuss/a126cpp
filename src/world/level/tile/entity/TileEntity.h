@@ -28,7 +28,7 @@ public:
 
 	virtual void tick();
 
-	static TileEntity *loadStatic(CompoundTag &tag);
+	static std::shared_ptr<TileEntity> loadStatic(CompoundTag &tag);
 
 	int_t getData();
 	void setData(int_t data);
@@ -38,6 +38,6 @@ public:
 
 	Tile &getTile();
 
-	// TODO
-	// getUpdatePacket
+	// Beta: TileEntity.getUpdatePacket() returns null (TileEntity.java:94-96)
+	virtual void *getUpdatePacket() { return nullptr; }
 };

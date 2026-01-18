@@ -25,7 +25,7 @@ public:
 protected:
 	void setupRotations(Mob &mob, float bob, float bodyRot, float a);
 	float getAttackAnim(Mob &mob, float a);
-	float getBob(Mob &mob, float a);
+	virtual float getBob(Mob &mob, float a);
 
 	virtual void additionalRendering(Mob &mob, float a);
 

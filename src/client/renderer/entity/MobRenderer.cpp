@@ -33,29 +33,33 @@ void MobRenderer::render(Entity &entity, double x, double y, double z, float rot
 	float bob = getBob(mob, a);
 	setupRotations(mob, bob, bodyRot, a);
 
-	float scale = 1.0f / 16.0f;
+	float scale = 0.0625F;  // Beta: 0.0625F (1.0F / 16.0F) (MobRenderer.java:38)
 	glEnable(GL_RESCALE_NORMAL_EXT);
 	glScalef(-1.0f, -1.0f, 1.0f);
 
 	this->scale(mob, a);
-	glTranslatef(0.0f, -24.0f * scale - (1.0f / 128.0f), 0.0f);
+	glTranslatef(0.0F, -24.0F * scale - 0.0078125F, 0.0F);  // Beta: -24.0F * scale - 0.0078125F (1.0F / 128.0F) (MobRenderer.java:42)
 
 	float ws = mob.walkAnimSpeedO + (mob.walkAnimSpeed - mob.walkAnimSpeedO) * a;
 	float wp = mob.walkAnimPos - mob.walkAnimSpeed * (1.0f - a);
 
 	if (ws > 1.0f) ws = 1.0f;
 
-	bindTexture(mob.customTextureUrl, mob.getTexture());
+	jstring backupTexture = mob.getTexture();
+	glBindTexture(GL_TEXTURE_2D, entityRenderDispatcher.textures->loadHttpTexture(mob.customTextureUrl, &backupTexture));
 	glEnable(GL_ALPHA_TEST);
 
 	model->render(wp, ws, bob, headRot - bodyRot, headRotx, scale);
+	// Beta: MobRenderer.java:53-59 - armor rendering restores GL state after each layer
 	for (int_t i = 0; i < MAX_ARMOR_LAYERS; i++)
 	{
 		if (prepareArmor(mob, i, a))
 		{
+			// newb12: Sync attackTime to armor model so it animates during attacks (MobRenderer.java:25 sets model.attackTime, but armor needs it too)
+			if (armor != nullptr) armor->attackTime = model->attackTime;
 			armor->render(wp, ws, bob, headRot - bodyRot, headRotx, scale);
-			glDisable(GL_BLEND);
-			glDisable(GL_ALPHA_TEST);
+			glDisable(GL_BLEND);  // Beta: GL11.glDisable(3042) (MobRenderer.java:56)
+			glEnable(GL_ALPHA_TEST);  // Beta: GL11.glEnable(3008) (MobRenderer.java:57)
 		}
 	}
 
@@ -75,13 +79,16 @@ void MobRenderer::render(Entity &entity, double x, double y, double z, float rot
 		{
 			glColor4f(br, 0.0f, 0.0f, 0.4f);
 			model->render(wp, ws, bob, headRot - bodyRot, headRotx, scale);
+			// Beta: MobRenderer.java:74-79 - armor rendering in overlay block doesn't change GL state
 			for (int_t i = 0; i < MAX_ARMOR_LAYERS; i++)
 			{
 				if (prepareArmor(mob, i, a))
 				{
+					// Sync attackTime to armor model for animation
+					if (armor != nullptr) armor->attackTime = model->attackTime;
+					glColor4f(br, 0.0F, 0.0F, 0.4F);  // Beta: GL11.glColor4f(br, 0.0F, 0.0F, 0.4F) (MobRenderer.java:76)
 					armor->render(wp, ws, bob, headRot - bodyRot, headRotx, scale);
-					glDisable(GL_BLEND);
-					glDisable(GL_ALPHA_TEST);
+					// Beta: No GL state changes here (MobRenderer.java:77-78)
 				}
 			}
 		}
@@ -94,13 +101,16 @@ void MobRenderer::render(Entity &entity, double x, double y, double z, float rot
 			float aa = ((overlayColor >> 24) & 0xFF) / 255.0f;
 			glColor4f(r, g, b, aa);
 			model->render(wp, ws, bob, headRot - bodyRot, headRotx, scale);
+			// Beta: MobRenderer.java:90-95 - armor rendering in overlay block doesn't change GL state
 			for (int_t i = 0; i < MAX_ARMOR_LAYERS; i++)
 			{
 				if (prepareArmor(mob, i, a))
 				{
+					// Sync attackTime to armor model for animation
+					if (armor != nullptr) armor->attackTime = model->attackTime;
+					glColor4f(r, g, b, aa);  // Beta: GL11.glColor4f(r, g, b, aa) (MobRenderer.java:92)
 					armor->render(wp, ws, bob, headRot - bodyRot, headRotx, scale);
-					glDisable(GL_BLEND);
-					glDisable(GL_ALPHA_TEST);
+					// Beta: No GL state changes here (MobRenderer.java:93-94)
 				}
 			}
 		}
@@ -109,6 +119,7 @@ void MobRenderer::render(Entity &entity, double x, double y, double z, float rot
 		glDisable(GL_BLEND);
 		glEnable(GL_ALPHA_TEST);
 		glEnable(GL_TEXTURE_2D);
+		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);  // Restore color after overlay rendering
 	}
 
 	glDisable(GL_RESCALE_NORMAL_EXT);

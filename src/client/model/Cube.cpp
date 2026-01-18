@@ -50,14 +50,14 @@ void Cube::addBox(float x0, float y0, float z0, int_t w, int_t h, int_t d, float
 	Vertex l2 = Vertex(x1, y1, z1, 8.0f, 8.0f);
 	Vertex l3 = Vertex(x0, y1, z1, 8.0f, 0.0f);
 
-	polygons[0] = Polygon(std::array<Vertex, 4>{ l1, u1, u2, l2 }, xTexOffs + d + w, yTexOffs + d, xTexOffs + d + w + d, yTexOffs + d + h);
-	polygons[1] = Polygon(std::array<Vertex, 4>{ u0, l0, l3, u3 }, xTexOffs + 0, yTexOffs + d, xTexOffs + d, yTexOffs + d + h);
+	polygons[0] = Poly(std::array<Vertex, 4>{ l1, u1, u2, l2 }, xTexOffs + d + w, yTexOffs + d, xTexOffs + d + w + d, yTexOffs + d + h);
+	polygons[1] = Poly(std::array<Vertex, 4>{ u0, l0, l3, u3 }, xTexOffs + 0, yTexOffs + d, xTexOffs + d, yTexOffs + d + h);
 	
-	polygons[2] = Polygon(std::array<Vertex, 4>{ l1, l0, u0, u1 }, xTexOffs + d, yTexOffs + 0, xTexOffs + d + w, yTexOffs + d);
-	polygons[3] = Polygon(std::array<Vertex, 4>{ u2, u3, l3, l2 }, xTexOffs + d + w, yTexOffs + 0, xTexOffs + d + w + w, yTexOffs + d);
+	polygons[2] = Poly(std::array<Vertex, 4>{ l1, l0, u0, u1 }, xTexOffs + d, yTexOffs + 0, xTexOffs + d + w, yTexOffs + d);
+	polygons[3] = Poly(std::array<Vertex, 4>{ u2, u3, l3, l2 }, xTexOffs + d + w, yTexOffs + 0, xTexOffs + d + w + w, yTexOffs + d);
 	
-	polygons[4] = Polygon(std::array<Vertex, 4>{ u1, u0, u3, u2 }, xTexOffs + d, yTexOffs + d, xTexOffs + d + w, yTexOffs + d + h);
-	polygons[5] = Polygon(std::array<Vertex, 4>{ l0, l1, l2, l3 }, xTexOffs + d + w + d, yTexOffs + d, xTexOffs + d + w + d + w, yTexOffs + d + h);
+	polygons[4] = Poly(std::array<Vertex, 4>{ u1, u0, u3, u2 }, xTexOffs + d, yTexOffs + d, xTexOffs + d + w, yTexOffs + d + h);
+	polygons[5] = Poly(std::array<Vertex, 4>{ l0, l1, l2, l3 }, xTexOffs + d + w + d, yTexOffs + d, xTexOffs + d + w + d + w, yTexOffs + d + h);
 
 	if (mirror)
 	{
@@ -89,14 +89,14 @@ void Cube::addTexBox(float x0, float y0, float z0, int_t w, int_t h, int_t d, in
 	float _u1 = ((tex % 16) + us) / 16.0f;
 	float v1 = ((tex / 16) + vs) / 16.0f;
 
-	polygons[0] = Polygon(std::array<Vertex, 4>{ l1, u1, u2, l2 }, _u0, v0, _u1, v1);
-	polygons[1] = Polygon(std::array<Vertex, 4>{ u0, l0, l3, u3 }, _u0, v0, _u1, v1);
-
-	polygons[2] = Polygon(std::array<Vertex, 4>{ l1, l0, u0, u1 }, _u0, v0, _u1, v1);
-	polygons[3] = Polygon(std::array<Vertex, 4>{ u2, u3, l3, l2 }, _u0, v0, _u1, v1);
-
-	polygons[4] = Polygon(std::array<Vertex, 4>{ u1, u0, u3, u2 }, _u0, v0, _u1, v1);
-	polygons[5] = Polygon(std::array<Vertex, 4>{ l0, l1, l2, l3 }, _u0, v0, _u1, v1);
+	polygons[0] = Poly(std::array<Vertex, 4>{ l1, u1, u2, l2 }, _u0, v0, _u1, v1);
+	polygons[1] = Poly(std::array<Vertex, 4>{ u0, l0, l3, u3 }, _u0, v0, _u1, v1);
+	
+	polygons[2] = Poly(std::array<Vertex, 4>{ l1, l0, u0, u1 }, _u0, v0, _u1, v1);
+	polygons[3] = Poly(std::array<Vertex, 4>{ u2, u3, l3, l2 }, _u0, v0, _u1, v1);
+	
+	polygons[4] = Poly(std::array<Vertex, 4>{ u1, u0, u3, u2 }, _u0, v0, _u1, v1);
+	polygons[5] = Poly(std::array<Vertex, 4>{ l0, l1, l2, l3 }, _u0, v0, _u1, v1);
 }
 
 void Cube::setPos(float x, float y, float z)

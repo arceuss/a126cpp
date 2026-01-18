@@ -27,4 +27,5 @@ public:
 	void setRGB(int_t startX, int_t startY, int_t w, int_t h, unsigned char *rgbArray);
 
 	static BufferedImage ImageIO_read(std::istream &is);
+	static BufferedImage ImageIO_readFromMemory(const unsigned char *data, int_t size);
 };

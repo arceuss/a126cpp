@@ -31,6 +31,7 @@ public:
 	void draw(const jstring &str, int_t x, int_t y, int_t color, bool darken);
 
 	int_t width(const jstring &str);
+	jstring trimStringToWidth(const jstring &str, int_t width, bool reverse = false);
 
 	static jstring sanitize(const jstring &str);
 };

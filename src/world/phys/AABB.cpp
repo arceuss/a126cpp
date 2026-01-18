@@ -181,10 +181,12 @@ bool AABB::contains(const Vec3 &other) const
 
 double AABB::getSize() const
 {
+	// newb12: AABB.getSize() - returns average of three dimensions
+	// Reference: newb12/net/minecraft/world/phys/AABB.java:213-217
 	double dx = x1 - x0;
 	double dy = y1 - y0;
 	double dz = z1 - z0;
-	return (dx * dy * dz) / 3.0;
+	return (dx + dy + dz) / 3.0;
 }
 
 AABB *AABB::shrink(double x, double y, double z) const
@@ -224,17 +226,18 @@ HitResult AABB::clip(const Vec3 &a, const Vec3 &b) const
 	Vec3 *clipz0 = a.clipZ(b, z0);
 	Vec3 *clipz1 = a.clipZ(b, z1);
 
-	if (!containsX(*clipx0))
+	// Check for null pointers before dereferencing - clipX/Y/Z can return nullptr
+	if (clipx0 != nullptr && !containsX(*clipx0))
 		clipx0 = nullptr;
-	if (!containsX(*clipx1))
+	if (clipx1 != nullptr && !containsX(*clipx1))
 		clipx1 = nullptr;
-	if (!containsY(*clipy0))
+	if (clipy0 != nullptr && !containsY(*clipy0))
 		clipy0 = nullptr;
-	if (!containsY(*clipy1))
+	if (clipy1 != nullptr && !containsY(*clipy1))
 		clipy1 = nullptr;
-	if (!containsZ(*clipz0))
+	if (clipz0 != nullptr && !containsZ(*clipz0))
 		clipz0 = nullptr;
-	if (!containsZ(*clipz1))
+	if (clipz1 != nullptr && !containsZ(*clipz1))
 		clipz1 = nullptr;
 
 	Vec3 *closest = nullptr;

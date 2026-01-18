@@ -38,7 +38,11 @@ void OffsettedRenderList::render()
 	if (!lists.empty())
 	{
 		glPushMatrix();
-		glTranslatef(static_cast<float>(x) - xOff, static_cast<float>(y) - yOff, static_cast<float>(z) - zOff);
+		// AlphaPlace fix: Subtract offset in double precision before casting to float
+		// This prevents floating point precision loss at long distances
+		glTranslatef(static_cast<float>(static_cast<double>(x) - xOff), 
+		             static_cast<float>(static_cast<double>(y) - yOff), 
+		             static_cast<float>(static_cast<double>(z) - zOff));
 		glCallLists(lists.size(), GL_UNSIGNED_INT, lists.data());
 		glPopMatrix();
 	}

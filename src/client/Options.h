@@ -52,9 +52,11 @@ public:
 		static Element LIMIT_FRAMERATE;
 		static Element DIFFICULTY;
 		static Element GRAPHICS;
+		static Element FOV;
+		static Element GUI_SCALE;
 
-		static constexpr Element *values[10] = {
-			&MUSIC, &SOUND, &INVERT_MOUSE, &SENSITIVITY, &RENDER_DISTANCE, &VIEW_BOBBING, &ANAGLYPH, &LIMIT_FRAMERATE, &DIFFICULTY, &GRAPHICS
+		static constexpr Element *values[12] = {
+			&MUSIC, &SOUND, &INVERT_MOUSE, &SENSITIVITY, &RENDER_DISTANCE, &VIEW_BOBBING, &ANAGLYPH, &LIMIT_FRAMERATE, &DIFFICULTY, &GRAPHICS, &FOV, &GUI_SCALE
 		};
 	};
 
@@ -74,8 +76,11 @@ public:
 	bool anaglyph3d = false;
 	bool limitFramerate = false;
 	bool fancyGraphics = true;
+	float fovSetting = 0.0f;
+	int_t guiScale = 0;
 
 	jstring skin = u"Default";
+	jstring username = u"Player";  // Username setting for Player name
 
 	KeyMapping keyUp = KeyMapping(u"key.forward", lwjgl::Keyboard::KEY_W);
 	KeyMapping keyLeft = KeyMapping(u"key.left", lwjgl::Keyboard::KEY_A);
@@ -99,7 +104,8 @@ private:
 public:
 	int_t difficulty = 2;
 
-	bool thirdPersonView = false;
+	int_t thirdPersonView = 0;  // Alpha: thirdPersonView - 0=first person, 1=back, 2=front (GameSettings.java:43)
+	bool showDebugInfo = false;  // Alpha: showDebugInfo - debug screen toggle (GameSettings.java:49)
 
 	jstring lastMpIp = u"";
 

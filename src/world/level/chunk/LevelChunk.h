@@ -70,7 +70,7 @@ private:
 	
 public:
 	virtual int_t getTile(int_t x, int_t y, int_t z);
-	virtual bool setTileAndData(int_t x, int_t y, int_t z, int_t tile, int_t data);
+	virtual bool setTileAndData(int_t x, int_t y, int_t z, int_t tile, int_t dataValue);
 	virtual bool setTile(int_t x, int_t y, int_t z, int_t tile);
 
 	virtual int_t getData(int_t x, int_t y, int_t z);
@@ -109,6 +109,12 @@ public:
 	virtual void setBlocks(byte_t *blocks, int_t y);
 	virtual int_t getBlocksAndData(byte_t *out, int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1);
 	virtual int_t setBlocksAndData(byte_t *in, int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1);
+	
+	// Alpha 1.2.6: Chunk.func_1004_a - decode chunk data with offset (returns new offset)
+	// Signature: func_1004_a(byte[] var1, int var2, int var3, int var4, int var5, int var6, int var7, int var8)
+	// Returns: new offset for next chunk
+	virtual int_t setBlocksAndDataFromPacket(byte_t *data, int_t xStart, int_t yStart, int_t zStart, 
+	                                          int_t xEnd, int_t yEnd, int_t zEnd, int_t offset);
 
 	virtual Random getRandom(long_t seed);
 

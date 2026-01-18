@@ -8,6 +8,7 @@ class Minecraft;
 class Player;
 class Entity;
 class Level;
+class ItemStack;
 
 class GameMode
 {
@@ -32,7 +33,8 @@ public:
 
 	virtual float getPickRange();
 
-	//virtual bool useItem(); // TODO
+	// Beta: GameMode.useItem() - uses item (GameMode.java:62-75)
+	virtual bool useItem(std::shared_ptr<Player> &player, std::shared_ptr<Level> &level, ItemStack *item);
 
 	virtual void initPlayer(std::shared_ptr<Player> player);
 
@@ -42,7 +44,8 @@ public:
 
 	virtual void adjustPlayer(std::shared_ptr<Player> player);
 
-	//virtual bool useItemOn();
+	// Beta: GameMode.useItemOn() - uses item on block (GameMode.java:90-97)
+	virtual bool useItemOn(std::shared_ptr<Player> &player, std::shared_ptr<Level> &level, ItemStack *item, int_t x, int_t y, int_t z, Facing face);
 
 	virtual std::shared_ptr<Player> createPlayer(Level &level);
 

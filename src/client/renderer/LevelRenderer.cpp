@@ -1,14 +1,30 @@
 #include "client/renderer/LevelRenderer.h"
 
 #include <algorithm>
+#include <iostream>
+#include <typeinfo>
 
 #include "client/Minecraft.h"
+#include "world/entity/item/EntityItem.h"
 #include "client/renderer/DirtyChunkSorter.h"
 #include "client/renderer/DistanceChunkSorter.h"
 #include "client/renderer/entity/EntityRenderDispatcher.h"
+#include "client/renderer/tileentity/TileEntityRenderDispatcher.h"
+#include "client/renderer/MobSkinTextureProcessor.h"
 
 #include "world/level/tile/Tile.h"
 #include "world/level/tile/LeafTile.h"
+#include "world/level/material/Material.h"
+#include "world/phys/AABB.h"
+
+#include "client/particle/BubbleParticle.h"
+#include "client/particle/SplashParticle.h"
+#include "client/particle/SmokeParticle.h"
+#include "client/particle/FlameParticle.h"
+#include "client/particle/LavaParticle.h"
+#include "client/particle/ExplodeParticle.h"
+#include "client/particle/RedDustParticle.h"
+#include "client/particle/PortalParticle.h"
 
 #include "util/Mth.h"
 
@@ -227,6 +243,9 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 		return;
 	}
 
+	// Beta: Prepare tile entity render dispatcher (LevelRenderer.java:288)
+	TileEntityRenderDispatcher::instance.prepare(level.get(), &textures, mc.font.get(), mc.player.get(), a);
+	
 	EntityRenderDispatcher::instance.prepare(level, textures, *mc.font, mc.player, mc.options, a);
 	totalEntities = 0;
 	renderedEntities = 0;
@@ -236,17 +255,69 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 	EntityRenderDispatcher::xOff = player.xOld + (player.x - player.xOld) * a;
 	EntityRenderDispatcher::yOff = player.yOld + (player.y - player.yOld) * a;
 	EntityRenderDispatcher::zOff = player.zOld + (player.z - player.zOld) * a;
+	
+	// Beta: Set tile entity render dispatcher offsets (LevelRenderer.java:297-299)
+	TileEntityRenderDispatcher::xOff = player.xOld + (player.x - player.xOld) * a;
+	TileEntityRenderDispatcher::yOff = player.yOld + (player.y - player.yOld) * a;
+	TileEntityRenderDispatcher::zOff = player.zOld + (player.z - player.zOld) * a;
 
 	const auto &entities = level->getAllEntities();
+	totalEntities = entities.size();  // Beta: this.totalEntities = entities.size() (LevelRenderer.java:301)
+
+	// Optimized: Cache player shared_ptr and thirdPersonView check outside loop
+	// Match Java pattern: for (int i = 0; i < entities.size(); i++) (LevelRenderer.java:303)
+	const bool shouldRenderPlayer = mc.options.thirdPersonView > 0;
+	const auto &playerShared = mc.player;
 
 	for (auto &entity : entities)
 	{
-		if (entity->shouldRender(cam) && culler.isVisible(entity->bb) && (entity != mc.player || mc.options.thirdPersonView) && level->hasChunkAt(Mth::floor(entity->x), Mth::floor(entity->y), Mth::floor(entity->z)))
-		{
+		// Early exit optimizations: check cheapest conditions first
+		if (entity == playerShared && !shouldRenderPlayer)
+			continue;
+		
+		if (!entity->shouldRender(cam))
+			continue;
+		
+		if (!culler.isVisible(entity->bb))
+			continue;
+		
+		// Cache floor calculations
+		const int_t ex = Mth::floor(entity->x);
+		const int_t ey = Mth::floor(entity->y);
+		const int_t ez = Mth::floor(entity->z);
+		
+		if (!level->hasChunkAt(ex, ey, ez))
+			continue;
+		
 			renderedEntities++;
 			EntityRenderDispatcher::instance.render(*entity, a);
-		}
 	}
+	
+	// Beta: Restore GL state after entity rendering (prevents state from affecting clouds/items)
+	// Entity rendering may change depth function (GL_EQUAL for overlays), so restore it
+	glDepthFunc(GL_LEQUAL);  // Beta: Restore default depth function
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);  // Beta: Restore color to white
+	
+	// Beta: Render tile entities (LevelRenderer.java:314-316)
+	// Java: Iterates through renderableTileEntities list, not level.tileEntityList
+	// Performance optimization: Add frustum culling for tile entities
+	for (int_t ix = 0; ix < static_cast<int_t>(renderableTileEntities.size()); ix++)  // newb12: for (int ix = 0; ix < this.renderableTileEntities.size(); ix++) (LevelRenderer.java:314)
+	{
+		TileEntity *tileEntity = renderableTileEntities[ix].get();
+		
+		// Performance optimization: Frustum cull tile entities before rendering
+		// Create a small AABB for the tile entity (1 block)
+		AABB tileEntityBB(tileEntity->x, tileEntity->y, tileEntity->z, 
+		                   tileEntity->x + 1.0, tileEntity->y + 1.0, tileEntity->z + 1.0);
+		if (!culler.isVisible(tileEntityBB))
+			continue;
+		
+		TileEntityRenderDispatcher::instance.render(tileEntity, a);  // newb12: TileEntityRenderDispatcher.instance.render(this.renderableTileEntities.get(ix), a) (LevelRenderer.java:315)
+	}
+	
+	// Beta: Reset color after tile entity rendering (prevents dark color from affecting translucent blocks)
+	// TileEntityRenderDispatcher sets glColor3f(br, br, br) which can leave color darker than white
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
 jstring LevelRenderer::gatherStats1()
@@ -442,7 +513,8 @@ int_t LevelRenderer::renderChunks(int_t from, int_t to, int_t layer, double alph
 	for (auto &l : renderLists)
 		l.clear();
 
-	for (int_t i = 0; i < renderChunksList.size(); i++)
+	// Optimized: break early when found, use size_t for better performance
+	for (size_t i = 0; i < renderChunksList.size(); i++)
 	{
 		auto &chunk = renderChunksList[i];
 		
@@ -450,7 +522,10 @@ int_t LevelRenderer::renderChunks(int_t from, int_t to, int_t layer, double alph
 		for (int_t l = 0; l < lists; l++)
 		{
 			if (renderLists[l].isAt(chunk->xRender, chunk->yRender, chunk->zRender))
+			{
 				list = l;
+				break;  // Early exit when found
+			}
 		}
 
 		if (list < 0)
@@ -675,7 +750,14 @@ void LevelRenderer::renderClouds(float alpha)
 
 void LevelRenderer::renderAdvancedClouds(float alpha)
 {
-	glDisable(GL_CULL_FACE);
+	// Beta: LevelRenderer.java:758 - exact order of operations
+	glDisable(GL_CULL_FACE);  // Beta: GL11.glDisable(2884) (LevelRenderer.java:758)
+	
+	// Beta: Ensure depth testing is enabled for cloud depth prepass
+	// Depth testing should already be enabled, but ensure it's correct
+	glEnable(GL_DEPTH_TEST);  // Beta: Depth testing must be enabled for depth prepass
+	glDepthMask(true);  // Beta: Depth mask must be enabled to write depth values in prepass
+	glDepthFunc(GL_LEQUAL);  // Beta: Default depth function
 
 	float yOffs = mc.player->yOld + (mc.player->y - mc.player->yOld) * alpha;
 
@@ -684,7 +766,7 @@ void LevelRenderer::renderAdvancedClouds(float alpha)
 	float h = 4.0f;
 
 	double xo = (mc.player->xo + (mc.player->x - mc.player->xo) * alpha + ((ticks + alpha) * 0.03f)) / ss;
-	double zo = (mc.player->zo + (mc.player->z - mc.player->zo) * alpha) / ss + 0.33;
+	double zo = (mc.player->zo + (mc.player->z - mc.player->zo) * alpha) / ss + 0.33f;  // Beta: 0.33F (LevelRenderer.java:764)
 
 	float yy = 108.0f - yOffs + 0.33f;
 
@@ -713,28 +795,37 @@ void LevelRenderer::renderAdvancedClouds(float alpha)
 		cb = cbb;
 	}
 
-	float uo = xo * 0.0;
-	float vo = zo * 0.0;
-	float scale = 1.0f / 256.0f;
-
+	float uo = (float)(xo * 0.0);  // Beta: (float)(xo * 0.0) (LevelRenderer.java:786)
+	float vo = (float)(zo * 0.0);  // Beta: (float)(zo * 0.0) (LevelRenderer.java:787)
+	float scale = 0.00390625F;  // Beta: 0.00390625F (1.0F / 256.0F) (LevelRenderer.java:788)
 	uo = Mth::floor(xo) * scale;
 	vo = Mth::floor(zo) * scale;
-
-	float xoffs = xo - Mth::floor(xo);
-	float zoffs = zo - Mth::floor(zo);
-
+	float xoffs = (float)(xo - Mth::floor(xo));  // Beta: (float)(xo - Mth.floor(xo)) (LevelRenderer.java:791)
+	float zoffs = (float)(zo - Mth::floor(zo));  // Beta: (float)(zo - Mth.floor(zo)) (LevelRenderer.java:792)
 	int_t D = 8;
 	int_t radius = 3;
-	float e = 1.0f / 1024.0f;
+	float e = 9.765625E-4F;  // Beta: 9.765625E-4F (1.0F / 1024.0F) (LevelRenderer.java:795)
 
-	glScalef(ss, 1.0f, ss);
+	// Beta: LevelRenderer.java:796 - glScalef called directly without glPushMatrix
+	glScalef(ss, 1.0f, ss);  // Beta: GL11.glScalef(ss, 1.0F, ss) (LevelRenderer.java:796)
 
 	for (int_t pass = 0; pass < 2; pass++)
 	{
 		if (pass == 0)
-			glColorMask(false, false, false, false);
+		{
+			// Beta: LevelRenderer.java:799-800 - depth prepass with color mask disabled
+			glColorMask(false, false, false, false);  // Beta: GL11.glColorMask(false, false, false, false) (LevelRenderer.java:800)
+			// Beta: Depth mask must be enabled during prepass to write depth values
+			glDepthMask(true);  // Beta: Ensure depth mask is enabled for depth prepass
+		}
 		else
-			glColorMask(true, true, true, true);
+		{
+			// Beta: LevelRenderer.java:802 - color pass with color mask enabled
+			glColorMask(true, true, true, true);  // Beta: GL11.glColorMask(true, true, true, true) (LevelRenderer.java:802)
+			// Beta: Depth mask should remain enabled for color pass (depth testing, but not writing)
+			// Actually, we want to write depth in color pass too for proper depth testing
+			glDepthMask(true);  // Beta: Keep depth mask enabled for color pass
+		}
 
 		for (int_t xPos = -radius + 1; xPos <= radius; xPos++)
 		{
@@ -749,20 +840,21 @@ void LevelRenderer::renderAdvancedClouds(float alpha)
 				if (yy > -h - 1.0f)
 				{
 					t.color(cr * 0.7f, cg * 0.7f, cb * 0.7f, 0.8f);
-					t.vertexUV((xp + 0.0F), (yy + 0.0F), (zp + D), ((xx + 0.0F) * scale + uo), ((zz + D) * scale + vo));
-					t.vertexUV((xp + D), (yy + 0.0F), (zp + D), ((xx + D) * scale + uo), ((zz + D) * scale + vo));
-					t.vertexUV((xp + D), (yy + 0.0F), (zp + 0.0F), ((xx + D) * scale + uo), ((zz + 0.0F) * scale + vo));
-					t.vertexUV((xp + 0.0F), (yy + 0.0F), (zp + 0.0F), ((xx + 0.0F) * scale + uo), ((zz + 0.0F) * scale + vo));
+					t.normal(0.0F, -1.0F, 0.0F);  // Beta: t.normal(0.0F, -1.0F, 0.0F) (LevelRenderer.java:814)
+					t.vertexUV(xp + 0.0F, yy + 0.0F, zp + D, (xx + 0.0F) * scale + uo, (zz + D) * scale + vo);  // Beta: exact match (LevelRenderer.java:815)
+					t.vertexUV(xp + D, yy + 0.0F, zp + D, (xx + D) * scale + uo, (zz + D) * scale + vo);  // Beta: exact match (LevelRenderer.java:816)
+					t.vertexUV(xp + D, yy + 0.0F, zp + 0.0F, (xx + D) * scale + uo, (zz + 0.0F) * scale + vo);  // Beta: exact match (LevelRenderer.java:817)
+					t.vertexUV(xp + 0.0F, yy + 0.0F, zp + 0.0F, (xx + 0.0F) * scale + uo, (zz + 0.0F) * scale + vo);  // Beta: exact match (LevelRenderer.java:818)
 				}
 
 				if (yy <= h + 1.0F)
 				{
 					t.color(cr, cg, cb, 0.8F);
 					t.normal(0.0F, 1.0F, 0.0F);
-					t.vertexUV((xp + 0.0F), (yy + h - e), (zp + D), ((xx + 0.0F) * scale + uo), ((zz + D) * scale + vo));
-					t.vertexUV((xp + D), (yy + h - e), (zp + D), ((xx + D) * scale + uo), ((zz + D) * scale + vo));
-					t.vertexUV((xp + D), (yy + h - e), (zp + 0.0F), ((xx + D) * scale + uo), ((zz + 0.0F) * scale + vo));
-					t.vertexUV((xp + 0.0F), (yy + h - e), (zp + 0.0F), ((xx + 0.0F) * scale + uo), ((zz + 0.0F) * scale + vo));
+					t.vertexUV(xp + 0.0F, yy + h - e, zp + D, (xx + 0.0F) * scale + uo, (zz + D) * scale + vo);  // Beta: exact match (LevelRenderer.java:824)
+					t.vertexUV(xp + D, yy + h - e, zp + D, (xx + D) * scale + uo, (zz + D) * scale + vo);  // Beta: exact match (LevelRenderer.java:825)
+					t.vertexUV(xp + D, yy + h - e, zp + 0.0F, (xx + D) * scale + uo, (zz + 0.0F) * scale + vo);  // Beta: exact match (LevelRenderer.java:826)
+					t.vertexUV(xp + 0.0F, yy + h - e, zp + 0.0F, (xx + 0.0F) * scale + uo, (zz + 0.0F) * scale + vo);  // Beta: exact match (LevelRenderer.java:827)
 				}
 
 				t.color(cr * 0.9F, cg * 0.9F, cb * 0.9F, 0.8F);
@@ -773,10 +865,10 @@ void LevelRenderer::renderAdvancedClouds(float alpha)
 
 					for (int_t i = 0; i < D; i++)
 					{
-						t.vertexUV((xp + i + 0.0F), (yy + 0.0F), (zp + D), ((xx + i + 0.5F) * scale + uo), ((zz + D) * scale + vo));
-						t.vertexUV((xp + i + 0.0F), (yy + h), (zp + D), ((xx + i + 0.5F) * scale + uo), ((zz + D) * scale + vo));
-						t.vertexUV((xp + i + 0.0F), (yy + h), (zp + 0.0F), ((xx + i + 0.5F) * scale + uo), ((zz + 0.0F) * scale + vo));
-						t.vertexUV((xp + i + 0.0F), (yy + 0.0F), (zp + 0.0F), ((xx + i + 0.5F) * scale + uo), ((zz + 0.0F) * scale + vo));
+						t.vertexUV(xp + i + 0.0F, yy + 0.0F, zp + D, (xx + i + 0.5F) * scale + uo, (zz + D) * scale + vo);  // Beta: exact match (LevelRenderer.java:835)
+						t.vertexUV(xp + i + 0.0F, yy + h, zp + D, (xx + i + 0.5F) * scale + uo, (zz + D) * scale + vo);  // Beta: exact match (LevelRenderer.java:836)
+						t.vertexUV(xp + i + 0.0F, yy + h, zp + 0.0F, (xx + i + 0.5F) * scale + uo, (zz + 0.0F) * scale + vo);  // Beta: exact match (LevelRenderer.java:837)
+						t.vertexUV(xp + i + 0.0F, yy + 0.0F, zp + 0.0F, (xx + i + 0.5F) * scale + uo, (zz + 0.0F) * scale + vo);  // Beta: exact match (LevelRenderer.java:838)
 					}
 				}
 
@@ -786,10 +878,10 @@ void LevelRenderer::renderAdvancedClouds(float alpha)
 
 					for (int_t i = 0; i < D; i++)
 					{
-						t.vertexUV((xp + i + 1.0F - e), (yy + 0.0F), (zp + D), ((xx + i + 0.5F) * scale + uo), ((zz + D) * scale + vo));
-						t.vertexUV((xp + i + 1.0F - e), (yy + h), (zp + D), ((xx + i + 0.5F) * scale + uo), ((zz + D) * scale + vo));
-						t.vertexUV((xp + i + 1.0F - e), (yy + h), (zp + 0.0F), ((xx + i + 0.5F) * scale + uo), ((zz + 0.0F) * scale + vo));
-						t.vertexUV((xp + i + 1.0F - e), (yy + 0.0F), (zp + 0.0F), ((xx + i + 0.5F) * scale + uo), ((zz + 0.0F) * scale + vo));
+						t.vertexUV(xp + i + 1.0F - e, yy + 0.0F, zp + D, (xx + i + 0.5F) * scale + uo, (zz + D) * scale + vo);  // Beta: exact match (LevelRenderer.java:846)
+						t.vertexUV(xp + i + 1.0F - e, yy + h, zp + D, (xx + i + 0.5F) * scale + uo, (zz + D) * scale + vo);  // Beta: exact match (LevelRenderer.java:847)
+						t.vertexUV(xp + i + 1.0F - e, yy + h, zp + 0.0F, (xx + i + 0.5F) * scale + uo, (zz + 0.0F) * scale + vo);  // Beta: exact match (LevelRenderer.java:848)
+						t.vertexUV(xp + i + 1.0F - e, yy + 0.0F, zp + 0.0F, (xx + i + 0.5F) * scale + uo, (zz + 0.0F) * scale + vo);  // Beta: exact match (LevelRenderer.java:849)
 					}
 				}
 
@@ -800,10 +892,10 @@ void LevelRenderer::renderAdvancedClouds(float alpha)
 
 					for (int_t i = 0; i < D; i++)
 					{
-						t.vertexUV((xp + 0.0F), (yy + h), (zp + i + 0.0F), ((xx + 0.0F) * scale + uo), ((zz + i + 0.5F) * scale + vo));
-						t.vertexUV((xp + D), (yy + h), (zp + i + 0.0F), ((xx + D) * scale + uo), ((zz + i + 0.5F) * scale + vo));
-						t.vertexUV((xp + D), (yy + 0.0F), (zp + i + 0.0F), ((xx + D) * scale + uo), ((zz + i + 0.5F) * scale + vo));
-						t.vertexUV((xp + 0.0F), (yy + 0.0F), (zp + i + 0.0F), ((xx + 0.0F) * scale + uo), ((zz + i + 0.5F) * scale + vo));
+						t.vertexUV(xp + 0.0F, yy + h, zp + i + 0.0F, (xx + 0.0F) * scale + uo, (zz + i + 0.5F) * scale + vo);  // Beta: exact match (LevelRenderer.java:858)
+						t.vertexUV(xp + D, yy + h, zp + i + 0.0F, (xx + D) * scale + uo, (zz + i + 0.5F) * scale + vo);  // Beta: exact match (LevelRenderer.java:859)
+						t.vertexUV(xp + D, yy + 0.0F, zp + i + 0.0F, (xx + D) * scale + uo, (zz + i + 0.5F) * scale + vo);  // Beta: exact match (LevelRenderer.java:860)
+						t.vertexUV(xp + 0.0F, yy + 0.0F, zp + i + 0.0F, (xx + 0.0F) * scale + uo, (zz + i + 0.5F) * scale + vo);  // Beta: exact match (LevelRenderer.java:861)
 					}
 				}
 
@@ -813,10 +905,10 @@ void LevelRenderer::renderAdvancedClouds(float alpha)
 
 					for (int_t i = 0; i < D; i++)
 					{
-						t.vertexUV((xp + 0.0F), (yy + h), (zp + i + 1.0F - e), ((xx + 0.0F) * scale + uo), ((zz + i + 0.5F) * scale + vo));
-						t.vertexUV((xp + D), (yy + h), (zp + i + 1.0F - e), ((xx + D) * scale + uo), ((zz + i + 0.5F) * scale + vo));
-						t.vertexUV((xp + D), (yy + 0.0F), (zp + i + 1.0F - e), ((xx + D) * scale + uo), ((zz + i + 0.5F) * scale + vo));
-						t.vertexUV((xp + 0.0F), (yy + 0.0F), (zp + i + 1.0F - e), ((xx + 0.0F) * scale + uo), ((zz + i + 0.5F) * scale + vo));
+						t.vertexUV(xp + 0.0F, yy + h, zp + i + 1.0F - e, (xx + 0.0F) * scale + uo, (zz + i + 0.5F) * scale + vo);  // Beta: exact match (LevelRenderer.java:869)
+						t.vertexUV(xp + D, yy + h, zp + i + 1.0F - e, (xx + D) * scale + uo, (zz + i + 0.5F) * scale + vo);  // Beta: exact match (LevelRenderer.java:870)
+						t.vertexUV(xp + D, yy + 0.0F, zp + i + 1.0F - e, (xx + D) * scale + uo, (zz + i + 0.5F) * scale + vo);  // Beta: exact match (LevelRenderer.java:871)
+						t.vertexUV(xp + 0.0F, yy + 0.0F, zp + i + 1.0F - e, (xx + 0.0F) * scale + uo, (zz + i + 0.5F) * scale + vo);  // Beta: exact match (LevelRenderer.java:872)
 					}
 				}
 
@@ -824,6 +916,11 @@ void LevelRenderer::renderAdvancedClouds(float alpha)
 			}
 		}
 	}
+
+	// Beta: LevelRenderer.java:881-883 - no glPopMatrix, just restore GL state
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);  // Beta: GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F) (LevelRenderer.java:881)
+	glDisable(GL_BLEND);
+	glEnable(GL_CULL_FACE);
 }
 
 bool LevelRenderer::updateDirtyChunks(Player &player, bool force)
@@ -1030,7 +1127,13 @@ void LevelRenderer::renderHitOutline(Player &player, HitResult &h, int_t mode, I
 			double xo = player.xOld + (player.x - player.xOld) * a;
 			double yo = player.yOld + (player.y - player.yOld) * a;
 			double zo = player.zOld + (player.z - player.zOld) * a;
-			render(*Tile::tiles[tileId]->getTileAABB(*level, h.x, h.y, h.z)->grow(ss, ss, ss)->cloneMove(-xo, -yo, -zo));
+			// CRASH GUARD: Plants (flowers, mushrooms, reeds) return nullptr from getTileAABB() (no collision)
+			// Check before dereferencing to prevent "this was nullptr" crashes in AABB::grow()
+			AABB *aabb = Tile::tiles[tileId]->getTileAABB(*level, h.x, h.y, h.z);
+			if (aabb != nullptr)
+			{
+				render(*aabb->grow(ss, ss, ss)->cloneMove(-xo, -yo, -zo));
+			}
 		}
 
 		glDepthMask(true);
@@ -1125,19 +1228,90 @@ void LevelRenderer::cull(Culler &culler, float a)
 	cullStep++;
 }
 
-void LevelRenderer::playStreamingMusic(const jstring &name, int_t x, int_t y, int_t z)
-{
-
-}
-
 void LevelRenderer::playSound(const jstring &name, double x, double y, double z, float volume, float pitch)
 {
+	// Beta: playSound() - forwards to SoundEngine with distance check (LevelRenderer.java:1203-1212)
+	if (mc.player == nullptr)
+		return;
 
+	float dd = 16.0f;
+	if (volume > 1.0f)
+	{
+		dd *= volume;
+	}
+
+	// Beta: Only play sound if player is within distance (LevelRenderer.java:1209)
+	double dx = x - mc.player->x;
+	double dy = y - mc.player->y;
+	double dz = z - mc.player->z;
+	double distSqr = dx * dx + dy * dy + dz * dz;
+
+	if (distSqr < dd * dd)
+	{
+		mc.soundEngine.play(name, (float)x, (float)y, (float)z, volume, pitch);
+	}
 }
 
 void LevelRenderer::addParticle(const jstring &name, double x, double y, double z, double xa, double ya, double za)
 {
-
+	// Beta: addParticle() - creates particles based on name (LevelRenderer.java:1215-1246)
+	if (mc.player == nullptr)
+		return;
+	
+	// Beta: Distance check - only spawn particles within 16 blocks (LevelRenderer.java:1216-1220)
+	double dx = mc.player->x - x;
+	double dy = mc.player->y - y;
+	double dz = mc.player->z - z;
+	double particleDistance = 16.0;
+	if (dx * dx + dy * dy + dz * dz > particleDistance * particleDistance)
+		return;
+	
+	// Beta: Create particles based on name (LevelRenderer.java:1221-1245)
+	if (name == u"bubble")
+	{
+		mc.particleEngine.add(std::make_unique<BubbleParticle>(*level, x, y, z, xa, ya, za));
+	}
+	else if (name == u"splash")
+	{
+		mc.particleEngine.add(std::make_unique<SplashParticle>(*level, x, y, z, xa, ya, za));
+	}
+	else if (name == u"reddust")
+	{
+		// Beta: RedDustParticle for redstone dust (LevelRenderer.java:1239-1240)
+		mc.particleEngine.add(std::make_unique<RedDustParticle>(*level, x, y, z));
+	}
+	else if (name == u"portal")
+	{
+		// Beta: PortalParticle for nether portals (LevelRenderer.java:1227-1228)
+		mc.particleEngine.add(std::make_unique<PortalParticle>(*level, x, y, z, xa, ya, za));
+	}
+	else if (name == u"smoke")
+	{
+		// Beta: SmokeParticle for redstone torch burnout (LevelRenderer.java:1223-1224)
+		mc.particleEngine.add(std::make_unique<SmokeParticle>(*level, x, y, z, xa, ya, za));
+	}
+	else if (name == u"largesmoke")
+	{
+		// Beta: LargeSmokeParticle for fire (LevelRenderer.java:1237-1238)
+		// largesmoke uses SmokeParticle with scale 2.5F
+		mc.particleEngine.add(std::make_unique<SmokeParticle>(*level, x, y, z, xa, ya, za, 2.5f));
+	}
+	else if (name == u"flame")
+	{
+		// newb12: FlameParticle for torches and fire (LevelRenderer.java:1231-1232)
+		mc.particleEngine.add(std::make_unique<FlameParticle>(*level, x, y, z, xa, ya, za));
+	}
+	else if (name == u"lava")
+	{
+		// newb12: LavaParticle for lava blocks (LevelRenderer.java:1233-1234)
+		mc.particleEngine.add(std::make_unique<LavaParticle>(*level, x, y, z));
+	}
+	else if (name == u"explode")
+	{
+		// newb12: ExplodeParticle for mob deaths and explosions (LevelRenderer.java:1229-1230)
+		mc.particleEngine.add(std::make_unique<ExplodeParticle>(*level, x, y, z, xa, ya, za));
+	}
+	// TODO: Add other particle types (snowballpoof, slime) - note: "note" particles don't exist in Alpha 1.2.6
 }
 
 void LevelRenderer::playMusic(const jstring &name, double x, double y, double z, float songOffset)
@@ -1145,14 +1319,48 @@ void LevelRenderer::playMusic(const jstring &name, double x, double y, double z,
 
 }
 
+// Beta: playStreamingMusic() - forwards to SoundEngine (LevelRenderer.java equivalent)
+// Alpha: IWorldAccess.playStreamingMusic() is implemented by RenderGlobal (client-side)
+void LevelRenderer::playStreamingMusic(const jstring &name, int_t x, int_t y, int_t z)
+{
+	// Beta: Forward to SoundEngine.playStreaming() with position
+	// Java: RenderGlobal.playStreamingMusic() would call soundEngine.playStreaming()
+	// Volume and pitch are not specified in LevelListener interface, use defaults
+	mc.soundEngine.playStreaming(name, static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f, static_cast<float>(z) + 0.5f, 1.0f, 1.0f);
+}
+
 void LevelRenderer::entityAdded(std::shared_ptr<Entity> entity)
 {
-
+	// newb12: LevelRenderer.entityAdded() - calls prepareCustomTextures() and loads textures (LevelRenderer.java:1254-1263)
+	if (entity != nullptr)
+	{
+		entity->prepareCustomTextures();
+		static MobSkinTextureProcessor processor;
+		if (!entity->customTextureUrl.empty())
+		{
+			textures.addHttpTexture(entity->customTextureUrl, &processor);
+		}
+		if (!entity->customTextureUrl2.empty())
+		{
+			textures.addHttpTexture(entity->customTextureUrl2, &processor);
+		}
+	}
 }
 
 void LevelRenderer::entityRemoved(std::shared_ptr<Entity> entity)
 {
-
+	// newb12: LevelRenderer.entityRemoved() - removes textures (LevelRenderer.java:1266-1274)
+	if (entity != nullptr)
+	{
+		if (!entity->customTextureUrl.empty())
+		{
+			textures.removeHttpTexture(entity->customTextureUrl);
+		}
+		if (!entity->customTextureUrl2.empty())
+		{
+			textures.removeHttpTexture(entity->customTextureUrl2);
+		}
+	}
 }
 
 void LevelRenderer::skyColorChanged()

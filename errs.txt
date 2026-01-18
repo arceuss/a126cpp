@@ -1,0 +1,108 @@
+Severity	Code	Description	Project	File	Line	Suppression State	Details
+Error	C2440	'=': cannot convert from 'DoorTile *' to 'Tile *'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemDoor.cpp	34		
+Error	C2440	'=': cannot convert from 'DoorTile *' to 'Tile *'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemDoor.cpp	36		
+Error	C2664	'bool Level::mayInteract(std::shared_ptr<Player>,int_t,int_t,int_t)': cannot convert argument 1 from 'Player' to 'std::shared_ptr<Player>'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	56		
+Error	C2039	'face': is not a member of 'HitResult'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	84		
+Error	C2039	'face': is not a member of 'HitResult'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	86		
+Error	C2039	'face': is not a member of 'HitResult'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	88		
+Error	C2039	'face': is not a member of 'HitResult'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	90		
+Error	C2039	'face': is not a member of 'HitResult'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	92		
+Error	C2039	'face': is not a member of 'HitResult'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	94		
+Error	C2065	'id': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemRecord.cpp	27		
+Error	C2440	'initializing': cannot convert from 'Vec3 *' to 'Vec3'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	34		
+Error	C2440	'initializing': cannot convert from 'Vec3 *' to 'Vec3'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	42		
+Error	C2440	'initializing': cannot convert from 'Vec3 *' to 'Vec3'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBoat.cpp	31		
+Error	C2440	'initializing': cannot convert from 'Vec3 *' to 'Vec3'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBoat.cpp	39		
+Error	C2665	'ItemBucket::ItemBucket': no overloaded function could convert all the argument types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	361		
+Error	C2665	'ItemBucket::ItemBucket': no overloaded function could convert all the argument types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	363		
+Error	C2665	'ItemReed::ItemReed': no overloaded function could convert all the argument types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	394		
+Error	C2371	'Items::boat': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	146		
+Error	C2371	'Items::bootsChain': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	110		
+Error	C2371	'Items::bootsDiamond': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	122		
+Error	C2371	'Items::bootsGold': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	128		
+Error	C2371	'Items::bootsLeather': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	104		
+Error	C2371	'Items::bootsSteel': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	116		
+Error	C2371	'Items::bow': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	42		
+Error	C2371	'Items::bucketEmpty': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	138		
+Error	C2371	'Items::bucketLava': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	140		
+Error	C2371	'Items::bucketMilk': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	148		
+Error	C2371	'Items::bucketWater': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	139		
+Error	C2371	'Items::doorSteel': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	143		
+Error	C2371	'Items::doorWood': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	137		
+Error	C2371	'Items::fishingRod': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	159		
+Error	C2371	'Items::flintAndSteel': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	36		
+Error	C2371	'Items::helmetChain': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	107		
+Error	C2371	'Items::helmetDiamond': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	119		
+Error	C2371	'Items::helmetGold': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	125		
+Error	C2371	'Items::helmetLeather': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	101		
+Error	C2371	'Items::helmetSteel': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	113		
+Error	C2371	'Items::hoeDiamond': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	92		
+Error	C2371	'Items::hoeGold': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	93		
+Error	C2371	'Items::hoeSteel': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	91		
+Error	C2371	'Items::hoeStone': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	90		
+Error	C2371	'Items::hoeWood': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	89		
+Error	C2371	'Items::legsChain': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	109		
+Error	C2371	'Items::legsDiamond': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	121		
+Error	C2371	'Items::legsGold': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	127		
+Error	C2371	'Items::legsLeather': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	103		
+Error	C2371	'Items::legsSteel': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	115		
+Error	C2371	'Items::minecartCrate': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	155		
+Error	C2371	'Items::minecartEmpty': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	141		
+Error	C2371	'Items::minecartPowered': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	156		
+Error	C2371	'Items::painting': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	134		
+Error	C2371	'Items::plateChain': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	108		
+Error	C2371	'Items::plateDiamond': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	120		
+Error	C2371	'Items::plateGold': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	126		
+Error	C2371	'Items::plateLeather': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	102		
+Error	C2371	'Items::plateSteel': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	114		
+Error	C2371	'Items::record13': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	166		
+Error	C2371	'Items::recordCat': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	167		
+Error	C2371	'Items::redstone': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	144		
+Error	C2371	'Items::reed': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	151		
+Error	C2371	'Items::saddle': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	142		
+Error	C2371	'Items::seeds': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	96		
+Error	C2371	'Items::sign': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	136		
+Error	C2371	'Items::snowball': redefinition; different basic types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	145		
+Error	C2665	'ItemSeeds::ItemSeeds': no overloaded function could convert all the argument types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	298		
+Error	C2665	'Level::playSound': no overloaded function could convert all the argument types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBow.cpp	25		
+Error	C2665	'Level::playSound': no overloaded function could convert all the argument types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemSnowball.cpp	24		
+Error	C2665	'Level::playSound': no overloaded function could convert all the argument types	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemFishingRod.cpp	32		
+Error	C2660	'Level::setTile': function does not take 3 arguments	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemFlintAndSteel.cpp	44		
+Error	C2660	'Level::setTile': function does not take 3 arguments	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemRedstone.cpp	41		
+Error	C2660	'Level::setTileAndData': function does not take 4 arguments	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemSign.cpp	52		
+Error	C2660	'Level::setTileAndData': function does not take 4 arguments	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemSign.cpp	57		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	35		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	35		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	36		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	36		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	37		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	38		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBoat.cpp	32		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBoat.cpp	32		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBoat.cpp	33		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBoat.cpp	33		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBoat.cpp	34		
+Error	C2065	'M_PI': undeclared identifier	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBoat.cpp	35		
+Error	C2039	'removeResource': is not a member of 'InventoryPlayer'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBow.cpp	22		
+Error	C2039	'ultraWarm': is not a member of 'std::shared_ptr<Dimension>'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	101		
+Error	C2679	binary '==': no operator found which takes a right-hand operand of type 'LiquidMaterial' (or there is no acceptable conversion)	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	63		
+Error	C2679	binary '==': no operator found which takes a right-hand operand of type 'LiquidMaterial' (or there is no acceptable conversion)	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	68		
+Error	C2027	use of undefined type 'CropTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	298		
+Error	C2027	use of undefined type 'DirtTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemHoe.cpp	38		
+Error	C2027	use of undefined type 'FarmTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemHoe.cpp	42		
+Error	C2027	use of undefined type 'FarmTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemSeeds.cpp	25		
+Error	C2027	use of undefined type 'FireTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemFlintAndSteel.cpp	44		
+Error	C2027	use of undefined type 'FluidFlowingTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemBucket.cpp	101		
+Error	C2027	use of undefined type 'FluidStationaryTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	361		
+Error	C2027	use of undefined type 'FluidStationaryTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	363		
+Error	C2027	use of undefined type 'GrassTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemHoe.cpp	38		
+Error	C2027	use of undefined type 'GrassTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemHoe.cpp	63		
+Error	C2027	use of undefined type 'RailTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemMinecart.cpp	24		
+Error	C2027	use of undefined type 'RecordPlayerTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemRecord.cpp	22		
+Error	C2027	use of undefined type 'RedStoneDustTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemRedstone.cpp	38		
+Error	C2027	use of undefined type 'RedStoneDustTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemRedstone.cpp	41		
+Error	C2027	use of undefined type 'ReedTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\Items.cpp	394		
+Error	C2027	use of undefined type 'SignTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemSign.cpp	44		
+Error	C2027	use of undefined type 'SignTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemSign.cpp	52		
+Error	C2027	use of undefined type 'SignTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemSign.cpp	57		
+Error	C2027	use of undefined type 'SnowTile'	Alpha126Cpp	D:\stupid shit\a126cpp\a126cpp\src\world\item\ItemReed.cpp	20		

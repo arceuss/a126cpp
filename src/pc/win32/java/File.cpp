@@ -184,6 +184,27 @@ public:
 		return files;
 	}
 
+	jstring getName() const override
+	{
+		// Extract filename directly from wpath (more reliable)
+		size_t wpos = wpath.find_last_of(L"/\\");
+		if (wpos == std::wstring::npos)
+		{
+			// No separator found, wpath is just the filename
+			// Remove \\?\ prefix if present
+			if (wpath.length() > 4 && wpath.substr(0, 4) == L"\\\\?\\")
+				return FromWPath(wpath.substr(4));
+			return FromWPath(wpath);
+		}
+		
+		// Extract filename part (after last separator)
+		if (wpos + 1 >= wpath.length())
+			return u"";
+			
+		std::wstring wfilename = wpath.substr(wpos + 1);
+		return FromWPath(wfilename);
+	}
+
 	File *getParentFile() const override
 	{
 		size_t npos = path.find_last_of(u"/\\");
@@ -251,7 +272,7 @@ File *File::openResourceDirectory()
 	if (pos == std::string::npos)
 		return new File_Impl(u"");
 
-	// Return resource directory
+	// Return resource directory (singular - matches bin\Debug\resource\)
 	return new File_Impl(u16str.substr(0, pos) + u"\\resource");
 }
 

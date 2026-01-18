@@ -3,8 +3,10 @@
 #include "client/renderer/Tesselator.h"
 #include "client/renderer/entity/EntityRenderer.h"
 #include "client/renderer/TileRenderer.h"
+#include "client/renderer/tileentity/TileEntityRenderDispatcher.h"
 
 #include "world/level/Region.h"
+#include "world/level/chunk/LevelChunk.h"
 
 #include "util/Mth.h"
 
@@ -116,21 +118,30 @@ void Chunk::rebuild()
 							t.offset(-this->x, -this->y, -this->z);
 						}
 
-						if (i == 0 && Tile::isEntityTile[tileId])
+					if (i == 0 && Tile::isEntityTile[tileId])
+					{
+						// newb12: Collect tile entities for rendering (Chunk.java:148-152)
+						// newb12: TileEntity et = region.getTileEntity(x, y, z);
+						// newb12: if (TileEntityRenderDispatcher.instance.hasRenderer(et)) {
+						// newb12:     this.renderableTileEntities.add(et);
+						// newb12: }
+						std::shared_ptr<TileEntity> tileEntity = region.getTileEntity(x, y, z);
+						if (tileEntity != nullptr && TileEntityRenderDispatcher::instance.hasRenderer(tileEntity.get()))
 						{
-							// TODO
+							globalRenderableTileEntities.push_back(tileEntity);
 						}
+					}
 
-						Tile *tile = Tile::tiles[tileId];
-						int_t renderLayer = tile->getRenderLayer();
-						if (renderLayer != i)
-						{
-							renderNextLayer = true;
-						}
-						else if (renderLayer == i)
-						{
-							rendered |= tileRenderer.tesselateInWorld(*tile, x, y, z);
-						}
+					Tile *tile = Tile::tiles[tileId];
+					int_t renderLayer = tile->getRenderLayer();
+					if (renderLayer != i)
+					{
+						renderNextLayer = true;
+					}
+					else if (renderLayer == i)
+					{
+						rendered |= tileRenderer.tesselateInWorld(*tile, x, y, z);
+					}
 					}
 				}
 			}

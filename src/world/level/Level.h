@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <unordered_set>
+#include <set>
 
 #include "nbt/Tag.h"
 #include "nbt/CompoundTag.h"
@@ -17,6 +18,8 @@
 #include "world/entity/Entity.h"
 #include "world/entity/player/Player.h"
 
+class Explosion;
+
 #include "world/level/LightLayer.h"
 #include "world/level/LevelListener.h"
 #include "world/level/LightUpdate.h"
@@ -26,10 +29,16 @@
 #include "world/level/biome/BiomeSource.h"
 #include "world/level/dimension/Dimension.h"
 #include "world/level/tile/Tile.h"
+#include "world/level/NextTickListEntry.h"
+#include "world/level/ChunkPos.h"
+#include "world/level/pathfinder/Path.h"
+#include "world/level/pathfinder/PathFinder.h"
 
 #include "util/ProgressListener.h"
 
 #include "util/Memory.h"
+
+enum class MobCategory;
 
 class Level : public LevelSource
 {
@@ -46,6 +55,11 @@ public:
 	static constexpr int_t TICKS_PER_DAY = 24000;
 
 private:
+	// Alpha: World.scheduledTickTreeSet and scheduledTickSet (World.java:22-23)
+	// TreeSet for ordered processing, HashSet for duplicate detection
+	std::set<NextTickListEntry> scheduledTickTreeSet;
+	std::unordered_set<NextTickListEntry> scheduledTickSet;
+
 public:
 	std::vector<LightUpdate> lightUpdates;
 
@@ -91,8 +105,6 @@ public:
 
 protected:
 	std::unordered_set<LevelListener *> listeners;
-
-private:
 	std::shared_ptr<ChunkSource> chunkSource;
 
 public:
@@ -124,6 +136,8 @@ public:
 private:
 	int_t delayUntilNextMoodSound = random.nextInt(12000);
 
+	std::unordered_set<ChunkPos> chunksToPoll;
+
 	std::vector<std::shared_ptr<Entity>> es;
 
 public:
@@ -146,7 +160,7 @@ public:
 	Level(File *workingDirectory, const jstring &name, long_t seed, int_t dimension);
 
 protected:
-	ChunkSource *createChunkSource(std::shared_ptr<File> dir);
+	virtual ChunkSource *createChunkSource(std::shared_ptr<File> dir);
 
 public:
 	void validateSpawn();
@@ -187,6 +201,9 @@ public:
 	bool setTile(int_t x, int_t y, int_t z, int_t tile);
 	bool setTileAndData(int_t x, int_t y, int_t z, int_t tile, int_t data);
 
+	// Beta: Level.mayPlace() - checks if block can be placed (Level.java:1833-1848)
+	bool mayPlace(int_t tileId, int_t x, int_t y, int_t z, bool flag);
+
 	void sendTileUpdated(int_t x, int_t y, int_t z);
 	void tileUpdated(int_t x, int_t y, int_t z, int_t tile);
 
@@ -197,6 +214,15 @@ public:
 	void swap(int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1);
 	void updateNeighborsAt(int_t x, int_t y, int_t z, int_t tile);
 	void neighborChanged(int_t x, int_t y, int_t z, int_t tile);
+
+	// Beta: Level.getSignal() - gets redstone signal strength (Level.java:1904-1912)
+	bool getSignal(int_t x, int_t y, int_t z, int_t facing);
+
+	// Beta: Level.getDirectSignal() - gets direct redstone signal (Level.java:1885-1888)
+	bool getDirectSignal(int_t x, int_t y, int_t z, int_t facing);
+
+	// Beta: Level.hasNeighborSignal() - checks if any neighbor has signal (Level.java:1913-1925)
+	bool hasNeighborSignal(int_t x, int_t y, int_t z);
 
 	bool canSeeSky(int_t x, int_t y, int_t z);
 
@@ -244,6 +270,11 @@ public:
 
 	float getStarBrightness(float a);
 
+	// Alpha: World.scheduleBlockUpdate() (World.java:1117-1138)
+	// Schedules a block update after delay ticks (uses block's tickRate() if delay not specified)
+	void scheduleBlockUpdate(int_t x, int_t y, int_t z, int_t blockID);
+	
+	// Legacy method - delegates to scheduleBlockUpdate
 	void addToTickNextTick(int_t x, int_t y, int_t z, int_t delay);
 
 	void tickEntities();
@@ -253,6 +284,9 @@ public:
 	bool isUnobstructed(AABB &bb);
 	bool containsAnyLiquid(AABB &bb);
 	bool containsFireTile(AABB &bb);
+
+	// Beta: Level.checkAndHandleWater() - checks for water material and applies flow physics (Level.java:1345-1383)
+	bool checkAndHandleWater(AABB &bb, const Material &material, Entity *entity);
 
 	void extinguishFire(int_t x, int_t y, int_t z, Facing f);
 
@@ -277,7 +311,7 @@ public:
 
 	void setSpawnSettings(bool spawnEnemies, bool spawnFriendlies);
 
-	void tick();
+	virtual void tick();
 
 protected:
 	void tickTiles();
@@ -293,10 +327,44 @@ public:
 	void tileEntityChanged(int_t x, int_t y, int_t z, std::shared_ptr<TileEntity> tileEntity);
 
 	int_t countConditionOf(bool (*condition)(Entity&));
+
+	// newb12: Level.countInstanceOf() - counts entities by type
+	// Reference: newb12/net/minecraft/world/level/Level.java:1803-1814
+	// Note: Java uses Class.isAssignableFrom(), in C++ we use dynamic_cast with base classes
+	template<typename T>
+	int_t countInstanceOf() const
+	{
+		int_t count = 0;
+		for (auto &entity : entities)
+		{
+			if (dynamic_cast<T*>(entity.get()) != nullptr)
+				count++;
+		}
+		return count;
+	}
+	
+	// Helper to count entities by MobCategory (replaces Java's countInstanceOf(getBaseClass()))
+	// newb12: Used in MobSpawner as var0.countInstanceOf(var36.getBaseClass())
+	// Reference: newb12/net/minecraft/world/level/MobSpawner.java:50
+	int_t countInstanceOf(MobCategory category) const;
+
+	// newb12: Level.getNearestPlayer() - finds nearest player within distance
+	// Reference: newb12/net/minecraft/world/level/Level.java:1931-1945
+	std::shared_ptr<Player> getNearestPlayer(double x, double y, double z, double distance);
+	
+	// newb12: Level.getNearestPlayer() - helper that takes Entity
+	// Reference: newb12/net/minecraft/world/level/Level.java:1927-1929
+	std::shared_ptr<Player> getNearestPlayer(Entity &entity, double distance);
+
+	// newb12: Level.findPath() - pathfinding methods
+	// Reference: newb12/net/minecraft/world/level/Level.java:1855-1881
+	std::unique_ptr<pathfinder::Path> findPath(Entity &entity, Entity &target, float distance);
+	std::unique_ptr<pathfinder::Path> findPath(Entity &entity, int_t x, int_t y, int_t z, float distance);
+
 	void addEntities(const std::unordered_set<std::shared_ptr<Entity>> &entities);
 	void removeEntities(const std::unordered_set<std::shared_ptr<Entity>> &entities);
 
-	void disconnect();
+	virtual void disconnect();  // Virtual so MultiPlayerLevel can override
 
 	void checkSession();
 
@@ -309,4 +377,24 @@ public:
 	void broadcastEntityEvent(std::shared_ptr<Entity> entity, byte_t event);
 
 	std::shared_ptr<ChunkSource> getChunkSource();
+
+	// Beta: playSound() methods - forward to listeners (Level.java:880-889)
+	void playSound(Entity *entity, const jstring &name, float volume, float pitch);
+	void playSound(double x, double y, double z, const jstring &name, float volume, float pitch);
+	
+	// Beta: addParticle() method - forward to listeners (Level.java:891-894)
+	void addParticle(const jstring &name, double x, double y, double z, double xa, double ya, double za);
+	
+	// Beta: playStreamingMusic() method - forward to listeners (Level.java:892-895)
+	void playStreamingMusic(const jstring &name, int_t x, int_t y, int_t z);
+
+	// Beta: Level.explode() - creates and executes explosion (Level.java:1550-1559)
+	std::shared_ptr<Explosion> explode(Entity *source, double x, double y, double z, float radius);
+	std::shared_ptr<Explosion> explode(Entity *source, double x, double y, double z, float radius, bool fire);
+
+	// Beta: Level.getSeenPercent() - calculates visibility percentage (Level.java:1562-1580)
+	double getSeenPercent(Vec3 &from, AABB &to);
+
+private:
+	std::unique_ptr<PathFinder> pathFinder;
 };

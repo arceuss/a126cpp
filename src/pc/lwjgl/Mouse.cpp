@@ -37,6 +37,17 @@ struct Event
 static Event event_current = {};
 static std::queue<Event> event_queue;
 
+// Beta: Map SDL button numbers to LWJGL button numbers
+// SDL: 1=Left, 2=Middle, 3=Right
+// LWJGL: 0=Left, 1=Right, 2=Middle
+static int_t sdlToLwjglButton(int_t sdlButton)
+{
+	if (sdlButton == 1) return 0; // Left
+	if (sdlButton == 3) return 1; // Right
+	if (sdlButton == 2) return 2; // Middle
+	return sdlButton - 1; // fallback for other buttons
+}
+
 void pushEvent(const SDL_Event &e)
 {
 	switch (e.type)
@@ -50,10 +61,10 @@ void pushEvent(const SDL_Event &e)
 			event_queue.emplace(-1, 0, e.wheel.mouseX, Display::getHeight() - e.wheel.mouseY - 1, 0, 0, e.wheel.y);
 			break;
 		case SDL_MOUSEBUTTONDOWN:
-			event_queue.emplace(e.button.button - 1, 1, e.button.x, Display::getHeight() - e.button.y - 1, 0, 0, 0);
+			event_queue.emplace(sdlToLwjglButton(e.button.button), 1, e.button.x, Display::getHeight() - e.button.y - 1, 0, 0, 0);
 			break;
 		case SDL_MOUSEBUTTONUP:
-			event_queue.emplace(e.button.button - 1, 0, e.button.x, Display::getHeight() - e.button.y - 1, 0, 0, 0);
+			event_queue.emplace(sdlToLwjglButton(e.button.button), 0, e.button.x, Display::getHeight() - e.button.y - 1, 0, 0, 0);
 			break;
 	}
 }
@@ -143,9 +154,20 @@ int_t getDWheel()
 	return result;
 }
 
+// Beta: Map LWJGL button numbers to SDL button numbers
+// LWJGL: 0=Left, 1=Right, 2=Middle
+// SDL: 1=Left, 2=Middle, 3=Right
+static int_t lwjglToSdlButton(int_t lwjglButton)
+{
+	if (lwjglButton == 0) return 1; // Left
+	if (lwjglButton == 1) return 3; // Right
+	if (lwjglButton == 2) return 2; // Middle
+	return lwjglButton + 1; // fallback for other buttons
+}
+
 bool isButtonDown(int_t button)
 {
-	return SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON(1 + button);
+	return SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON(lwjglToSdlButton(button));
 }
 
 bool isGrabbed()

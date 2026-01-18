@@ -9,6 +9,9 @@
 #include "java/Type.h"
 #include "java/System.h"
 #include "java/Random.h"
+#include "world/phys/ChunkCoordinates.h"
+#include "network/Packet63Digging.h"
+#include <unordered_map>
 
 class Minecraft;
 
@@ -19,10 +22,15 @@ private:
 
 	float renderDistance = 0.0f;
 
+public:
 	ItemInHandRenderer itemInHandRenderer;
 
 	int_t ticks = 0;
 	std::shared_ptr<Entity> hovered;
+	
+	// Alpha 1.2.6: EntityRenderer.mpDigging - stores block breaking progress for rendering
+	// Java: public HashMap<ChunkCoordinates, Packet63Digging> mpDigging = new HashMap();
+	std::unordered_map<ChunkCoordinates, Packet63Digging*> mpDigging;
 
 	double zoom = 1.0;
 	double zoom_x = 0.0;
@@ -47,6 +55,7 @@ public:
 
 private:
 	float getFov(float a);
+	float getFovForItemInHand(float a);  // Returns base 70 FOV (no fovSetting multiplier) to prevent arm stretching
 
 	void bobHurt(float a);
 	void bobView(float a);

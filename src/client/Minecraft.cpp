@@ -3,29 +3,51 @@
 #include <iostream>
 #include <stdexcept>
 #include <thread>
+#include <typeinfo>
 
 #include "SharedConstants.h"
 
 #include "client/renderer/Chunk.h"
 #include "client/renderer/Tesselator.h"
+#include "client/renderer/TextureWaterFX.h"
+#include "client/renderer/TextureWaterSideFX.h"
+#include "client/renderer/TextureLavaFX.h"
+#include "client/renderer/TextureLavaSideFX.h"
+#include "client/renderer/TexturePortalFX.h"
+#include "client/renderer/TextureCompassFX.h"
+#include "client/renderer/TextureClockFX.h"
+#include "client/renderer/TextureFireFX.h"
 #include "client/gui/ScreenSizeCalculator.h"
 #include "client/gui/PauseScreen.h"
+#include "client/gui/InventoryScreen.h"
+#include "client/gui/DeathScreen.h"
+#include "client/gui/GuiChat.h"
 #include "client/title/TitleScreen.h"
 #include "client/player/KeyboardInput.h"
+#include "client/player/EntityClientPlayerMP.h"
 
 #include "client/gamemode/SurvivalMode.h"
 
 #include "world/phys/Vec3.h"
 #include "world/phys/AABB.h"
+#include "world/phys/HitResult.h"
 #include "world/level/chunk/ChunkCache.h"
 #include "world/level/Level.h"
 #include "world/level/tile/Tile.h"
+#include "world/item/Items.h"
+#include "world/item/crafting/FurnaceRecipes.h"
+#include "Facing.h"
 
 #include "java/System.h"
 #include "java/Runtime.h"
 #include "java/File.h"
+#include "java/String.h"
 
 #include "util/Mth.h"
+
+#include <fstream>
+#include <vector>
+#include <utility>
 
 #include "lwjgl/Display.h"
 #include "lwjgl/Keyboard.h"
@@ -58,6 +80,8 @@ void Minecraft::onCrash(const std::string &message, const std::exception &e)
 void Minecraft::init()
 {
 	Tile::initTiles();
+	Items::initItems();  // Alpha: Initialize item registry
+	FurnaceRecipes::getInstance().init();  // Initialize furnace recipes after items are ready
 
 	// Setup LWJGL
 	if (fullscreen)
@@ -75,7 +99,7 @@ void Minecraft::init()
 		lwjgl::Display::setDisplayMode(lwjgl::DisplayMode(width, height));
 	}
 
-	lwjgl::Display::setTitle(u"Minecraft " + VERSION_STRING);
+	lwjgl::Display::setTitle(u"Minecraft Minecraft " + VERSION_STRING);
 
 	lwjgl::Display::create();
 
@@ -88,8 +112,25 @@ void Minecraft::init()
 	texturePackRepository.updateListAndSelect();
 
 	font = Util::make_unique<Font>(options, u"/font/default.png", textures);
+	
+	// Beta: Render loading screen (Minecraft.java:215)
+	renderLoadingScreen();
 
-	// renderLoadingScreen();
+	// Beta: Initialize sound engine (Minecraft.java:242)
+	soundEngine.init(&options);
+
+	// Beta: Load all sounds from resource directory (BackgroundDownloader.java:66-80, Minecraft.java:fileDownloaded)
+	// This automatically loads all sounds from sound/, newsound/, streaming/, music/, and newmusic/ directories
+	std::unique_ptr<File> resourceDir(File::openResourceDirectory());
+	if (resourceDir && resourceDir->exists() && resourceDir->isDirectory())
+		{
+		loadAllSounds(resourceDir.get(), u"");
+		std::cerr << "Sound loading complete" << std::endl;
+		}
+		else
+		{
+		std::cerr << "Warning: Could not open resource directory for sound loading" << std::endl;
+		}
 
 	checkGlError("Pre startup");
 
@@ -110,26 +151,37 @@ void Minecraft::init()
 	// TODO
 	// soundEngine
 
-	// TODO
-	// dynamic textures
-	//textures.addDynamicTexture();
+	// Alpha: Register animated textures (Minecraft.startGame() lines 242-250)
+	// Beta 1.2: Register all fluid texture FX (Minecraft.java:243-249)
+	// Alpha 1.2.6: Register TextureFlamesFX(0) and TextureFlamesFX(1) (Minecraft.java:249-250)
+	textures.registerTextureFX(std::make_unique<TextureLavaFX>());      // Stationary lava
+	textures.registerTextureFX(std::make_unique<TextureWaterFX>());     // Stationary water
+	textures.registerTextureFX(std::make_unique<TextureWaterSideFX>()); // Flowing water
+	textures.registerTextureFX(std::make_unique<TextureLavaSideFX>()); // Flowing lava
+	textures.registerTextureFX(std::make_unique<TexturePortalFX>());   // Portal animation (Alpha: Minecraft.java:244)
+	textures.registerTextureFX(std::make_unique<TextureCompassFX>(this)); // Compass animation (Alpha: Minecraft.java:245)
+	textures.registerTextureFX(std::make_unique<TextureClockFX>(this)); // Clock animation (Alpha: Minecraft.java:246 TextureWatchFX)
+	textures.registerTextureFX(std::make_unique<TextureFireFX>(0));     // Fire texture 0
+	textures.registerTextureFX(std::make_unique<TextureFireFX>(1));     // Fire texture 1
 
 	setScreen(Util::make_shared<TitleScreen>(*this));
 }
 
 void Minecraft::renderLoadingScreen()
 {
-	ScreenSizeCalculator ssc(width, height);
+	ScreenSizeCalculator ssc(width, height, options);
 	int_t w = ssc.getWidth();
 	int_t h = ssc.getHeight();
 
+	// Beta: Exact order of operations matching Minecraft.java:269-303
+	// Beta: 16640 = GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	glMatrixMode(GL_PROJECTION);
+	glMatrixMode(GL_PROJECTION);  // Beta: 5889
 	glLoadIdentity();
 	glOrtho(0.0, w, h, 0.0, 1000.0, 3000.0);
 
-	glMatrixMode(GL_MODELVIEW);
+	glMatrixMode(GL_MODELVIEW);  // Beta: 5888
 	glLoadIdentity();
 	glTranslatef(0.0f, 0.0f, -2000.0f);
 
@@ -139,30 +191,34 @@ void Minecraft::renderLoadingScreen()
 	
 	Tesselator &tesselator = Tesselator::instance;
 	
-	glDisable(GL_LIGHTING);
-	glEnable(GL_TEXTURE_2D);
-	glDisable(GL_FOG);
+	glDisable(GL_LIGHTING);  // Beta: 2896
+	glEnable(GL_TEXTURE_2D);  // Beta: 3553
+	glDisable(GL_FOG);  // Beta: 2912
 
-	glBindTexture(GL_TEXTURE_2D, textures.loadTexture(u"/title/mojang.png"));
+	glBindTexture(GL_TEXTURE_2D, textures.loadTexture(u"/title/mojang.png"));  // Beta: line 286
 
+	// Beta: Draw mojang.png background (Minecraft.java:287-293)
+	// Beta uses (0.0, 0.0) for all UV coordinates - matching exactly
 	tesselator.begin();
-	tesselator.color(0xFFFFFF);
-	tesselator.vertexUV(0.0, height, 0.0, 0.0, 0.0);
-	tesselator.vertexUV(width, height, 0.0, 0.0, 0.0);
-	tesselator.vertexUV(width, 0.0, 0.0, 0.0, 0.0);
-	tesselator.vertexUV(0.0, 0.0, 0.0, 0.0, 0.0);
+	tesselator.color(0xFFFFFF);  // Beta: 16777215
+	tesselator.vertexUV(0.0, height, 0.0, 0.0, 0.0);  // Beta: line 289
+	tesselator.vertexUV(width, height, 0.0, 0.0, 0.0);  // Beta: line 290
+	tesselator.vertexUV(width, 0.0, 0.0, 0.0, 0.0);  // Beta: line 291
+	tesselator.vertexUV(0.0, 0.0, 0.0, 0.0, 0.0);  // Beta: line 292
 	tesselator.end();
 
-	short_t gw = 256;
-	short_t gh = 256;
-	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-	tesselator.color(0xFFFFFF);
-	blit((width / 2 - gw) / 2, (height / 2 - gh) / 2, 0, 0, gw, gh);
+	// Beta: Draw Minecraft logo (Minecraft.java:294-298)
+	// Note: mojang.png is still bound from line 189, blit() uses it
+	short_t gw = 256;  // Beta: var5
+	short_t gh = 256;  // Beta: var6
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);  // Beta: line 296
+	tesselator.color(0xFFFFFF);  // Beta: line 297
+	blit((width / 2 - gw) / 2, (height / 2 - gh) / 2, 0, 0, gw, gh);  // Beta: line 298
 
-	glDisable(GL_LIGHTING);
-	glDisable(GL_FOG);
-	glEnable(GL_ALPHA_TEST);
-	glAlphaFunc(GL_GREATER, 0.1f);
+	glDisable(GL_LIGHTING);  // Beta: line 299
+	glDisable(GL_FOG);  // Beta: line 300
+	glEnable(GL_ALPHA_TEST);  // Beta: 3008, line 301
+	glAlphaFunc(GL_GREATER, 0.1f);  // Beta: 516, line 302
 
 	lwjgl::Display::swapBuffers();
 }
@@ -194,27 +250,28 @@ const std::shared_ptr<File> &Minecraft::getWorkingDirectory()
 
 void Minecraft::setScreen(std::shared_ptr<Screen> screen)
 {
+	// Beta: Minecraft.setScreen(Screen var1) - sets current screen (Minecraft.java:364-389)
 	if (this->screen != nullptr)
-		this->screen->removed();
+		this->screen->removed();  // Beta: this.screen.removed() (Minecraft.java:367)
 
-	if (screen == nullptr && level == nullptr)
-		screen = Util::make_shared<TitleScreen>(*this);
-	else if (screen == nullptr) // TODO player check
-		;// TODO death
+	if (screen == nullptr && level == nullptr)  // Beta: if (var1 == null && this.level == null) (Minecraft.java:370)
+		screen = Util::make_shared<TitleScreen>(*this);  // Beta: var1 = new TitleScreen() (Minecraft.java:371)
+	else if (screen == nullptr && player != nullptr && player->health <= 0)  // Beta: else if (var1 == null && this.player.health <= 0) (Minecraft.java:372)
+		screen = Util::make_shared<DeathScreen>(*this);  // Beta: var1 = new DeathScreen() (Minecraft.java:373)
 
 	this->screen = std::move(screen);
-	if (this->screen != nullptr)
+	if (this->screen != nullptr)  // Beta: if (var1 != null) (Minecraft.java:377)
 	{
-		releaseMouse();
-		ScreenSizeCalculator ssc(width, height);
+		releaseMouse();  // Beta: this.releaseMouse() (Minecraft.java:378)
+		ScreenSizeCalculator ssc(width, height, options);
 		int_t w = ssc.getWidth();
 		int_t h = ssc.getHeight();
-		this->screen->init(w, h);
-		noRender = false;
+		this->screen->init(w, h);  // Beta: var1.init(this, var3, var4) (Minecraft.java:382)
+		noRender = false;  // Beta: this.noRender = false (Minecraft.java:383)
 	}
-	else
+	else  // Beta: else (Minecraft.java:384)
 	{
-		grabMouse();
+		grabMouse();  // Beta: this.grabMouse() (Minecraft.java:385)
 	}
 }
 
@@ -433,15 +490,17 @@ void Minecraft::run()
 			}
 			long_t tickNanos = System::nanoTime() - tickNano;
 
-			checkGlError("Pre render");
+		checkGlError("Pre render");
+		
+		// Beta: Update sound engine every frame (Minecraft.java:588)
+		if (player != nullptr)
+			soundEngine.update(player.get(), timer.a);
 
-			glEnable(GL_TEXTURE_2D);
-			glEnable(GL_ALPHA_TEST);
+		glEnable(GL_TEXTURE_2D);
+		glEnable(GL_ALPHA_TEST);
 
-			if (level != nullptr && !level->isOnline)
-				level->updateLights();
-			// Something was probably here at some point
-			if (level != nullptr && level->isOnline)
+			// Update lights once per frame (was being called twice before)
+			if (level != nullptr)
 				level->updateLights();
 
 			if (options.limitFramerate)
@@ -464,7 +523,7 @@ void Minecraft::run()
 				std::this_thread::sleep_for(std::chrono::milliseconds(10));
 			}
 
-			if (lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_F3))
+			if (options.showDebugInfo)
 			{
 				renderFpsMeter(tickNanos);
 			}
@@ -473,7 +532,7 @@ void Minecraft::run()
 				lastTimer = System::nanoTime();
 			}
 
-			std::this_thread::yield();
+			// Removed std::this_thread::yield() - causes unnecessary context switches
 			if (lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_F7))
 				lwjgl::Display::update();
 
@@ -640,22 +699,25 @@ void Minecraft::pauseGame()
 
 void Minecraft::handleMouseDown(int_t button, bool down)
 {
-	if (gameMode->instaBuild)
-		return;
-	if (button == 0 && missTime > 0)
-		return;
-	if (down && hitResult.type == HitResult::Type::TILE && button == 0)
+	// Beta: handleMouseDown() (Minecraft.java:835-849)
+	if (!gameMode->instaBuild)
 	{
-		int_t x = hitResult.x;
-		int_t y = hitResult.y;
-		int_t z = hitResult.z;
-		gameMode->continueDestroyBlock(x, y, z, hitResult.f);
-		// TODO
-		// particleEngine
-	}
-	else
-	{
-		gameMode->stopDestroyBlock();
+		if (button != 0 || missTime <= 0)
+		{
+			if (down && hitResult.type == HitResult::Type::TILE && button == 0)
+			{
+				int_t x = hitResult.x;
+				int_t y = hitResult.y;
+				int_t z = hitResult.z;
+				Facing f = hitResult.f;
+				gameMode->continueDestroyBlock(x, y, z, f);
+				particleEngine.crack(x, y, z, static_cast<int_t>(f));
+			}
+			else
+			{
+				gameMode->stopDestroyBlock();
+			}
+		}
 	}
 }
 
@@ -666,7 +728,7 @@ void Minecraft::handleMouseClick(int_t button)
 	if (button == 0)
 		player->swing();
 
-	bool canUseItem = false;
+	bool canUseItem = true;
 
 	if (hitResult.type == HitResult::Type::NONE)
 	{
@@ -694,19 +756,55 @@ void Minecraft::handleMouseClick(int_t button)
 		if (button == 0)
 		{
 			level->extinguishFire(x, y, z, hitResult.f);
-			// TODO: unbreakable check
-			if (player->userType >= 100)
+			// Alpha 1.2.6: Check userType >= 100 for block breaking (Minecraft.java:876-878)
+			// Java: if (var7 != Tile.unbreakable || this.player.userType >= 100) {
+			//     this.gameMode.startDestroyBlock(var3, var4, var5, this.hitResult.f);
+			// }
+			if (t.id != 7 || player->userType >= 100)  // Tile 7 is bedrock (unbreakable)
+			{
 				gameMode->startDestroyBlock(x, y, z, hitResult.f);
+			}
 		}
-		else
+		else if (button == 1)
 		{
-			// TODO
+			// Beta: Right-click block placement (Minecraft.java:879-895)
+			auto playerPtr = std::static_pointer_cast<Player>(this->player);
+			ItemStack *item = playerPtr->inventory.getSelected();  // Beta: ItemInstance var8 = this.player.inventory.getSelected() (Minecraft.java:880)
+			int_t oldCount = item != nullptr ? item->stackSize : 0;  // Beta: int var9 = var8 != null ? var8.count : 0 (Minecraft.java:881)
+			
+			if (gameMode->useItemOn(playerPtr, level, item, x, y, z, f))  // Beta: this.gameMode.useItemOn(this.player, this.level, var8, var3, var4, var5, var6) (Minecraft.java:882)
+			{
+				canUseItem = false;  // Beta: var2 = false (Minecraft.java:883)
+				playerPtr->swing();  // Beta: this.player.swing() (Minecraft.java:884)
+			}
+			
+			if (item != nullptr)
+			{
+				// Beta: if (var8.count == 0) this.player.inventory.items[this.player.inventory.selected] = null (Minecraft.java:891-892)
+				if (item->isEmpty())
+				{
+					ItemStack *selected = playerPtr->inventory.getSelected();
+					if (selected != nullptr)
+						*selected = ItemStack();  // Clear stack
+				}
+				// Beta: else if (var8.count != var9) this.gameRenderer.itemInHandRenderer.itemPlaced() (Minecraft.java:893-894)
+				else if (item->stackSize != oldCount)
+				{
+					gameRenderer.itemInHandRenderer.itemPlaced();
+				}
+			}
 		}
 	}
 
 	if (canUseItem && button == 1)
 	{
-		// TODO
+		// Beta: Right-click item use (Minecraft.java:899-903)
+		auto playerPtr = std::static_pointer_cast<Player>(this->player);
+		ItemStack *item = playerPtr->inventory.getSelected();  // Beta: ItemInstance var10 = this.player.inventory.getSelected() (Minecraft.java:900)
+		if (item != nullptr && !item->isEmpty() && gameMode->useItem(playerPtr, level, item))  // Beta: if (var10 != null && this.gameMode.useItem(this.player, this.level, var10)) (Minecraft.java:901)
+		{
+			gameRenderer.itemInHandRenderer.itemUsed();  // Beta: this.gameRenderer.itemInHandRenderer.itemUsed() (Minecraft.java:902)
+		}
 	}
 }
 
@@ -752,7 +850,7 @@ void Minecraft::resize(int_t w, int_t h)
 
 	if (screen != nullptr)
 	{
-		ScreenSizeCalculator ssc(width, height);
+		ScreenSizeCalculator ssc(width, height, options);
 		int_t w = ssc.getWidth();
 		int_t h = ssc.getHeight();
 		screen->init(w, h);
@@ -798,7 +896,7 @@ void Minecraft::tick()
 		textures.tick();
 
 	// Show death screen when dead
-	if (screen == nullptr && player != nullptr && player->health == 0)
+	if (screen == nullptr && player != nullptr && player->health <= 0)
 		setScreen(nullptr);
 
 	// Tick screen
@@ -822,7 +920,11 @@ void Minecraft::tick()
 				continue;
 
 			int_t dwheel = lwjgl::Mouse::getEventDWheel();
-			// TODO inventory
+			// Alpha: Scroll wheel hotbar selection (Minecraft.java:999-1002)
+			if (dwheel != 0 && screen == nullptr && player != nullptr)
+			{
+				player->inventory.changeCurrentItem(dwheel);
+			}
 
 			if (screen == nullptr)
 			{
@@ -872,21 +974,80 @@ void Minecraft::tick()
 				{
 					if (lwjgl::Keyboard::getEventKey() == lwjgl::Keyboard::KEY_ESCAPE)
 						pauseGame();
-					if (lwjgl::Keyboard::getEventKey() == lwjgl::Keyboard::KEY_S && lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_F3))
-						reloadSound();
+					if (lwjgl::Keyboard::getEventKey() == lwjgl::Keyboard::KEY_F3)
+						options.showDebugInfo = !options.showDebugInfo;  // Alpha: toggle debug screen (Minecraft.java:945-947)
+					if (lwjgl::Keyboard::getEventKey() == lwjgl::Keyboard::KEY_S && options.showDebugInfo)
+						reloadSound();  // Alpha: F3+S reloads sound (Minecraft.java:937-939)
 					if (lwjgl::Keyboard::getEventKey() == lwjgl::Keyboard::KEY_F5)
-						options.thirdPersonView = !options.thirdPersonView;
+					{
+						++options.thirdPersonView;  // Alpha: cycle third person view (Minecraft.java:950-953)
+						if (options.thirdPersonView > 2)
+							options.thirdPersonView = 0;
+					}
+					
+					// Alpha 1.2.6: Drop item on drop key (Q) - Java: if (Keyboard.getEventKey() == this.options.keyBindDrop.keyCode) { this.thePlayer.dropCurrentItem(); }
+					// Java: This is inside the currentScreen == null block
+					if (lwjgl::Keyboard::getEventKey() == options.keyDrop.key)
+					{
+						if (isOnline())
+						{
+							// Multiplayer: Send Packet14BlockDig(4, 0, 0, 0, 0) via EntityClientPlayerMP
+							EntityClientPlayerMP* mpPlayer = dynamic_cast<EntityClientPlayerMP*>(player.get());
+							if (mpPlayer != nullptr)
+							{
+								mpPlayer->dropCurrentItem();
+							}
+							else
+							{
+								std::cout << "[Drop] WARNING: dynamic_cast to EntityClientPlayerMP failed!" << std::endl;
+							}
+						}
+						else
+						{
+							// Single-player: Drop item locally
+							// Note: In single-player, LocalPlayer should have a dropCurrentItem method, but for now just drop the selected item
+							ItemStack *selected = player->inventory.getCurrentItem();
+							if (selected != nullptr && !selected->isEmpty())
+							{
+								player->drop(*selected);
+								player->removeSelectedItem();
+							}
+						}
+					}
 				}
 
+				// Alpha: Hotbar selection with number keys (Minecraft.java:982-986)
 				for (int_t i = 0; i < 9; i++)
 				{
-					// TODO: inventory
-					// if (lwjgl::Keyboard::getEventKey() == lwjgl::Keyboard::KEY_1 + i)
-					// 	player->inventory.selected = i;
+					if (lwjgl::Keyboard::getEventKey() == lwjgl::Keyboard::KEY_1 + i)
+					{
+						player->inventory.currentItem = i;
+					}
 				}
 
 				if (lwjgl::Keyboard::getEventKey() == options.keyFog.key)
 					options.toggle(Options::Option::RENDER_DISTANCE, (lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_LSHIFT) || lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_RSHIFT)) ? -1 : 1);
+				
+				// Beta: Open inventory screen on inventory key (I)
+				if (lwjgl::Keyboard::getEventKey() == options.keyInventory.key)
+				{
+					if (screen == nullptr)
+					{
+						setScreen(Util::make_shared<InventoryScreen>(*this));
+					}
+				}
+				
+				// Alpha 1.2.6: Open chat screen on chat key (T) when online
+				// Java: if (this.isOnline() && Keyboard.getEventKey() == this.options.keyChat.key) {
+				//     this.setScreen(new ChatScreen());
+				// }
+				if (isOnline() && lwjgl::Keyboard::getEventKey() == options.keyChat.key)
+				{
+					if (screen == nullptr)
+					{
+						setScreen(Util::make_shared<GuiChat>(*this));
+					}
+				}
 			}
 		}
 
@@ -937,10 +1098,14 @@ void Minecraft::tick()
 		}
 		if (!pause && level != nullptr)
 			level->animateTick(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));
-		// TODO
-		// if (!pause)
-		// 	particleEngine.tick();
+		// Beta: Tick particle engine (Minecraft.java:1170-1172)
+		if (!pause)
+			particleEngine.tick();
 	}
+
+	// Beta 1.2/newb12: Tick GUI (increments ticks for chat messages)
+	// Java: this.gui.tick();
+	gui.tick();
 
 	lastTickTime = System::currentTimeMillis();
 }
@@ -1004,6 +1169,11 @@ void Minecraft::setLevel(std::shared_ptr<Level> level, const jstring &title, std
 
 	if (level != nullptr)
 	{
+		// Ensure gameMode is initialized
+		if (gameMode == nullptr)
+		{
+			gameMode = Util::make_shared<SurvivalMode>(*this);
+		}
 		gameMode->initLevel(level);
 
 		if (!isOnline())
@@ -1032,6 +1202,9 @@ void Minecraft::setLevel(std::shared_ptr<Level> level, const jstring &title, std
 		this->player->input = Util::make_unique<KeyboardInput>(options);
 
 		levelRenderer.setLevel(level);
+
+		// Beta: Set particle engine level (Minecraft.java:1292-1294)
+		particleEngine.setLevel(level.get());
 
 		gameMode->adjustPlayer(this->player);
 		if (player != nullptr)
@@ -1118,7 +1291,132 @@ jstring Minecraft::gatherStats3()
 
 void Minecraft::respawnPlayer()
 {
+	// Beta: Minecraft.respawnPlayer() - handles player respawn (Minecraft.java:1399-1430)
+	// Safety check: ensure level and dimension are valid
+	if (level == nullptr || level->dimension == nullptr)
+	{
+		return;  // Can't respawn without a valid level
+	}
+	
+	if (!level->dimension->mayRespawn())  // Beta: if (!this.level.dimension.mayRespawn()) (Minecraft.java:1400)
+		toggleDimension();  // Beta: this.toggleDimension() (Minecraft.java:1401)
+	
+	int_t xSpawn = level->xSpawn;  // Beta: int var1 = this.level.xSpawn (Minecraft.java:1404)
+	int_t zSpawn = level->zSpawn;  // Beta: int var2 = this.level.zSpawn (Minecraft.java:1405)
+	std::shared_ptr<ChunkSource> chunkSource = level->getChunkSource();  // Beta: ChunkSource var3 = this.level.getChunkSource() (Minecraft.java:1406)
+	if (chunkSource->isChunkCache())  // Beta: if (var3 instanceof ChunkCache) (Minecraft.java:1407)
+	{
+		ChunkCache &chunkCache = static_cast<ChunkCache &>(*chunkSource);  // Beta: ChunkCache var4 = (ChunkCache)var3 (Minecraft.java:1408)
+		chunkCache.centerOn(xSpawn >> 4, zSpawn >> 4);  // Beta: var4.centerOn(var1 >> 4, var2 >> 4) (Minecraft.java:1409)
+	}
+	
+	level->validateSpawn();  // Beta: this.level.validateSpawn() (Minecraft.java:1412)
+	level->entitiesToRemove.clear();  // Beta: this.level.removeAllPendingEntityRemovals() (Minecraft.java:1413) - clear entitiesToRemove
+	int_t entityId = 0;  // Beta: int var5 = 0 (Minecraft.java:1414)
+	if (player != nullptr)  // Beta: if (this.player != null) (Minecraft.java:1415)
+	{
+		entityId = player->entityId;  // Beta: var5 = this.player.entityId (Minecraft.java:1416)
+		level->removeEntity(player);  // Beta: this.level.removeEntity(this.player) (Minecraft.java:1417)
+	}
+	
+	// newb12: Clear loaded player data before respawning so respawn uses spawn point, not saved death position
+	level->clearLoadedPlayerData();
+	
+	player = std::static_pointer_cast<LocalPlayer>(gameMode->createPlayer(*level));  // Beta: this.player = (LocalPlayer)this.gameMode.createPlayer(this.level) (Minecraft.java:1420)
+	player->resetPos();  // Beta: this.player.resetPos() (Minecraft.java:1421)
+	gameMode->initPlayer(player);  // Beta: this.gameMode.initPlayer(this.player) (Minecraft.java:1422)
+	level->loadPlayer(player);  // Beta: this.level.loadPlayer(this.player) (Minecraft.java:1423)
+	player->input = Util::make_unique<KeyboardInput>(options);  // Beta: this.player.input = new KeyboardInput(this.options) (Minecraft.java:1424)
+	player->entityId = entityId;  // Beta: this.player.entityId = var5 (Minecraft.java:1425)
+	gameMode->adjustPlayer(player);  // Beta: this.gameMode.adjustPlayer(this.player) (Minecraft.java:1426)
+	prepareLevel(u"Respawning");  // Beta: this.prepareLevel("Respawning") (Minecraft.java:1427)
+	if (dynamic_cast<DeathScreen *>(screen.get()) != nullptr)  // Beta: if (this.screen instanceof DeathScreen) (Minecraft.java:1428)
+		setScreen(nullptr);  // Beta: this.setScreen(null) (Minecraft.java:1429)
+}
 
+// Beta: fileDownloaded(String name, File file) - categorizes and loads sounds (Minecraft.java:1352-1367)
+void Minecraft::fileDownloaded(const jstring &name, File *file)
+{
+	if (!file || !file->exists())
+		return;
+	
+	// Beta: Extract category prefix (e.g., "sound", "newsound", "streaming", "music", "newmusic")
+	size_t slashPos = name.find(u"/");
+	if (slashPos == jstring::npos)
+		return;
+	
+	jstring category = name.substr(0, slashPos);
+	jstring soundName = name.substr(slashPos + 1);  // Beta: Strip category prefix before calling add()
+	
+	// Beta: Convert file path to string for sound engine
+	std::string filePath = String::toUTF8(file->toString());
+	
+	// Beta: Categorize and load sounds based on directory prefix (Minecraft.java:1356-1366)
+	if (category == u"sound" || category == u"newsound")
+	{
+		// Beta: Regular sounds (Minecraft.java:1357-1359)
+		soundEngine.add(soundName, filePath);
+	}
+	else if (category == u"streaming")
+	{
+		// Beta: Streaming sounds (Minecraft.java:1361)
+		soundEngine.addStreaming(soundName, filePath);
+	}
+	else if (category == u"music" || category == u"newmusic")
+	{
+		// Beta: Music files (Minecraft.java:1363-1365)
+		soundEngine.addMusic(soundName, filePath);
+	}
+}
+
+// Beta: loadAllSounds() - recursively loads all sounds from resource directory (BackgroundDownloader.java:66-80)
+void Minecraft::loadAllSounds(File *dir, const jstring &prefix)
+{
+	if (!dir || !dir->exists() || !dir->isDirectory())
+		return;
+	
+	// Beta: List all files in directory (BackgroundDownloader.java:67)
+	std::vector<std::unique_ptr<File>> files = dir->listFiles();
+	
+	// Beta: Recursively process all files (BackgroundDownloader.java:69-79)
+	for (auto &file : files)
+	{
+		if (!file)
+			continue;
+		
+		if (file->isDirectory())
+		{
+			// Beta: Recursively load subdirectories (BackgroundDownloader.java:70-71)
+			jstring newPrefix = prefix + file->getName() + u"/";
+			loadAllSounds(file.get(), newPrefix);
+		}
+		else if (file->isFile())
+		{
+			// Beta: Only load sound files (.ogg, .mus, .wav) - matching Beta 1.2 codec support
+			jstring fileName = file->getName();
+			bool isSoundFile = false;
+			if (fileName.length() >= 4)
+			{
+				jstring ext = fileName.substr(fileName.length() - 4);
+				if (ext == u".ogg" || ext == u".mus" || ext == u".wav")
+					isSoundFile = true;
+			}
+			
+			if (isSoundFile)
+			{
+				// Beta: Load file and call fileDownloaded (BackgroundDownloader.java:73-77)
+				try
+				{
+					jstring fullName = prefix + fileName;
+					fileDownloaded(fullName, file.get());
+				}
+				catch (const std::exception &e)
+				{
+					std::cerr << "Failed to add " << String::toUTF8(prefix + fileName) << ": " << e.what() << std::endl;
+				}
+			}
+		}
+	}
 }
 
 void Minecraft::start(const jstring *name, const jstring *sessionId)

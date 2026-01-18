@@ -52,6 +52,10 @@ public:
 	void setBlocks(byte_t *blocks, int_t y) override;
 	int_t getBlocksAndData(byte_t *out, int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1) override;
 	int_t setBlocksAndData(byte_t *in, int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1) override;
+	
+	// Alpha 1.2.6: Chunk.func_1004_a - decode chunk data with offset (returns new offset)
+	int_t setBlocksAndDataFromPacket(byte_t *data, int_t xStart, int_t yStart, int_t zStart, 
+	                                  int_t xEnd, int_t yEnd, int_t zEnd, int_t offset) override;
 
 	Random getRandom(long_t seed) override;
 

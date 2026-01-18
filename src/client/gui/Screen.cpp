@@ -48,10 +48,14 @@ void Screen::mouseClicked(int_t x, int_t y, int_t buttonNum)
 		{
 			if (button->clicked(minecraft, x, y))
 			{
+				// Save a copy of the shared_ptr before buttonClicked() which might clear buttons
 				clickedButton = button;
-				// TODO
-				// this.minecraft.soundEngine.playUI("random.click", 1.0f, 1.0f);
-				buttonClicked(*button);
+				std::shared_ptr<Button> buttonCopy = button;
+				// Beta: Play click sound (Screen.java:64)
+				minecraft.soundEngine.playUI(u"random.click", 1.0f, 1.0f);
+				buttonClicked(*buttonCopy);
+				// Break after handling click - buttonClicked() may have cleared buttons (e.g., GUI scale re-layout)
+				break;
 			}
 		}
 	}

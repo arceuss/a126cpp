@@ -17,8 +17,11 @@
 #include "client/renderer/LevelRenderer.h"
 #include "client/renderer/GameRenderer.h"
 #include "client/renderer/Textures.h"
+#include "client/particle/ParticleEngine.h"
 
 #include "client/skins/TexturePackRepository.h"
+
+#include "client/sound/SoundEngine.h"
 
 #include "client/gamemode/GameMode.h"
 
@@ -73,6 +76,8 @@ public:
 
 	GameRenderer gameRenderer = GameRenderer(*this);
 
+	ParticleEngine particleEngine = ParticleEngine(nullptr, &textures);
+
 private:
 	int_t ticks = 0;
 	int_t missTime = 0;
@@ -91,6 +96,8 @@ public:
 
 	MouseHandler mouseHandler = MouseHandler(*this);
 	TexturePackRepository texturePackRepository = TexturePackRepository(*this);
+
+	SoundEngine soundEngine = SoundEngine();
 
 	std::shared_ptr<File> workingDirectory;
 
@@ -134,6 +141,9 @@ public:
 private:
 	void renderLoadingScreen();
 	void blit(int_t dstx, int_t dsty, int_t srcx, int_t srcy, int_t w, int_t h);
+	
+	// Beta: loadAllSounds() - recursively loads all sounds from resource directory (BackgroundDownloader.java:66-80)
+	void loadAllSounds(File *dir, const jstring &prefix);
 
 public:
 	static const std::shared_ptr<File> &getWorkingDirectory();
@@ -170,6 +180,9 @@ public:
 	void tick();
 
 	void reloadSound();
+
+	// Beta: fileDownloaded(String name, File file) - categorizes and loads sounds (Minecraft.java:1352-1367)
+	void fileDownloaded(const jstring &name, File *file);
 
 	bool isOnline();
 

@@ -1,4 +1,5 @@
 #include "client/gamemode/SurvivalMode.h"
+#include "world/item/ItemStack.h"
 
 #include "client/Minecraft.h"
 
@@ -21,8 +22,23 @@ bool SurvivalMode::destroyBlock(int_t x, int_t y, int_t z, Facing face)
 {
 	int_t t = minecraft.level->getTile(x, y, z);
 	int_t data = minecraft.level->getData(x, y, z);
+	
 	bool changed = GameMode::destroyBlock(x, y, z, face);
 	bool couldDestroy = minecraft.player->canDestroy(*Tile::tiles[t]);
+
+	// Alpha: Consume durability when breaking blocks (PlayerControllerSP.java:28-34)
+	ItemStack *held = minecraft.player->inventory.getCurrentItem();
+	if (held != nullptr && changed)
+	{
+		// Alpha: hitBlock(blockID, x, y, z) damages item by 1 (ItemTool.java:37-39, PlayerControllerSP.java:29)
+		held->hitBlock(t, x, y, z);
+		if (held->isEmpty())
+		{
+			// Alpha: When stackSize reaches 0, destroy item (PlayerControllerSP.java:30-33)
+			// Clear inventory slot when item breaks
+			minecraft.player->inventory.mainInventory[minecraft.player->inventory.currentItem] = ItemStack();
+		}
+	}
 
 	if (changed && couldDestroy)
 		Tile::tiles[t]->playerDestroy(*minecraft.level, x, y, z, data);
@@ -63,7 +79,15 @@ void SurvivalMode::continueDestroyBlock(int_t x, int_t y, int_t z, Facing face)
 		destroyProgress += tile.getDestroyProgress(*minecraft.player);
 		if (std::fmod(destroyTicks, 4.0f) == 0.0f)
 		{
-			// TODO sound engine
+			// Beta: Play mining sound during block breaking (SurvivalMode.java:83-88)
+			const Tile::SoundType *soundType = tile.getSoundType();
+			if (soundType != nullptr)
+			{
+				jstring stepSound = soundType->getStepSound();
+				float volume = (soundType->getVolume() + 1.0f) / 8.0f;
+				float pitch = soundType->getPitch() * 0.5f;
+				minecraft.soundEngine.play(stepSound, (float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f, volume, pitch);
+			}
 		}
 
 		destroyTicks++;
