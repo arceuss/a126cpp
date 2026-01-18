@@ -1,6 +1,6 @@
 #include "client/renderer/HttpTexture.h"
 
-#include "../../external/cpp-httplib/httplib.h"
+#include "external/cpp-httplib/httplib.h"
 #include "java/BufferedImage.h"
 #include "java/String.h"
 #include "java/File.h"
