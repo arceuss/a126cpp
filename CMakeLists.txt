@@ -1076,3 +1076,11 @@ endif()
 set_target_properties(Alpha126Cpp PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
 )
+
+# Copy resources folder to output directory next to executable
+add_custom_command(TARGET Alpha126Cpp POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_directory
+	"${CMAKE_SOURCE_DIR}/resources"
+	"$<TARGET_FILE_DIR:Alpha126Cpp>/resources"
+	COMMENT "Copying resources folder to output directory"
+)
