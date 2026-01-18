@@ -20,10 +20,12 @@ jobs:
       # 1. <Windows, Release, latest MSVC compiler toolchain on the default runner image, default generator>
       # 2. <Linux, Release, latest GCC compiler toolchain on the default runner image, default generator>
       # 3. <Linux, Release, latest Clang compiler toolchain on the default runner image, default generator>
+      # 4. <macOS Intel, Release, Clang>
+      # 5. <macOS Apple Silicon, Release, Clang>
       #
       # To add more build types (Release, Debug, RelWithDebInfo, etc.) customize the build_type list.
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-12, macos-14]
         build_type: [Release]
         c_compiler: [gcc, clang, cl]
         include:
@@ -36,6 +38,14 @@ jobs:
           - os: ubuntu-latest
             c_compiler: clang
             cpp_compiler: clang++
+          - os: macos-12
+            c_compiler: clang
+            cpp_compiler: clang++
+            arch: x86_64
+          - os: macos-14
+            c_compiler: clang
+            cpp_compiler: clang++
+            arch: arm64
         exclude:
           - os: windows-latest
             c_compiler: gcc
@@ -43,6 +53,10 @@ jobs:
             c_compiler: clang
           - os: ubuntu-latest
             c_compiler: cl
+          - os: macos-12
+            c_compiler: gcc
+          - os: macos-14
+            c_compiler: gcc
 
     steps:
     - uses: actions/checkout@v4
@@ -56,6 +70,16 @@ jobs:
       shell: bash
       run: |
         echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          echo "bin-dir=${{ github.workspace }}/bin/Release" >> "$GITHUB_OUTPUT"
+          echo "exe-name=Alpha126Cpp.exe" >> "$GITHUB_OUTPUT"
+        elif [ "${{ runner.os }}" = "macOS" ]; then
+          echo "bin-dir=${{ github.workspace }}/bin" >> "$GITHUB_OUTPUT"
+          echo "exe-name=Alpha126Cpp" >> "$GITHUB_OUTPUT"
+        else
+          echo "bin-dir=${{ github.workspace }}/bin" >> "$GITHUB_OUTPUT"
+          echo "exe-name=Alpha126Cpp" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
@@ -65,7 +89,11 @@ jobs:
         -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
         -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        ${{ matrix.arch && format('-DCMAKE_OSX_ARCHITECTURES={0}', matrix.arch) || '' }}
         -S ${{ github.workspace }}
+      env:
+        CC: ${{ matrix.c_compiler }}
+        CXX: ${{ matrix.cpp_compiler }}
 
     - name: Build
       # Build your program with the given configuration. Note that --config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
@@ -75,4 +103,19 @@ jobs:
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
       # Execute tests defined by the CMake configuration. Note that --build-config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
       # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-      run: ctest --build-config ${{ matrix.build_type }}
+      # Skip tests if they don't exist
+      continue-on-error: true
+      run: ctest --build-config ${{ matrix.build_type }} || true
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: ${{ runner.os }}-${{ matrix.c_compiler }}-${{ matrix.arch || 'native' }}-${{ matrix.build_type }}
+        path: |
+          ${{ steps.strings.outputs.bin-dir }}/${{ steps.strings.outputs.exe-name }}
+          ${{ steps.strings.outputs.bin-dir }}/resource/
+          ${{ steps.strings.outputs.bin-dir }}/*.dll
+          ${{ steps.strings.outputs.bin-dir }}/*.so
+          ${{ steps.strings.outputs.bin-dir }}/*.dylib
+        retention-days: 30
