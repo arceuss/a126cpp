@@ -1,16 +1,17 @@
 #include "client/model/Polygon.h"
+#include "client/renderer/Tesselator.h"
 
-Polygon::Polygon()
+Poly::Poly()
 {
 
 }
 
-Polygon::Polygon(std::array<Vertex, 4> &&vertices) : vertices(std::move(vertices))
+Poly::Poly(std::array<Vertex, 4> &&vertices) : vertices(std::move(vertices))
 {
 	vertexCount = this->vertices.size();
 }
 
-Polygon::Polygon(std::array<Vertex, 4> &&vertices, int_t u0, int_t v0, int_t u1, int_t v1) : Polygon(std::move(vertices))
+Poly::Poly(std::array<Vertex, 4> &&vertices, int_t u0, int_t v0, int_t u1, int_t v1) : Poly(std::move(vertices))
 {
 	float us = 1.0F / 640.0F;
 	float vs = 1.0F / 480.0F;
@@ -20,7 +21,7 @@ Polygon::Polygon(std::array<Vertex, 4> &&vertices, int_t u0, int_t v0, int_t u1,
 	this->vertices[3] = this->vertices[3].remap(u1 / 64.0f - us, v1 / 32.0f - vs);
 }
 
-Polygon::Polygon(std::array<Vertex, 4> &&vertices, float u0, float v0, float u1, float v1) : Polygon(std::move(vertices))
+Poly::Poly(std::array<Vertex, 4> &&vertices, float u0, float v0, float u1, float v1) : Poly(std::move(vertices))
 {
 	this->vertices[0] = this->vertices[0].remap(u1, v0);
 	this->vertices[1] = this->vertices[1].remap(u0, v0);
@@ -28,13 +29,13 @@ Polygon::Polygon(std::array<Vertex, 4> &&vertices, float u0, float v0, float u1,
 	this->vertices[3] = this->vertices[3].remap(u1, v1);
 }
 
-void Polygon::mirror()
+void Poly::mirror()
 {
 	for (int_t i = 0; i < vertices.size() / 2; i++)
 		std::swap(vertices[i], vertices[vertices.size() - i - 1]);
 }
 
-void Polygon::render(Tesselator &t, float scale)
+void Poly::render(Tesselator &t, float scale)
 {
 	Vec3 *v0 = vertices[1].pos.vectorTo(vertices[0].pos);
 	Vec3 *v1 = vertices[1].pos.vectorTo(vertices[2].pos);
@@ -56,7 +57,7 @@ void Polygon::render(Tesselator &t, float scale)
 	t.end();
 }
 
-Polygon &Polygon::flipNormal()
+Poly &Poly::flipNormal()
 {
 	flipNormalFlag = true;
 	return *this;

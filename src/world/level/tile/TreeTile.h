@@ -5,8 +5,8 @@
 class TreeTile : public Tile
 {
 public:
-	static constexpr int_t DARK_TRUNK = 1;
-	static constexpr int_t BIRCH_TRUNK = 2;
+	// Alpha 1.2.6: BlockLog has no metadata variants - only oak logs exist
+	// DARK_TRUNK and BIRCH_TRUNK are Beta 1.2 features, not Alpha
 
 	TreeTile(int_t id);
 	

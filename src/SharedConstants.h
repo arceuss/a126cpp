@@ -5,7 +5,7 @@
 namespace SharedConstants
 {
 
-static const jstring VERSION_STRING = u"Beta 1.2_02";
+static const jstring VERSION_STRING = u"Alpha v1.2.6";
 extern const int NETWORK_PROTOCOL_VERSION;
 extern const int maxChatLength;
 extern const jstring acceptableLetters;

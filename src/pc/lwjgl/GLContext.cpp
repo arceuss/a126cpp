@@ -8,6 +8,12 @@
 
 #include "SDL.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <commdlg.h>
+#define IDI_ICON1 1  // Icon ID from resource file
+#endif
+
 // #define MC_DEBUG_GL
 
 #ifdef MC_DEBUG_GL
@@ -143,9 +149,89 @@ public:
 #endif
 
 		// Create SDL window
-		window = SDL_CreateWindow("McBetaCpp", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 854, 480, SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+		window = SDL_CreateWindow("Minecraft Alpha v1.2.6", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 854, 480, SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
 		if (window == nullptr)
 			throw SDLException();
+
+		// Load and set window icon
+#ifdef _WIN32
+		{
+			HICON hIcon = NULL;
+			bool fromResource = false;
+			
+			// First try to load from resource (embedded icon)
+			hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ICON1));
+			if (hIcon != NULL)
+			{
+				fromResource = true;
+			}
+			else
+			{
+				// If not found in resource, try loading from file
+				const char* iconPaths[] = {
+					"src/mc.ico",
+					"mc.ico",
+					"../src/mc.ico",
+					"../../src/mc.ico"
+				};
+				
+				for (int i = 0; i < 4 && hIcon == NULL; i++)
+				{
+					hIcon = (HICON)LoadImageA(NULL, iconPaths[i], IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
+				}
+			}
+			
+			if (hIcon != NULL)
+			{
+				ICONINFO iconInfo;
+				if (GetIconInfo(hIcon, &iconInfo))
+				{
+					BITMAP bmp;
+					if (GetObject(iconInfo.hbmColor, sizeof(BITMAP), &bmp))
+					{
+						int width = bmp.bmWidth;
+						int height = bmp.bmHeight;
+						
+						// Create SDL surface from icon (BGRA32 format for Windows)
+						SDL_Surface *iconSurface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_BGRA32);
+						if (iconSurface != nullptr)
+						{
+							// Get bitmap bits
+							HDC hDC = CreateCompatibleDC(NULL);
+							HBITMAP hOldBmp = (HBITMAP)SelectObject(hDC, iconInfo.hbmColor);
+							
+							BITMAPINFO bmi;
+							ZeroMemory(&bmi, sizeof(BITMAPINFO));
+							bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+							bmi.bmiHeader.biWidth = width;
+							bmi.bmiHeader.biHeight = -height; // Negative for top-down DIB
+							bmi.bmiHeader.biPlanes = 1;
+							bmi.bmiHeader.biBitCount = 32;
+							bmi.bmiHeader.biCompression = BI_RGB;
+							
+							if (GetDIBits(hDC, iconInfo.hbmColor, 0, height, iconSurface->pixels, &bmi, DIB_RGB_COLORS))
+							{
+								SDL_SetWindowIcon(window, iconSurface);
+							}
+							
+							SelectObject(hDC, hOldBmp);
+							DeleteDC(hDC);
+							SDL_FreeSurface(iconSurface);
+						}
+					}
+					
+					if (iconInfo.hbmColor) DeleteObject(iconInfo.hbmColor);
+					if (iconInfo.hbmMask) DeleteObject(iconInfo.hbmMask);
+				}
+				
+				// Only destroy if we loaded from file (not from resource)
+				if (!fromResource)
+				{
+					DestroyIcon(hIcon);
+				}
+			}
+		}
+#endif
 
 		// Create OpenGL context
 		gl_context = SDL_GL_CreateContext(window);

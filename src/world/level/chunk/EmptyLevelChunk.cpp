@@ -183,6 +183,30 @@ int_t EmptyLevelChunk::setBlocksAndData(byte_t *in, int_t x0, int_t y0, int_t z0
 	return fsize;
 }
 
+// Alpha 1.2.6: EmptyLevelChunk.func_1004_a - just advance offset, don't store data
+int_t EmptyLevelChunk::setBlocksAndDataFromPacket(byte_t *data, int_t xStart, int_t yStart, int_t zStart, 
+                                                   int_t xEnd, int_t yEnd, int_t zEnd, int_t offset)
+{
+	// EmptyLevelChunk doesn't store data, just advance offset to match expected size
+	int_t w = xEnd - xStart;
+	int_t h = yEnd - yStart;
+	int_t d = zEnd - zStart;
+	
+	// Blocks: w * h * d bytes
+	offset += w * h * d;
+	
+	// Data (nibbles): (w * h * d) / 2 bytes
+	offset += (w * h * d) / 2;
+	
+	// BlockLight (nibbles): (w * h * d) / 2 bytes
+	offset += (w * h * d) / 2;
+	
+	// SkyLight (nibbles): (w * h * d) / 2 bytes
+	offset += (w * h * d) / 2;
+	
+	return offset;
+}
+
 Random EmptyLevelChunk::getRandom(long_t seed)
 {
 	return Random(level.seed + (x * x * 4987142) + (x * 5947611) + (z * z) * 4392871LL + (z * 389711) ^ seed);

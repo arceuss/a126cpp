@@ -7,16 +7,15 @@ class LeafTile : public TransparentTile
 public:
 	static constexpr int_t REQUIRED_WOOD_RANGE = 4;
 
-	static constexpr int_t UPDATE_LEAF_BIT = 1 << 2;
+	static constexpr int_t UPDATE_LEAF_BIT = 4;  // Alpha: bit 2 = 4, used for leaf decay checking
 
-	static constexpr int_t NORMAL_LEAF = 0;
-	static constexpr int_t EVERGREEN_LEAF = 1;
-	static constexpr int_t BIRCH_LEAF = 2;
-
-	static constexpr int_t LEAF_TYPE_MASK = UPDATE_LEAF_BIT - 1;
+	// Alpha 1.2.6: BlockLeaves has no type variants (no birch/spruce) - only oak leaves exist
+	// EVERGREEN_LEAF and BIRCH_LEAF are Beta 1.2 features, not Alpha
+	// Metadata is only used for decay distance calculation, not for leaf type
 
 private:
 	int_t oTex = 0;
+	static int_t *checkBuffer;  // Beta: LeafTile.checkBuffer - array for decay checking (LeafTile.java:18) - static since LeafTile is singleton
 
 public:
 	LeafTile(int_t id, int_t tex);

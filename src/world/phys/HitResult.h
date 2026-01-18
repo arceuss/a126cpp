@@ -31,6 +31,7 @@ public:
 	HitResult();
 	HitResult(int_t x, int_t y, int_t z, Facing f, const Vec3 &pos);
 	HitResult(std::shared_ptr<Entity> &entity);
+	HitResult(Entity *entity);  // Convenience constructor for Entity*
 
 	double distanceTo(std::shared_ptr<Entity> &entity) const;
 };

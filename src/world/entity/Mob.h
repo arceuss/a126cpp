@@ -9,6 +9,8 @@
 #include "java/Type.h"
 #include "java/Math.h"
 
+class ItemStack;
+
 class Mob : public Entity
 {
 public:
@@ -48,7 +50,11 @@ protected:
 	float renderOffset = 0.0f;
 
 public:
-	bool interpolateOnly = false;
+	// Alpha 1.2.6: field_9343_G - flag indicating entity is client-side (spawned from network)
+	// Java: public boolean field_9343_G = false;
+	// When true, entity should NOT run AI - only interpolate positions from network
+	bool field_9343_G = false;
+	bool interpolateOnly = false;  // Alternative flag for same purpose
 
 	float oAttackAnim = 0.0f;
 	float attackAnim = 0.0f;
@@ -97,6 +103,12 @@ protected:
 	float xxa = 0.0f, yya = 0.0f;
 	float yRotA = 0.0f;
 
+public:
+	// Beta: Mob getters for input values (for boat control)
+	// These are used by boats and other vehicles to read rider input
+	float getXxa() const { return xxa; }
+	float getYya() const { return yya; }
+
 	bool jumping = false;
 	float defaultLookAngle = 0.0f;
 	float runSpeed = 0.7f;
@@ -110,6 +122,16 @@ public:
 
 protected:
 	virtual void defineSynchedData();
+	
+	// Alpha 1.2.6: EntityLiving.func_9282_a() - handles entity status from Packet38
+	// Java: public void func_9282_a(byte var1) {
+	//       if(var1 == 2) { this.hurtTime = 10; ... }
+	//       else if(var1 == 3) { this.health = 0; this.onDeath(...); } }
+	void func_9282_a(byte_t status) override;
+	
+	// Alpha 1.2.6: EntityLiving.func_9280_g() - triggers hurt animation
+	// Java: public void func_9280_g() { this.hurtTime = this.field_9332_M = 10; }
+	void func_9280_g() override;
 
 public:
 	bool canSee(const Entity &entity);
@@ -207,8 +229,10 @@ public:
 
 	virtual int_t getMaxSpawnClusterSize();
 
-	// TODO
-	// ItemInstance getCarriedItem
+	// newb12: Mob.getCarriedItem() - returns item being carried (for rendering)
+	// Returns null by default (Mob.java:825-827)
+	// Note: Player does NOT override this in newb12 - PlayerRenderer uses inventory.getSelected() directly
+	virtual ItemStack *getCarriedItem();
 
 	virtual void handleEntityEvent(byte_t event) override;
 };

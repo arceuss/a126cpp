@@ -194,6 +194,7 @@ static int_t keySDLToLWJGL(int_t key)
 		case SDLK_F12: return 88;
 		case SDLK_RSHIFT: return 54;
 		case SDLK_ESCAPE: return 1;
+		case SDLK_BACKSPACE: return 14; // KEY_BACK
 			// case SDLK_YEN: return 125;
 		case SDLK_LGUI: return 219;
 			// case SDLK_NONE: return 0;

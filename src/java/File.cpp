@@ -6,7 +6,11 @@
 
 jstring File::getName() const
 {
-	return u"";
+	// Extract filename from path (default implementation, can be overridden)
+	size_t pos = path.find_last_of(u"/\\");
+	if (pos == jstring::npos)
+		return path;
+	return path.substr(pos + 1);
 }
 
 jstring File::toString() const

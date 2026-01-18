@@ -2,6 +2,10 @@
 
 #include "world/level/Level.h"
 #include "world/level/material/GasMaterial.h"
+#include "world/level/tile/FarmTile.h"
+#include "world/level/tile/StoneSlabTile.h"
+#include "world/level/tile/FluidFlowingTile.h"
+#include "world/level/tile/FluidStationaryTile.h"
 
 Region::Region(Level &level, int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1) : level(level)
 {
@@ -36,7 +40,8 @@ std::shared_ptr<TileEntity> Region::getTileEntity(int_t x, int_t y, int_t z)
 {
 	int_t xc = (x >> 4) - xc1;
 	int_t zc = (z >> 4) - zc1;
-	return chunks[xc * h + zc]->getTileEntity(x & 0xF, y, z & 0xF);
+	std::shared_ptr<LevelChunk> chunk = chunks[xc * h + zc];
+	return (chunk == nullptr) ? nullptr : chunk->getTileEntity(x & 0xF, y, z & 0xF);
 }
 
 float Region::getBrightness(int_t x, int_t y, int_t z)
@@ -57,8 +62,23 @@ int_t Region::getRawBrightness(int_t x, int_t y, int_t z, bool neighbors)
 	if (neighbors)
 	{
 		int_t tile = getTile(x, y, z);
-		// TODO
-		// stoneSlabHalf farmland
+		// Beta: Special light handling for stoneSlabHalf and farmland (Level.java:603-626, Region.java:69-91)
+		// Both use the same lighting logic - check brightness from above and sides, return maximum
+		if (tile == Tile::stoneSlabHalf.id || tile == Tile::farmland.id)
+		{
+			int_t brightness = getRawBrightness(x, y + 1, z, false);
+			int_t bpx = getRawBrightness(x + 1, y, z, false);
+			int_t bnx = getRawBrightness(x - 1, y, z, false);
+			int_t bpz = getRawBrightness(x, y, z + 1, false);
+			int_t bnz = getRawBrightness(x, y, z - 1, false);
+			
+			if (bpx > brightness) brightness = bpx;
+			if (bnx > brightness) brightness = bnx;
+			if (bpz > brightness) brightness = bpz;
+			if (bnz > brightness) brightness = bnz;
+			
+			return brightness;
+		}
 	}
 
 	if (y < 0)

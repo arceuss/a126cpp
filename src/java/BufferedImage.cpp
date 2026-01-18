@@ -147,3 +147,70 @@ BufferedImage BufferedImage::ImageIO_read(std::istream &in)
 
 	return BufferedImage(w, h, std::move(data));
 }
+
+BufferedImage BufferedImage::ImageIO_readFromMemory(const unsigned char *data, int_t size)
+{
+	// Decode image from memory
+	int w, h, comp;
+	stbi_uc *raw_data = stbi_load_from_memory(data, size, &w, &h, &comp, 0);
+	if (raw_data == nullptr)
+	{
+		// Return empty image on failure
+		return BufferedImage();
+	}
+
+	// Convert to RGBA
+	std::unique_ptr<unsigned char[]> img_data = Util::make_unique<unsigned char[]>(w * h * 4);
+
+	if (comp == 1)
+	{
+		for (int i = 0; i < w * h; i++)
+		{
+			img_data[i * 4 + 0] = raw_data[i];
+			img_data[i * 4 + 1] = raw_data[i];
+			img_data[i * 4 + 2] = raw_data[i];
+			img_data[i * 4 + 3] = 255;
+		}
+		stbi_image_free(raw_data);
+	}
+	else if (comp == 2)
+	{
+		for (int i = 0; i < w * h; i++)
+		{
+			img_data[i * 4 + 0] = raw_data[i * 2 + 0];
+			img_data[i * 4 + 1] = raw_data[i * 2 + 0];
+			img_data[i * 4 + 2] = raw_data[i * 2 + 0];
+			img_data[i * 4 + 3] = raw_data[i * 2 + 1];
+		}
+		stbi_image_free(raw_data);
+	}
+	else if (comp == 3)
+	{
+		for (int i = 0; i < w * h; i++)
+		{
+			img_data[i * 4 + 0] = raw_data[i * 3 + 0];
+			img_data[i * 4 + 1] = raw_data[i * 3 + 1];
+			img_data[i * 4 + 2] = raw_data[i * 3 + 2];
+			img_data[i * 4 + 3] = 255;
+		}
+		stbi_image_free(raw_data);
+	}
+	else if (comp == 4)
+	{
+		for (int i = 0; i < w * h; i++)
+		{
+			img_data[i * 4 + 0] = raw_data[i * 4 + 0];
+			img_data[i * 4 + 1] = raw_data[i * 4 + 1];
+			img_data[i * 4 + 2] = raw_data[i * 4 + 2];
+			img_data[i * 4 + 3] = raw_data[i * 4 + 3];
+		}
+		stbi_image_free(raw_data);
+	}
+	else
+	{
+		stbi_image_free(raw_data);
+		return BufferedImage();
+	}
+
+	return BufferedImage(w, h, std::move(img_data));
+}

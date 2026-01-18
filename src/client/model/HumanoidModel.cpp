@@ -73,12 +73,19 @@ void HumanoidModel::setupAnim(float time, float r, float bob, float yRot, float 
 
 	if (riding)
 	{
-		arm0.xRot += -36.0f * Mth::DEGRAD;
-		arm1.xRot += -36.0f * Mth::DEGRAD;
-		leg0.xRot = 72.0f * Mth::DEGRAD;
-		leg1.xRot = 72.0f * Mth::DEGRAD;
-		leg0.yRot = 18.0f * Mth::DEGRAD;
-		leg1.yRot = -18.0f * Mth::DEGRAD;
+		// Beta: HumanoidModel.setupAnim() - sitting pose when riding (HumanoidModel.java:84-90)
+		// Java: this.arm0.xRot += (float)Math.PI * -0.2F;  // -36 degrees
+		//       this.arm1.xRot += (float)Math.PI * -0.2F;  // -36 degrees
+		//       this.leg0.xRot = (float)Math.PI * -0.4F;   // -72 degrees
+		//       this.leg1.xRot = (float)Math.PI * -0.4F;   // -72 degrees
+		//       this.leg0.yRot = (float)Math.PI * 0.1F;    // +18 degrees
+		//       this.leg1.yRot = (float)Math.PI * -0.1F;  // -18 degrees
+		arm0.xRot += -36.0f * Mth::DEGRAD;  // Beta: Math.PI * -0.2F = -36 degrees
+		arm1.xRot += -36.0f * Mth::DEGRAD;  // Beta: Math.PI * -0.2F = -36 degrees
+		leg0.xRot = -72.0f * Mth::DEGRAD;   // Beta: Math.PI * -0.4F = -72 degrees (was positive, should be negative)
+		leg1.xRot = -72.0f * Mth::DEGRAD;   // Beta: Math.PI * -0.4F = -72 degrees (was positive, should be negative)
+		leg0.yRot = 18.0f * Mth::DEGRAD;    // Beta: Math.PI * 0.1F = +18 degrees
+		leg1.yRot = -18.0f * Mth::DEGRAD;   // Beta: Math.PI * -0.1F = -18 degrees
 	}
 
 	if (holdingLeftHand)
@@ -125,6 +132,7 @@ void HumanoidModel::setupAnim(float time, float r, float bob, float yRot, float 
 		leg0.y = 9.0f;
 		leg1.y = 9.0f;
 		head.y = 1.0f;
+		hair.y = head.y;  // Fix: Sync hair/hat layer Y position with head when sneaking
 	}
 	else
 	{
@@ -134,6 +142,7 @@ void HumanoidModel::setupAnim(float time, float r, float bob, float yRot, float 
 		leg0.y = 12.0f;
 		leg1.y = 12.0f;
 		head.y = 0.0f;
+		hair.y = head.y;  // Fix: Sync hair/hat layer Y position with head when not sneaking
 	}
 
 	arm0.zRot += Mth::cos(bob * 0.09f) * 0.05f + 0.05f;
@@ -158,7 +167,7 @@ void HumanoidModel::renderEars(float scale)
 
 void HumanoidModel::renderCloak(float scale)
 {
-	// TODO
+	// doesn't exist in a1.2.6
 }
 
 void HumanoidModel::render(HumanoidModel &model, float scale)
@@ -168,6 +177,7 @@ void HumanoidModel::render(HumanoidModel &model, float scale)
 	head.xRot = model.head.xRot;
 	hair.yRot = head.yRot;
 	hair.xRot = head.xRot;
+	hair.y = head.y;  // Fix: Sync hair/hat layer Y position with head
 
 	arm0.xRot = model.arm0.xRot;
 	arm0.yRot = model.arm0.yRot;

@@ -3,6 +3,7 @@
 #include "world/level/Level.h"
 #include "world/level/chunk/LevelChunk.h"
 #include "world/entity/EntityIO.h"
+#include "world/level/tile/entity/TileEntity.h"
 
 #include "nbt/NbtIo.h"
 #include "nbt/CompoundTag.h"
@@ -225,6 +226,24 @@ std::shared_ptr<LevelChunk> OldChunkStorage::load(Level &level, CompoundTag &tag
 		{
 			std::shared_ptr<CompoundTag> entityTag = std::static_pointer_cast<CompoundTag>(entityTags->get(i));
 			std::shared_ptr<Entity> entity = EntityIO::loadStatic(*entityTag, level);
+		}
+	}
+
+	// Beta: Load tile entities from NBT (OldChunkStorage.java saves TileEntities tag)
+	std::shared_ptr<ListTag> tileEntityTags = tag.getList(u"TileEntities");
+	if (tileEntityTags != nullptr)
+	{
+		for (byte_t i = 0; i < tileEntityTags->size(); i++)
+		{
+			std::shared_ptr<CompoundTag> tileEntityTag = std::static_pointer_cast<CompoundTag>(tileEntityTags->get(i));
+			std::shared_ptr<TileEntity> tileEntity = TileEntity::loadStatic(*tileEntityTag);
+			if (tileEntity != nullptr)
+			{
+				// Beta: Set tile entity position relative to chunk and add to chunk
+				int_t tx = tileEntity->x - chunk->x * 16;
+				int_t tz = tileEntity->z - chunk->z * 16;
+				chunk->setTileEntity(tx, tileEntity->y, tz, tileEntity);
+			}
 		}
 	}
 

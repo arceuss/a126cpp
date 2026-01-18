@@ -15,4 +15,6 @@ public:
 	virtual bool shouldRenderFace(LevelSource &level, int_t x, int_t y, int_t z, Facing face) override;
 
 	virtual bool blocksLight();
+	
+	virtual bool isTranslucent() override;
 };

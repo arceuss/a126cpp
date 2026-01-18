@@ -11,14 +11,14 @@ class TitleScreen : public Screen
 private:
 	static Random random;
 
-	static constexpr unsigned LOGO_WIDTH = 38;
+	static constexpr unsigned LOGO_WIDTH = 39;
 	static constexpr unsigned LOGO_HEIGHT = 5;
-	char logo[LOGO_WIDTH][LOGO_WIDTH + 1] = {
-		" *   * * *   * *** *** *** *** *** ***",
-		" ** ** * **  * *   *   * * * * *    * ",
-		" * * * * * * * **  *   **  *** **   * ",
-		" *   * * *  ** *   *   * * * * *    * ",
-		" *   * * *   * *** *** * * * * *    * "
+	char logo[LOGO_HEIGHT][40] = {  // 40 to accommodate 38 chars + null terminator + safety margin
+		" *  *   **  * *  *  **  *    *   ** ***",
+		"* * *   * * * * * * * * *   * * *   *  ",
+		"*** *   **  *** *** **  *   *** *   ** ",
+		"* * *   *   * * * * *   *   * * *   *  ",
+		"* * *** *   * * * * *   *** * *  ** ***"
 	};
 
 	class LetterBlock

@@ -4,13 +4,14 @@
 
 #include "SharedConstants.h"
 #include "client/Minecraft.h"
-#include "client/locale/Language.h"
 #include "client/renderer/Tesselator.h"
 #include "client/renderer/TileRenderer.h"
 #include "client/gui/ScreenSizeCalculator.h"
 
 #include "client/gui/SelectWorldScreen.h"
 #include "client/gui/OptionsScreen.h"
+#include "client/gui/GuiMultiplayer.h"
+#include "client/gui/GuiConnecting.h"
 
 #include "world/level/tile/StoneTile.h"
 
@@ -77,25 +78,17 @@ void TitleScreen::init()
 	else if (tm->tm_mon == 1 && tm->tm_mday == 1)
 		splash = u"Happy new year!";
 
-	// Buttons
-	Language &language = Language::getInstance();
-
+	// Buttons - match GuiMainMenu layout exactly
 	int_t y = height / 4 + 48;
-	buttons.push_back(Util::make_shared<Button>(1, width / 2 - 100, y, language.getElement(u"menu.singleplayer")));
-	buttons.push_back(Util::make_shared<Button>(2, width / 2 - 100, y + 24, language.getElement(u"menu.multiplayer")));
-	buttons.push_back(Util::make_shared<Button>(3, width / 2 - 100, y + 48, language.getElement(u"menu.mods")));
-	if (false) // Applet
-	{
-		buttons.push_back(Util::make_shared<Button>(0, width / 2 - 100, y + 72, language.getElement(u"menu.options")));
-	}
-	else
-	{
-		buttons.push_back(Util::make_shared<Button>(0, width / 2 - 100, y + 72 + 12, 98, 20, language.getElement(u"menu.options")));
-		buttons.push_back(Util::make_shared<Button>(4, width / 2 + 2, y + 72 + 12, 98, 20, language.getElement(u"menu.quit")));
-	}
+	buttons.push_back(Util::make_shared<Button>(1, width / 2 - 100, y, u"Singleplayer"));
+	buttons.push_back(Util::make_shared<Button>(4, width / 2 - 100, y + 24, u"Connect to AlphaPlace!"));
+	buttons.push_back(Util::make_shared<Button>(3, width / 2 - 100, y + 48, u"Mods and Texture Packs"));
+	buttons.push_back(Util::make_shared<Button>(2, width / 2 - 100, y + 72, u"Multiplayer"));
+	buttons.push_back(Util::make_shared<Button>(0, width / 2 - 100, y + 96, 98, 20, u"Options..."));
+	buttons.push_back(Util::make_shared<Button>(5, width / 2 + 2, y + 96, 98, 20, u"Quit Game"));
 
 	if (minecraft.user == nullptr)
-		buttons[1]->active = false;
+		buttons[3]->active = false; // Multiplayer button (index 3, id 2)
 
 	// Level test
 	/*
@@ -116,13 +109,19 @@ void TitleScreen::buttonClicked(Button &button)
 		minecraft.setScreen(Util::make_shared<SelectWorldScreen>(minecraft, minecraft.screen));
 	if (button.id == 2)
 	{
-		// TODO
+		minecraft.setScreen(Util::make_shared<GuiMultiplayer>(minecraft, this));
 	}
 	if (button.id == 3)
 	{
-		// TODO
+		// TODO: Mods and Texture Packs screen
 	}
 	if (button.id == 4)
+	{
+		// Alpha 1.2.6: GuiMainMenu.actionPerformed() - connects to alphaplace.net:25565
+		// Java: this.mc.displayGuiScreen(new GuiConnecting(this.mc, "alphaplace.net", 25565));
+		minecraft.setScreen(Util::make_shared<GuiConnecting>(minecraft, u"alphaplace.net", 25565));
+	}
+	if (button.id == 5)
 		minecraft.stop();
 }
 
@@ -147,10 +146,12 @@ void TitleScreen::render(int_t xm, int_t ym, float a)
 	drawCenteredString(font, splash, 0, -8, 0xFFFF00);
 	glPopMatrix();
 
-	drawString(font, u"Minecraft " + SharedConstants::VERSION_STRING, 2, 2, 0x505050);
+	drawString(font, u"Minecraft Alpha v1.2.6", 2, 2, 0x505050);
 
-	jstring str = u"Copyright Mojang AB. Do not distribute.";
+	jstring str = u"Copyright Mojang Specifications. Do not distribute.";
 	drawString(font, str, width - font.width(str) - 2, height - 10, 0xFFFFFF);
+	str = u"who's arceus413?";  // Alpha: "v2.02 by Strultz" (GuiMainMenu.java:91)
+	drawString(font, str, width - font.width(str) - 2, height - 20, 0x00F7342B);  // Alpha: this.drawString(this.fontRenderer, var6, ..., 16200747) - converted Java integer to unsigned hex
 
 	Screen::render(xm, ym, a);
 }
@@ -161,7 +162,7 @@ void TitleScreen::renderMinecraftLogo(float a)
 	glPushMatrix();
 	glLoadIdentity();
 
-	ScreenSizeCalculator ssc(minecraft.width, minecraft.height);
+	ScreenSizeCalculator ssc(minecraft.width, minecraft.height, minecraft.options);
 	int_t h = 120 * ssc.scale;
 	gluPerspective(70.0f, static_cast<float>(minecraft.width) / h, 0.05f, 100.0f);
 	glViewport(0, minecraft.height - h, minecraft.width, h);

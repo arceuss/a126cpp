@@ -1,4 +1,8 @@
 #include "client/renderer/Textures.h"
+#include "client/renderer/TextureFX.h"
+#include "client/renderer/HttpTexture.h"
+#include "client/renderer/HttpTextureProcessor.h"
+#include "client/renderer/MobSkinTextureProcessor.h"
 
 #include <cassert>
 
@@ -193,26 +197,190 @@ void Textures::releaseTexture(int_t id)
 	glDeleteTextures(1, reinterpret_cast<GLuint*>(ib.data()));
 }
 
+// newb12: Textures.loadHttpTexture() - loads HTTP texture (Textures.java:177-194)
 int_t Textures::loadHttpTexture(const jstring &url, const jstring *backup)
 {
-	// TODO
-	return 0;
+	auto it = httpTextures.find(url);
+	if (it != httpTextures.end())
+	{
+		HttpTexture *texture = it->second.get();
+		// Check if download completed (image has dimensions) but not yet uploaded to OpenGL
+		if (texture->loadedImage.getWidth() > 0 && texture->loadedImage.getHeight() > 0 && !texture->isLoaded.load())
+		{
+			// Upload the processed image to OpenGL
+			if (texture->id < 0)
+			{
+				texture->id = getTexture(texture->loadedImage);
+			}
+			else
+			{
+				loadTexture(texture->loadedImage, texture->id);
+			}
+			texture->isLoaded.store(true);
+		}
+		
+		// Return texture ID if it's ready, otherwise fall back to backup
+		if (texture->id >= 0)
+		{
+			return texture->id;
+		}
+		// If texture is still downloading (id < 0 and image not ready), fall back to backup
+	}
+	else
+	{
+		// Texture not in map yet - add it with MobSkinTextureProcessor for player skins
+		// Check if it's a skin URL (contains "/skin/")
+		if (url.find(u"/skin/") != jstring::npos)
+		{
+			static MobSkinTextureProcessor processor;
+			addHttpTexture(url, &processor);
+			// Try again after adding (but it won't be ready immediately, so will fall back to backup)
+			it = httpTextures.find(url);
+			if (it != httpTextures.end())
+			{
+				HttpTexture *texture = it->second.get();
+				// Check if download completed (image has dimensions) but not yet uploaded to OpenGL
+				if (texture->loadedImage.getWidth() > 0 && texture->loadedImage.getHeight() > 0 && !texture->isLoaded.load())
+				{
+					// Upload the processed image to OpenGL
+					if (texture->id < 0)
+					{
+						texture->id = getTexture(texture->loadedImage);
+					}
+					else
+					{
+						loadTexture(texture->loadedImage, texture->id);
+					}
+					texture->isLoaded.store(true);
+				}
+				
+				// Return texture ID if it's ready
+				if (texture->id >= 0)
+				{
+					return texture->id;
+				}
+			}
+		}
+	}
+	
+	// Fall back to backup texture if URL texture isn't ready yet or failed
+	if (backup != nullptr)
+	{
+		return loadTexture(*backup);
+	}
+	return -1;
 }
 
 int_t Textures::loadHttpTexture(const jstring &url)
 {
-	// TODO
-	return 0;
+	return loadHttpTexture(url, nullptr);
 }
 
+// newb12: Textures.addHttpTexture() - adds HTTP texture (Textures.java:196-205)
+HttpTexture *Textures::addHttpTexture(const jstring &url, HttpTextureProcessor *processor)
+{
+	auto it = httpTextures.find(url);
+	if (it != httpTextures.end())
+	{
+		it->second->count++;
+		return it->second.get();
+	}
+	else
+	{
+		auto texture = Util::make_unique<HttpTexture>(url, processor);
+		HttpTexture *ptr = texture.get();
+		httpTextures.emplace(url, std::move(texture));
+		return ptr;
+	}
+}
+
+// newb12: Textures.removeHttpTexture() - removes HTTP texture (Textures.java:207-219)
 void Textures::removeHttpTexture(const jstring &url)
 {
-
+	auto it = httpTextures.find(url);
+	if (it != httpTextures.end())
+	{
+		HttpTexture *texture = it->second.get();
+		texture->count--;
+		if (texture->count == 0)
+		{
+			if (texture->id >= 0)
+			{
+				releaseTexture(texture->id);
+			}
+			httpTextures.erase(it);
+		}
+	}
 }
 
 void Textures::tick()
 {
-	
+	// Alpha: Minecraft.run() calls renderEngine.func_1067_a() every frame
+	func_1067_a();
+}
+
+void Textures::registerTextureFX(std::unique_ptr<TextureFX> textureFX)
+{
+	// Alpha: RenderEngine.registerTextureFX(TextureFX var1)
+	// Alpha: this.field_1604_f.add(var1); var1.func_783_a();
+	textureFX->func_783_a();  // Initialize animation
+	textureFXList.push_back(std::move(textureFX));
+}
+
+void Textures::func_1067_a()
+{
+	// Alpha: RenderEngine.func_1067_a() - complete 1:1 port
+	int_t var1, var2;
+	TextureFX *var2_ptr;
+	int_t var3, var4, var5, var6, var7, var8, var9, var10, var11, var12;
+
+	for (var1 = 0; var1 < static_cast<int_t>(textureFXList.size()); ++var1)
+	{
+		var2_ptr = textureFXList[var1].get();
+		var2_ptr->field_1131_c = options.anaglyph3d;  // Alpha: var2.field_1131_c = this.options.anaglyph
+		var2_ptr->func_783_a();  // Alpha: var2.func_783_a() - update animation
+		
+		// Alpha: this.imageData.clear(); this.imageData.put(var2.field_1127_a);
+		pixels.clear();
+		pixels.insert(pixels.end(), var2_ptr->field_1127_a.begin(), var2_ptr->field_1127_a.end());
+		
+		var2_ptr->func_782_a(*this);  // Alpha: var2.func_782_a(this) - bind texture
+
+		// Alpha: Upload texture sub-image for each tile (field_1129_e x field_1129_e tiles)
+		// Alpha: For water, field_1129_e = 1, so this loops once
+		// Alpha: field_1127_a contains 16x16 RGBA = 1024 bytes for a single tile
+		for (var3 = 0; var3 < var2_ptr->field_1129_e; ++var3)
+		{
+			for (var4 = 0; var4 < var2_ptr->field_1129_e; ++var4)
+			{
+				// Alpha: GL11.glTexSubImage2D(GL11.GL_TEXTURE_2D, 0, var2.field_1126_b % 16 * 16 + var3 * 16, var2.field_1126_b / 16 * 16 + var4 * 16, 16, 16, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, (ByteBuffer)this.imageData);
+				int_t texX = (var2_ptr->field_1126_b % 16) * 16 + var3 * 16;
+				int_t texY = (var2_ptr->field_1126_b / 16) * 16 + var4 * 16;
+				
+				// Alpha: imageData contains var2.field_1127_a (1024 bytes for 16x16 RGBA)
+				// For field_1129_e = 1, we upload the entire buffer as one tile
+				// For field_1129_e > 1, we'd need to calculate offsets, but water uses field_1129_e = 1
+				glTexSubImage2D(GL_TEXTURE_2D, 0, texX, texY, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+				
+				// Alpha: Mipmap generation (if useMipmaps is true, but we have MIPMAP = false)
+				// Skipping mipmap code since MIPMAP = false
+			}
+		}
+	}
+
+	// Alpha: Second loop for alternate textures (field_1130_d > 0)
+	for (var1 = 0; var1 < static_cast<int_t>(textureFXList.size()); ++var1)
+	{
+		var2_ptr = textureFXList[var1].get();
+		if (var2_ptr->field_1130_d > 0)
+		{
+			pixels.clear();
+			pixels.insert(pixels.end(), var2_ptr->field_1127_a.begin(), var2_ptr->field_1127_a.end());
+			glBindTexture(GL_TEXTURE_2D, var2_ptr->field_1130_d);
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+			// Skipping mipmap code since MIPMAP = false
+		}
+	}
 }
 
 int_t Textures::smoothBlend(int_t c0, int_t c1)
