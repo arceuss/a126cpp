@@ -316,7 +316,7 @@ void GuiNewChat::render(int_t updateCounter)
 			//         var8 = var4 * var16 + var4;
 			//         int var19 = this.field_73768_d * var8 / var5;
 			//         int var12 = var8 * var8 / var17;
-			byte lineHeight = 9;
+			int_t lineHeight = 9;
 			glTranslatef(-3.0f, 0.0f, 0.0f);
 			int_t totalHeight = totalLines * lineHeight + totalLines;
 			int_t visibleHeight = visibleCount * lineHeight + visibleCount;
