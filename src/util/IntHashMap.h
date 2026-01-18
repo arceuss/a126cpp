@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include <limits>
+#include <climits>
 
 // newb12: IntHashMap - hash map using int as keys
 // Reference: newb12/util/IntHashMap.java
