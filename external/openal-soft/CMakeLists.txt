@@ -743,11 +743,11 @@ SET(PACKAGE_VERSION "${LIB_VERSION}")
 
 # End configuration
 CONFIGURE_FILE(
-    "${OpenAL_SOURCE_DIR}/config.h.in"
-    "${OpenAL_BINARY_DIR}/config.h")
+    "${CMAKE_CURRENT_SOURCE_DIR}/config.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/config.h")
 CONFIGURE_FILE(
-    "${OpenAL_SOURCE_DIR}/openal.pc.in"
-    "${OpenAL_BINARY_DIR}/openal.pc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/openal.pc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/openal.pc"
     @ONLY)
 
 # Build a library
