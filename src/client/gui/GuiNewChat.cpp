@@ -225,7 +225,7 @@ static std::vector<jstring> splitStringToWidth(Font &font, const jstring &text, 
 void GuiNewChat::render(int_t updateCounter)
 {
 	// Alpha 1.2.6: Java lines 20-91
-	byte maxVisible = 10;
+	int_t maxVisible = 10;
 	bool chatOpen = false;
 	int_t visibleCount = 0;
 	int_t totalLines = chatLines.size();
