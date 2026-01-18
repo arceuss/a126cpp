@@ -8,6 +8,28 @@ c++ port of minecraft alpha 1.2.6. was a test to see if cursor could port alphap
 
 you need cmake 3.15+ and a c++ compiler. on windows you can use visual studio or just gcc if you have it. all the dependencies are in the `external/` folder so you dont need to install anything else.
 
+### Linux/Ubuntu dependencies
+
+on linux/ubuntu, you need to install some system packages:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake git pkg-config \
+    libgl1-mesa-dev libegl1-mesa-dev \
+    libasound2-dev libpulse-dev \
+    libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+    libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev \
+    libdbus-1-dev libudev-dev
+```
+
+or run the install script:
+```bash
+chmod +x install-ubuntu-deps.sh
+./install-ubuntu-deps.sh
+```
+
+### building
+
 to build:
 1. do git clone --recurse-submodules https://github.com/arceuss/a126cpp.git
 2. make a build directory: `mkdir build && cd build`

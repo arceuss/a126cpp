@@ -65,7 +65,7 @@ private:
 		void updateConnections();
 		void removeSoftConnections();
 		bool hasRail(int_t x, int_t y, int_t z);
-		Rail *getRail(TilePos &pos);
+		Rail *getRail(const TilePos &pos);
 		bool connectsTo(Rail &other);
 		bool hasConnection(int_t x, int_t z);
 		bool canConnectTo(Rail &other);

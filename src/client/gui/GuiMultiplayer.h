@@ -6,7 +6,9 @@
 #include "java/String.h"
 
 class Screen;
-class GuiTextField;
+
+// Include GuiTextField.h - needed for std::unique_ptr<GuiTextField> member variable
+#include "client/gui/GuiTextField.h"
 
 class GuiMultiplayer : public Screen
 {
