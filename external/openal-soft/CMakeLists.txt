@@ -776,7 +776,7 @@ INSTALL(FILES include/AL/al.h
               include/AL/efx-presets.h
         DESTINATION include/AL
 )
-INSTALL(FILES "${OpenAL_BINARY_DIR}/openal.pc"
+INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/openal.pc"
         DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
 
 
