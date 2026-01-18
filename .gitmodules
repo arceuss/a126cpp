@@ -13,7 +13,3 @@
 [submodule "external/miniaudio"]
 	path = external/miniaudio
 	url = https://github.com/mackron/miniaudio
-
-[submodule "external/openal-soft"]
-	path = external/openal-soft
-	url = https://github.com/kcat/openal-soft.git
