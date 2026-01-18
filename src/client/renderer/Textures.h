@@ -16,8 +16,10 @@
 
 class TexturePackRepository;
 class Options;
-class TextureFX;
 class HttpTextureProcessor;
+
+// Include TextureFX.h - needed for std::unique_ptr<TextureFX> member variable
+#include "client/renderer/TextureFX.h"
 
 // Include HttpTexture.h - needed for std::unique_ptr<HttpTexture> member variable
 #include "client/renderer/HttpTexture.h"

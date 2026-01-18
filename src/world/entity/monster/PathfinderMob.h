@@ -4,8 +4,8 @@
 #include "world/entity/Entity.h"
 #include <memory>
 
-// Forward declaration for Path class
-namespace pathfinder { class Path; }
+// Include Path.h - needed for std::unique_ptr<pathfinder::Path> member variable
+#include "world/level/pathfinder/Path.h"
 
 // newb12: PathfinderMob - base class for mobs with pathfinding
 // Reference: newb12/net/minecraft/world/entity/PathfinderMob.java

@@ -12,6 +12,9 @@
 #include <cstdlib>
 #include <climits>
 
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -109,15 +112,19 @@ public:
 		if (::stat(u8path.c_str(), &buffer) != 0)
 			return false;
 		
-    /* We check that st_mtime is a macro here in order to give us confidence
-     * that struct stat has a struct timespec st_mtim member. We need this
-     * check because there are some platforms that claim to be POSIX 2008
-     * compliant but which do not have st_mtim... */
-	#if (PLATFORM_POSIX_VERSION >= 200809L) && defined(st_mtime)
-        return buffer.st_mtim.tv_sec * 1000LL + buffer.st_mtim.tv_nsec / 1000000LL;
-	#else
-		return buffer.st_mtime * 1000LL + buffer.st_mtimespec.tv_nsec / 1000000LL;
-	#endif
+		// Linux uses st_mtim (POSIX 2008)
+		// macOS/BSD uses st_mtimespec
+		#ifdef __APPLE__
+			// macOS uses st_mtimespec
+			return buffer.st_mtime * 1000LL + buffer.st_mtimespec.tv_nsec / 1000000LL;
+		#elif defined(__FreeBSD__) || defined(__OpenBSD__)
+			// BSD uses st_mtimespec
+			return buffer.st_mtime * 1000LL + buffer.st_mtimespec.tv_nsec / 1000000LL;
+		#else
+			// Linux and other POSIX systems use st_mtim
+			// Note: st_mtim has been available since Linux 2.5.48 and POSIX 2008
+			return buffer.st_mtim.tv_sec * 1000LL + buffer.st_mtim.tv_nsec / 1000000LL;
+		#endif
 	}
 
 	long_t length() const override
@@ -201,16 +208,21 @@ File *File::open(const File &parent, const jstring &child)
 File *File::openResourceDirectory()
 {
 	// Get the path to the executable
-	char (*path) = (char*)malloc(PATH_MAX);
-	uint32_t length = PATH_MAX;
+	char *path = (char*)malloc(PATH_MAX);
+	ssize_t length;
 	#ifdef __APPLE__
-	if (_NSGetExecutablePath(path, &length) != 0)
+	uint32_t path_length = PATH_MAX;
+	if (_NSGetExecutablePath(path, &path_length) != 0)
 	{
 	  	// Buffer size is too small.
 		length = -1;
 	}
+	else
+	{
+		length = path_length;
+	}
 	#else
-	length = ::readlink("/proc/self/exe", path, sizeof(path) - 1);
+	length = ::readlink("/proc/self/exe", path, PATH_MAX - 1);
 	#endif
 	if (length == -1)
 		return new File_Impl(u"");

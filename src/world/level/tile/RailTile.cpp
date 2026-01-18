@@ -274,7 +274,7 @@ bool RailTile::Rail::hasRail(int_t x, int_t y, int_t z)
 }
 
 // Beta: RailTile.Rail.getRail() (RailTile.java:194-202)
-RailTile::Rail *RailTile::Rail::getRail(TilePos &pos)
+RailTile::Rail *RailTile::Rail::getRail(const TilePos &pos)
 {
 	int_t railId = Tile::rail.id;
 	// Beta: if (this.level.getTile(var1.x, var1.y, var1.z) == RailTile.this.id) (RailTile.java:195)
