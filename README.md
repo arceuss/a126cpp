@@ -2,6 +2,8 @@
 
 c++ port of minecraft alpha 1.2.6. was a test to see if cursor could port alphaplace client to c++17
 
+<img width="856" height="512" alt="image" src="https://github.com/user-attachments/assets/8b0263b7-a6db-4b3f-92a5-4172eb8ee720" />
+
 ## building
 
 you need cmake 3.15+ and a c++ compiler. on windows you can use visual studio or just gcc if you have it. all the dependencies are in the `external/` folder so you dont need to install anything else.
