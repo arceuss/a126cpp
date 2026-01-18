@@ -1049,20 +1049,20 @@ add_subdirectory("external/openal-soft" EXCLUDE_FROM_ALL)
 # Link against the built OpenAL library
 # OpenAL-Soft's CMakeLists.txt creates a target named ${LIBNAME}
 # which is "OpenAL32" on Windows and "openal" on other platforms
-if(WIN32)
+	if(WIN32)
 	if(TARGET OpenAL32)
 		target_link_libraries(Alpha126Cpp PRIVATE OpenAL32)
 		
 		# Copy DLL to output directory for runtime (Windows only)
-		add_custom_command(TARGET Alpha126Cpp POST_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			add_custom_command(TARGET Alpha126Cpp POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different
 			"$<TARGET_FILE:OpenAL32>"
-			"$<TARGET_FILE_DIR:Alpha126Cpp>/OpenAL32.dll"
-			COMMENT "Copying OpenAL32.dll to output directory"
-		)
+				"$<TARGET_FILE_DIR:Alpha126Cpp>/OpenAL32.dll"
+				COMMENT "Copying OpenAL32.dll to output directory"
+			)
 	else()
 		message(WARNING "OpenAL32 target not found. Please check OpenAL-Soft CMakeLists.txt")
-	endif()
+		endif()
 else()
 	if(TARGET openal)
 		target_link_libraries(Alpha126Cpp PRIVATE openal)

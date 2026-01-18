@@ -43,34 +43,34 @@ void HttpTexture::downloadThread(const jstring &url, HttpTextureProcessor *proce
 				if (workDir != nullptr)
 				{
 					std::unique_ptr<File> cacheDir(File::open(*workDir, u"skins"));
-					if (cacheDir != nullptr)
+				if (cacheDir != nullptr)
+				{
+					// Create cache directory if it doesn't exist
+					if (!cacheDir->exists())
 					{
-						// Create cache directory if it doesn't exist
-						if (!cacheDir->exists())
+						cacheDir->mkdirs();
+					}
+					
+					// Get cache file
+					std::unique_ptr<File> cacheFile(File::open(*cacheDir, String::fromUTF8(filename)));
+					if (cacheFile != nullptr && cacheFile->exists() && cacheFile->isFile())
+					{
+						// Try to load from cache
+						try
 						{
-							cacheDir->mkdirs();
-						}
-						
-						// Get cache file
-						std::unique_ptr<File> cacheFile(File::open(*cacheDir, String::fromUTF8(filename)));
-						if (cacheFile != nullptr && cacheFile->exists() && cacheFile->isFile())
-						{
-							// Try to load from cache
-							try
+							std::unique_ptr<std::istream> is(cacheFile->toStreamIn());
+							if (is != nullptr)
 							{
-								std::unique_ptr<std::istream> is(cacheFile->toStreamIn());
-								if (is != nullptr)
+								image = BufferedImage::ImageIO_read(*is);
+								if (image.getWidth() > 0 && image.getHeight() > 0)
 								{
-									image = BufferedImage::ImageIO_read(*is);
-									if (image.getWidth() > 0 && image.getHeight() > 0)
-									{
-										fromCache = true;
-									}
+									fromCache = true;
 								}
 							}
-							catch (...)
-							{
-								// Failed to load from cache, will download instead
+						}
+						catch (...)
+						{
+							// Failed to load from cache, will download instead
 							}
 						}
 					}
@@ -115,16 +115,16 @@ void HttpTexture::downloadThread(const jstring &url, HttpTextureProcessor *proce
 			}
 			else
 			{
-				auto res = client.Get(path.c_str());
+			auto res = client.Get(path.c_str());
 				if (res)
 				{
 					if (res->status < 400 && res->status >= 200)
-					{
-						// Load image from memory
-						image = BufferedImage::ImageIO_readFromMemory(
-							reinterpret_cast<const unsigned char*>(res->body.data()),
-							static_cast<int_t>(res->body.size())
-						);
+			{
+				// Load image from memory
+				image = BufferedImage::ImageIO_readFromMemory(
+					reinterpret_cast<const unsigned char*>(res->body.data()),
+					static_cast<int_t>(res->body.size())
+				);
 					}
 					else
 					{
@@ -133,29 +133,8 @@ void HttpTexture::downloadThread(const jstring &url, HttpTextureProcessor *proce
 				}
 				else
 				{
-					// Get error code from result
-					auto err = res.error();
-					std::cerr << "HTTP request failed for skin: " << urlStr << " (error: " << static_cast<int>(err) << ")" << std::endl;
-					
-					// Common error messages
-					switch (err)
-					{
-					case httplib::Error::Connection:
-						std::cerr << "  -> Connection failed (could not connect to server)" << std::endl;
-						break;
-					case httplib::Error::ConnectionTimeout:
-						std::cerr << "  -> Connection timeout" << std::endl;
-						break;
-					case httplib::Error::Read:
-						std::cerr << "  -> Read error" << std::endl;
-						break;
-					case httplib::Error::Timeout:
-						std::cerr << "  -> Request timeout" << std::endl;
-						break;
-					default:
-						std::cerr << "  -> Unknown error" << std::endl;
-						break;
-					}
+					// Request failed - res is null
+					std::cerr << "HTTP request failed for skin: " << urlStr << " (request returned null)" << std::endl;
 				}
 			}
 		}
@@ -188,35 +167,35 @@ void HttpTexture::downloadThread(const jstring &url, HttpTextureProcessor *proce
 						if (workDir != nullptr)
 						{
 							std::unique_ptr<File> cacheDir(File::open(*workDir, u"skins"));
-							if (cacheDir != nullptr)
+						if (cacheDir != nullptr)
+						{
+							if (!cacheDir->exists())
 							{
-								if (!cacheDir->exists())
-								{
 									if (!cacheDir->mkdirs())
 									{
 										std::cerr << "Failed to create skins directory: " << String::toUTF8(cacheDir->toString()) << std::endl;
 									}
-								}
-								
-								std::unique_ptr<File> cacheFile(File::open(*cacheDir, String::fromUTF8(filename)));
-								if (cacheFile != nullptr)
+							}
+							
+							std::unique_ptr<File> cacheFile(File::open(*cacheDir, String::fromUTF8(filename)));
+							if (cacheFile != nullptr)
+							{
+								// Write PNG to cache file (processed image)
+								std::string cachePath = String::toUTF8(cacheFile->toString());
+								const unsigned char *pixels = loadedImage.getRawPixels();
+								if (pixels != nullptr)
 								{
-									// Write PNG to cache file (processed image)
-									std::string cachePath = String::toUTF8(cacheFile->toString());
-									const unsigned char *pixels = loadedImage.getRawPixels();
-									if (pixels != nullptr)
-									{
 										int result = stbi_write_png(cachePath.c_str(), loadedImage.getWidth(), loadedImage.getHeight(), 4, pixels, loadedImage.getWidth() * 4);
 										if (result == 0)
 										{
 											std::cerr << "Failed to save skin to cache: " << cachePath << std::endl;
-										}
-									}
+								}
+							}
 									else
 									{
 										std::cerr << "Failed to get pixel data for skin: " << filename << std::endl;
-									}
-								}
+						}
+					}
 								else
 								{
 									std::cerr << "Failed to open cache file for skin: " << filename << std::endl;

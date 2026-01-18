@@ -55,7 +55,7 @@ public:
 	void openFurnace(std::shared_ptr<class FurnaceTileEntity> furnaceEntity);
 	
 	// Beta: LocalPlayer.openTextEdit() - opens sign edit screen (LocalPlayer.java:114-116)
-	void openTextEdit(std::shared_ptr<class SignTileEntity> signEntity);
+	void openTextEdit(std::shared_ptr<class SignTileEntity> signEntity) override;
 	
 	void prepareForTick();
 

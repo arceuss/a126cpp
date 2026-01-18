@@ -121,7 +121,7 @@ public:
 	Mob(Level &level);
 
 protected:
-	virtual void defineSynchedData();
+	virtual void defineSynchedData() override;
 	
 	// Alpha 1.2.6: EntityLiving.func_9282_a() - handles entity status from Packet38
 	// Java: public void func_9282_a(byte var1) {
