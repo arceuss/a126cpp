@@ -6,10 +6,14 @@ IF(COMMAND CMAKE_POLICY)
   CMAKE_POLICY(SET CMP0003 NEW)
 ENDIF(COMMAND CMAKE_POLICY)
 
+# Add OpenAL's custom cmake modules to the module path
 LIST(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# Include standard CMake modules
 INCLUDE(CheckFunctionExists)
 INCLUDE(CheckLibraryExists)
+
+# Include custom OpenAL module (must be after CMAKE_MODULE_PATH is set)
 INCLUDE(CheckSharedFunctionExists)
 INCLUDE(CheckIncludeFile)
 INCLUDE(CheckIncludeFiles)
