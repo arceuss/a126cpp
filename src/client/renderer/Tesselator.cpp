@@ -7,10 +7,6 @@
 
 #include "lwjgl/GLContext.h"
 
-#ifdef USE_BGFX
-#include "pc/lwjgl/BGFXCompatGlue.h"
-#endif
-
 Tesselator Tesselator::instance(MAX_FLOATS);
 
 Tesselator::Tesselator(int_t size)
@@ -47,20 +43,6 @@ void Tesselator::end()
 
 	if (vertices > 0)
 	{
-#ifdef USE_BGFX
-		// Check if we're compiling a display list - if so, capture vertex data for bgfx
-		if (bgfx_compiling_display_list())
-		{
-			// Capture vertex data for bgfx display list
-			const float* vertexData = reinterpret_cast<const float*>(buffer.get());
-			size_t vertexCount = static_cast<size_t>(vertices);
-			GLenum finalMode = (draw_mode == GL_QUADS && TRIANGLE_MODE) ? GL_TRIANGLES : draw_mode;
-			bgfx_capture_tesselator_data(vertexData, vertexCount, finalMode, hasTexture, hasColor, hasNormal);
-			clear();
-			return;
-		}
-#endif
-
 		// Bind VBO - Using core OpenGL functions (OpenGL 4.6 compatibility profile)
 		if (vboMode)
 		{

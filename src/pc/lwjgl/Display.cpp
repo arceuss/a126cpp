@@ -12,10 +12,6 @@
 #include <SDL3/SDL.h>
 #include <glad/glad.h>
 
-#ifdef USE_BGFX
-#include "lwjgl/BGFXContext.h"
-#endif
-
 namespace lwjgl
 {
 namespace Display
@@ -136,12 +132,7 @@ void processMessages()
 
 void swapBuffers()
 {
-#ifdef USE_BGFX
-	// When using bgfx, call bgfx::frame() instead of SDL_GL_SwapWindow
-	BGFXContext::frame();
-#else
 	SDL_GL_SwapWindow(GLContext::detail::getWindow());
-#endif
 }
 
 void update(bool doProcessMessages)
