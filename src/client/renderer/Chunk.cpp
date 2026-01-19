@@ -84,13 +84,18 @@ void Chunk::rebuild()
 	Region region(level, x0 - r, y0 - r, z0 - r, x1 + r, y1 + r, z1 + r);
 	TileRenderer tileRenderer(&region);
 
-	for (int_t i = 0; i < 2; i++)
+		for (int_t i = 0; i < 2; i++)
 	{
 		bool renderNextLayer = false;
 		bool rendered = false;
 
 		bool started = false;
 
+		// Ensure tesselator is in a clean state before starting this layer
+		// If somehow it's still tesselating, reset it (safety check)
+		t.reset();
+
+		// Optimized: Loop order for better cache locality (y-z-x is better for Minecraft's chunk layout)
 		for (int_t y = y0; y < y1; y++)
 		{
 			for (int_t z = z0; z < z1; z++)
@@ -98,25 +103,30 @@ void Chunk::rebuild()
 				for (int_t x = x0; x < x1; x++)
 				{
 					int_t tileId = region.getTile(x, y, z);
-					if (tileId > 0)
+					// Early skip for air (optimization: most blocks are air)
+					if (tileId <= 0)
+						continue;
+					
+					if (!started)
 					{
-						if (!started)
-						{
-							started = true;
+						started = true;
 
+							// Legacy display list (for compatibility)
 							glNewList(lists + i, GL_COMPILE);
 							
 							glPushMatrix();
 							translateToPos();
 
 							float ss = 1.0000001f;
-							glTranslatef(-zs / 2.0f, -ys / 2.0f, -zs / 2.0f);
+							glTranslatef(-this->zs / 2.0f, -this->ys / 2.0f, -this->zs / 2.0f);
 							glScalef(ss, ss, ss);
-							glTranslatef(zs / 2.0f, ys / 2.0f, zs / 2.0f);
+							glTranslatef(this->zs / 2.0f, this->ys / 2.0f, this->zs / 2.0f);
 
-							t.begin();
-							t.offset(-this->x, -this->y, -this->z);
-						}
+							// Ensure tesselator is clean before starting
+						t.reset();
+						t.begin();
+						t.offset(-this->x, -this->y, -this->z);
+					}
 
 					if (i == 0 && Tile::isEntityTile[tileId])
 					{
@@ -141,7 +151,6 @@ void Chunk::rebuild()
 					else if (renderLayer == i)
 					{
 						rendered |= tileRenderer.tesselateInWorld(*tile, x, y, z);
-					}
 					}
 				}
 			}
@@ -210,6 +219,21 @@ int_t Chunk::getAllLists(std::vector<int_t> displayLists, int_t p, int_t layer)
 
 void Chunk::cull(Culler &culler)
 {
+	// Performance optimization: Early height-based culling for underground chunks
+	// If chunk is far below player's view, skip expensive frustum test
+	// This is much cheaper than frustum test and catches most underground chunks
+	constexpr double UNDERGROUND_CULL_HEIGHT = 32.0;  // Skip chunks 32+ blocks below player view
+	
+	// Check if chunk is significantly below the viewing frustum
+	// Use bottom of chunk bounding box vs player's approximate view height
+	// This catches things underground that frustum might not optimize for
+	if (bb->y1 < culler.getY() - UNDERGROUND_CULL_HEIGHT)
+	{
+		visible = false;
+		return;
+	}
+	
+	// Full frustum culling test for chunks that might be visible
 	visible = culler.isVisible(*bb);
 }
 

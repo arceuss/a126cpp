@@ -1,6 +1,6 @@
 #include "CrashHandler.h"
 
-#include "SDL_messagebox.h"
+#include <SDL3/SDL.h>
 
 namespace CrashHandler
 {

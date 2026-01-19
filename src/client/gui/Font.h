@@ -8,6 +8,7 @@
 
 #include "java/Type.h"
 #include "java/String.h"
+#include "java/BufferedImage.h"
 
 class Options;
 class Textures;
@@ -16,6 +17,9 @@ class Font
 {
 private:
 	std::array<int_t, 256> charWidths;
+	// Performance: Store color code RGB values (like original Java's field_22009_h array)
+	// This avoids glGetFloatv queries when processing color codes
+	std::array<int_t, 32> colorCodeRGBs;  // RGB packed as 0xRRGGBB
 public:
 	int_t fontTexture = 0;
 
@@ -34,4 +38,14 @@ public:
 	jstring trimStringToWidth(const jstring &str, int_t width, bool reverse = false);
 
 	static jstring sanitize(const jstring &str);
+	
+	// Access font atlas data for texture baking
+	// Returns the font atlas image data (128x128 RGBA)
+	// This is used by SignRenderer to bake text into textures
+	const std::array<int_t, 256> &getCharWidths() const { return charWidths; }
+	const std::array<int_t, 32> &getColorCodeRGBs() const { return colorCodeRGBs; }
+	
+	// Get font atlas image (reloads if needed)
+	// Used for CPU-side text baking
+	BufferedImage getFontAtlasImage() const;
 };

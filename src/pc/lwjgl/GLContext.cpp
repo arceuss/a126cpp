@@ -6,7 +6,11 @@
 
 #include "external/SDLException.h"
 
-#include "SDL.h"
+#include <SDL3/SDL.h>
+
+#ifdef USE_BGFX
+#include "lwjgl/BGFXContext.h"
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -137,9 +141,10 @@ private:
 public:
 	GLContext()
 	{
-		// Setup SDL to use OpenGL 1.1
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+		// Setup SDL to use OpenGL 4.6 Compatibility Profile for maximum performance
+		// Compatibility profile maintains backward compatibility with display lists and immediate mode
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 6);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
 
 		// SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
@@ -148,8 +153,16 @@ public:
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
 #endif
 
-		// Create SDL window
-		window = SDL_CreateWindow("Minecraft Alpha v1.2.6", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 854, 480, SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+		// Create SDL window (SDL3 uses 4 parameters: title, width, height, flags)
+#ifdef USE_BGFX
+		// For bgfx, we don't need SDL_WINDOW_OPENGL - bgfx handles its own rendering context
+		window = SDL_CreateWindow("Minecraft Alpha v1.2.6", 854, 480, SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN);
+#else
+		window = SDL_CreateWindow("Minecraft Alpha v1.2.6", 854, 480, SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+#endif
+		// Set window position to centered (must be done after creation in SDL3)
+		if (window != nullptr)
+			SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 		if (window == nullptr)
 			throw SDLException();
 
@@ -193,7 +206,7 @@ public:
 						int height = bmp.bmHeight;
 						
 						// Create SDL surface from icon (BGRA32 format for Windows)
-						SDL_Surface *iconSurface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_BGRA32);
+						SDL_Surface *iconSurface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_BGRA32);
 						if (iconSurface != nullptr)
 						{
 							// Get bitmap bits
@@ -216,7 +229,7 @@ public:
 							
 							SelectObject(hDC, hOldBmp);
 							DeleteDC(hDC);
-							SDL_FreeSurface(iconSurface);
+							SDL_DestroySurface(iconSurface);
 						}
 					}
 					
@@ -233,12 +246,23 @@ public:
 		}
 #endif
 
+#ifdef USE_BGFX
+		// Initialize bgfx instead of OpenGL
+		int w, h;
+		SDL_GetWindowSize(window, &w, &h);
+		if (!BGFXContext::init(window, w, h))
+		{
+			throw std::runtime_error("Failed to initialize bgfx");
+		}
+		// bgfx doesn't use OpenGL context directly, so we don't create one
+		gl_context = nullptr;
+#else
 		// Create OpenGL context
 		gl_context = SDL_GL_CreateContext(window);
 		if (gl_context == nullptr)
 			throw SDLException();
 
-		if (SDL_GL_MakeCurrent(window, gl_context))
+		if (!SDL_GL_MakeCurrent(window, gl_context))
 			throw SDLException();
 
 		// Load GLAD
@@ -247,37 +271,50 @@ public:
 
 		// Disable VSync
 		SDL_GL_SetSwapInterval(0);
+#endif
 
-		// Parse capabilities
+#ifndef USE_BGFX
+		// Parse capabilities (only for OpenGL)
+		// Note: Using glGetString(GL_EXTENSIONS) which works in OpenGL 4.6 compatibility profile
+		// The modern glGetStringi method requires GLAD to be regenerated for OpenGL 4.6
+		// ARB extensions work identically to core functions in compatibility profile
 		{
 			const GLubyte *extensions = glGetString(GL_EXTENSIONS);
-			std::string cap;
-
-			const char *extension_p = reinterpret_cast<const char *>(extensions);
-			while (*extension_p != '\0')
+			if (extensions != nullptr)
 			{
-				if (*extension_p == ' ')
-				{
-					if (!cap.empty())
-					{
-						capabilties.add(cap);
-						cap.clear();
-					}
-					while (*extension_p == ' ')
-						extension_p++;
-					continue;
-				}
+				std::string cap;
 
-				cap.push_back(*extension_p++);
+				const char *extension_p = reinterpret_cast<const char *>(extensions);
+				while (*extension_p != '\0')
+				{
+					if (*extension_p == ' ')
+					{
+						if (!cap.empty())
+						{
+							capabilties.add(cap);
+							cap.clear();
+						}
+						while (*extension_p == ' ')
+							extension_p++;
+						continue;
+					}
+
+					cap.push_back(*extension_p++);
+				}
+				if (!cap.empty())
+				{
+					capabilties.add(cap);
+				}
 			}
 		}
 
 #ifdef MC_DEBUG_GL
-		// Enable debugging
+		// Enable debugging (OpenGL only)
 		glEnable(GL_DEBUG_OUTPUT);
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
 		glDebugMessageCallback(GLDebugMessageCallback, nullptr);
 #endif
+#endif // !USE_BGFX
 	}
 
 	SDL_Window *getWindow() const { return window; }
@@ -307,7 +344,7 @@ SDL_GLContext getGLContext()
 void instantiate()
 {
 	detail::getContext();
-	if (SDL_GL_MakeCurrent(detail::getContext().getWindow(), detail::getContext().getGLContext()))
+	if (!SDL_GL_MakeCurrent(detail::getContext().getWindow(), detail::getContext().getGLContext()))
 		throw SDLException();
 }
 

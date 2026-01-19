@@ -102,7 +102,9 @@ Font::Font(Options &options, const jstring &name, Textures &textures)
 
 		// Alpha 1.2.6: Color code display lists store RGB colors
 		// Java: this.field_22009_h[var7] = (var9 & 255) << 16 | (var10 & 255) << 8 | var11 & 255;
-		// The alpha is preserved from the original color parameter (this.alpha)
+		// Store RGB values for fast lookup (like original Java)
+		colorCodeRGBs[j] = (r & 0xFF) << 16 | (g & 0xFF) << 8 | (b & 0xFF);
+		
 		glNewList(listPos + 256 + j, GL_COMPILE);
 		glColor3f(r / 255.0f, g / 255.0f, b / 255.0f);  // RGB only, alpha preserved from glColor4f call
 		glEndList();
@@ -208,22 +210,19 @@ void Font::draw(const jstring &str, int_t x, int_t y, int_t color, bool darken)
 			if (codeIndex == jstring::npos || codeIndex > 15)
 				codeIndex = 15;
 			
-			// Set color using display list (color codes are in listPos + 256 + codeIndex)
-			// For shadow, add 16 to get darker version
-			// Java: if(var2) { var5 += 16; }
-			// Java: int var7 = this.field_22009_h[var5];
-			//       GL11.glColor4f((float)(var7 >> 16) / 255.0F, (float)(var7 >> 8 & 255) / 255.0F, (float)(var7 & 255) / 255.0F, this.alpha);
-			// Java explicitly sets alpha when processing color codes, preserving this.alpha from the original color.
-			// Our display list calls glColor3f (RGB only), which preserves the current alpha.
-			// Since we already set glColor4f with alpha at the start, glColor3f will preserve it.
-			// However, to ensure alpha is correct (especially for chat fading), we restore it explicitly.
-			int_t colorListIndex = listPos + 256 + codeIndex + (darken ? 16 : 0);
-			glCallList(colorListIndex);  // This calls glColor3f, setting RGB but preserving alpha
-			// Restore alpha explicitly to ensure it's correct for fading
-			// Get current RGB from OpenGL state, then restore alpha
-			GLfloat currentColor[4];
-			glGetFloatv(GL_CURRENT_COLOR, currentColor);
-			glColor4f(currentColor[0], currentColor[1], currentColor[2], alpha);
+		// Performance optimization: Set color directly like original Java code
+		// Java: int var7 = this.field_22009_h[var5 + (var2 ? 16 : 0)];
+		//       GL11.glColor4f((float)(var7 >> 16) / 255.0F, (float)(var7 >> 8 & 255) / 255.0F, (float)(var7 & 255) / 255.0F, this.alpha);
+		// Original code calls glColor4f directly - NO glGetFloatv query! This is MUCH faster.
+		// Look up stored RGB values (includes anaglyph3d transformation if enabled)
+		int_t colorIndex = codeIndex + (darken ? 16 : 0);
+		int_t rgb = colorCodeRGBs[colorIndex];
+		int_t r = (rgb >> 16) & 0xFF;
+		int_t g = (rgb >> 8) & 0xFF;
+		int_t b = rgb & 0xFF;
+		
+		// Set color directly with alpha (like original Java) - NO glGetFloatv!
+		glColor4f(r / 255.0f, g / 255.0f, b / 255.0f, alpha);
 			
 			i++;  // Skip the color code character
 		}
@@ -335,7 +334,7 @@ jstring Font::trimStringToWidth(const jstring &str, int_t width, bool reverse)
 	}
 }
 
-jstring Font::sanitize(const jstring &str)
+	jstring Font::sanitize(const jstring &str)
 {
 	jstring result;
 
@@ -349,4 +348,17 @@ jstring Font::sanitize(const jstring &str)
 	}
 
 	return result;
+}
+
+// Get font atlas image for CPU-side text baking
+// Reloads the font texture image so we can sample glyphs
+BufferedImage Font::getFontAtlasImage() const
+{
+	// Reload the font atlas image from resource
+	// This is used for CPU-side text baking in SignRenderer
+	// Note: Font constructor loads from the name passed to it, typically "/font/default.png"
+	// We reload it here for CPU-side access
+	using namespace Resource;
+	std::unique_ptr<std::istream> is(getResource(u"/font/default.png"));
+	return BufferedImage::ImageIO_read(*is);
 }

@@ -21,6 +21,7 @@
 #include "java/String.h"
 
 #include "util/Memory.h"
+#include "client/renderer/ChunkRebuildThread.h"
 
 class Minecraft;
 
@@ -80,6 +81,9 @@ private:
 
 	std::vector<std::shared_ptr<Chunk>> renderChunksList;
 	std::array<OffsettedRenderList, 4> renderLists = {};
+	
+	// Thread pool for parallel chunk rebuilding
+	std::unique_ptr<ChunkRebuildThreadPool> rebuildThreadPool;
 
 public:
 	int_t frame = 0;

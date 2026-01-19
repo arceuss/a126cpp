@@ -2,7 +2,7 @@
 
 #include <stdexcept>
 
-#include "SDL_error.h"
+#include <SDL3/SDL.h>
 
 class SDLException : public std::runtime_error
 {
