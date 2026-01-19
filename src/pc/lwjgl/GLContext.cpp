@@ -8,10 +8,6 @@
 
 #include <SDL3/SDL.h>
 
-#ifdef USE_BGFX
-#include "lwjgl/BGFXContext.h"
-#endif
-
 #ifdef _WIN32
 #include <windows.h>
 #include <commdlg.h>
@@ -154,12 +150,7 @@ public:
 #endif
 
 		// Create SDL window (SDL3 uses 4 parameters: title, width, height, flags)
-#ifdef USE_BGFX
-		// For bgfx, we don't need SDL_WINDOW_OPENGL - bgfx handles its own rendering context
-		window = SDL_CreateWindow("Minecraft Alpha v1.2.6", 854, 480, SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN);
-#else
 		window = SDL_CreateWindow("Minecraft Alpha v1.2.6", 854, 480, SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-#endif
 		// Set window position to centered (must be done after creation in SDL3)
 		if (window != nullptr)
 			SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
@@ -246,17 +237,6 @@ public:
 		}
 #endif
 
-#ifdef USE_BGFX
-		// Initialize bgfx instead of OpenGL
-		int w, h;
-		SDL_GetWindowSize(window, &w, &h);
-		if (!BGFXContext::init(window, w, h))
-		{
-			throw std::runtime_error("Failed to initialize bgfx");
-		}
-		// bgfx doesn't use OpenGL context directly, so we don't create one
-		gl_context = nullptr;
-#else
 		// Create OpenGL context
 		gl_context = SDL_GL_CreateContext(window);
 		if (gl_context == nullptr)
@@ -271,9 +251,7 @@ public:
 
 		// Disable VSync
 		SDL_GL_SetSwapInterval(0);
-#endif
 
-#ifndef USE_BGFX
 		// Parse capabilities (only for OpenGL)
 		// Note: Using glGetString(GL_EXTENSIONS) which works in OpenGL 4.6 compatibility profile
 		// The modern glGetStringi method requires GLAD to be regenerated for OpenGL 4.6
@@ -314,7 +292,6 @@ public:
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
 		glDebugMessageCallback(GLDebugMessageCallback, nullptr);
 #endif
-#endif // !USE_BGFX
 	}
 
 	SDL_Window *getWindow() const { return window; }

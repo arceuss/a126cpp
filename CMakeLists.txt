@@ -7,9 +7,6 @@ project(Alpha126Cpp
 )
 
 # Optional components
-# Set USE_BGFX=ON to enable bgfx with Vulkan backend instead of OpenGL
-option(USE_BGFX "Enable bgfx rendering library (Vulkan/OpenGL/D3D)" OFF)
-
 # Mesa3D with Zink support (optional)
 # Set MESA_ENABLE_ZINK=ON to enable Zink (OpenGL over Vulkan)
 option(MESA_ENABLE_ZINK "Enable Mesa3D Zink driver (OpenGL over Vulkan)" OFF)
@@ -957,12 +954,6 @@ add_executable(Alpha126Cpp
 	"src/pc/lwjgl/Display.h"
 	"src/pc/lwjgl/GLContext.cpp"
 	"src/pc/lwjgl/GLContext.h"
-	"src/pc/lwjgl/BGFXContext.cpp"
-	"src/pc/lwjgl/BGFXContext.h"
-	"src/pc/lwjgl/BGFXCompat.cpp"
-	"src/pc/lwjgl/BGFXCompat.h"
-	"src/pc/lwjgl/BGFXCompatGlue.h"
-	"src/pc/OpenGL_BGFX.h"
 	"src/pc/lwjgl/Keyboard.cpp"
 	"src/pc/lwjgl/Keyboard.h"
 	"src/pc/lwjgl/Mouse.cpp"
@@ -1007,23 +998,13 @@ elseif(UNIX)
 	target_compile_definitions(Alpha126Cpp PRIVATE MC_LINUX)
 endif()
 
-# Use C++20 when bgfx is enabled (required by bx library), otherwise C++17
-# C++17 is required for std::variant in DataWatcher
-if(USE_BGFX)
-	set_target_properties(Alpha126Cpp PROPERTIES
-		CXX_STANDARD 20
-		CXX_STANDARD_REQUIRED YES
-		CXX_EXTENSIONS NO
-	)
-	message(STATUS "Using C++20 (required by bgfx/bx)")
-else()
+# Use C++17 (required for std::variant in DataWatcher)
 set_target_properties(Alpha126Cpp PROPERTIES
 	CXX_STANDARD 17
 	CXX_STANDARD_REQUIRED YES
 	CXX_EXTENSIONS NO
 )
-	message(STATUS "Using C++17")
-endif()
+message(STATUS "Using C++17")
 
 # Performance optimizations for Release builds
 if(MSVC)
@@ -1091,138 +1072,6 @@ target_include_directories(Alpha126Cpp PRIVATE "external/gzip-hpp/include")
 target_include_directories(Alpha126Cpp PRIVATE "external/cpp-httplib")
 
 target_include_directories(Alpha126Cpp PRIVATE "external/miniaudio")
-
-# BGFX rendering library
-if(USE_BGFX)
-	# Add bx (base library) - required by bgfx
-	target_sources(Alpha126Cpp PRIVATE
-		"external/bx/src/amalgamated.cpp"
-	)
-	
-	# Add bgfx source files using amalgamated build
-	target_sources(Alpha126Cpp PRIVATE
-		"external/bgfx/src/amalgamated.cpp"
-	)
-	
-	# Add bimg source files (required by bgfx for image processing)
-	target_sources(Alpha126Cpp PRIVATE
-		"external/bimg/src/image.cpp"
-		"external/bimg/src/image_decode.cpp"
-		"external/bimg/src/image_encode.cpp"
-		"external/bimg/src/image_cubemap_filter.cpp"
-		"external/bimg/src/image_gnf.cpp"
-	)
-	
-	# Add bimg 3rdparty source files
-	# astc-encoder (for ASTC texture compression)
-	file(GLOB_RECURSE ASTC_SOURCES "external/bimg/3rdparty/astc-encoder/source/*.cpp")
-	target_sources(Alpha126Cpp PRIVATE ${ASTC_SOURCES})
-	
-	# miniz (for zlib compression in tinyexr)
-	target_sources(Alpha126Cpp PRIVATE "external/bimg/3rdparty/tinyexr/deps/miniz/miniz.c")
-	
-	# iqa (for image quality assessment)
-	file(GLOB IQA_SOURCES "external/bimg/3rdparty/iqa/source/*.c")
-	target_sources(Alpha126Cpp PRIVATE ${IQA_SOURCES})
-	
-	# edtaa3 (for distance transform)
-	target_sources(Alpha126Cpp PRIVATE "external/bimg/3rdparty/edtaa3/edtaa3func.cpp")
-	
-	# libsquish (for DXT compression)
-	file(GLOB SQUISH_SOURCES "external/bimg/3rdparty/libsquish/*.cpp")
-	target_sources(Alpha126Cpp PRIVATE ${SQUISH_SOURCES})
-	
-	# etc1 (for ETC1 compression)
-	target_sources(Alpha126Cpp PRIVATE "external/bimg/3rdparty/etc1/etc1.cpp")
-	
-	# etc2 (for ETC2 compression)
-	target_sources(Alpha126Cpp PRIVATE 
-		"external/bimg/3rdparty/etc2/ProcessRGB.cpp"
-		"external/bimg/3rdparty/etc2/Tables.cpp"
-	)
-	
-	# pvrtc (for PVRTC compression)
-	target_sources(Alpha126Cpp PRIVATE
-		"external/bimg/3rdparty/pvrtc/PvrTcEncoder.cpp"
-		"external/bimg/3rdparty/pvrtc/PvrTcPacket.cpp"
-		"external/bimg/3rdparty/pvrtc/PvrTcDecoder.cpp"
-		"external/bimg/3rdparty/pvrtc/BitScale.cpp"
-		"external/bimg/3rdparty/pvrtc/MortonTable.cpp"
-	)
-	
-	# nvtt (for BC6H/BC7 compression)
-	file(GLOB_RECURSE NVTT_SOURCES "external/bimg/3rdparty/nvtt/*.cpp")
-	target_sources(Alpha126Cpp PRIVATE ${NVTT_SOURCES})
-	
-	# Add bx include directories (must be before bgfx)
-	target_include_directories(Alpha126Cpp PRIVATE "external/bx/include")
-	
-	# Add bx 3rdparty directory (contains ini library)
-	target_include_directories(Alpha126Cpp PRIVATE "external/bx/3rdparty")
-	
-	# On Windows, add compat directory for dirent.h (MSVC compat dirent has d_type support)
-	# MinGW's dirent doesn't have d_type, so use MSVC compat version
-	if(WIN32)
-		target_include_directories(Alpha126Cpp PRIVATE "external/bx/include/compat/msvc")
-	endif()
-	
-	# Add bgfx include directories
-	target_include_directories(Alpha126Cpp PRIVATE "external/bgfx/include")
-	
-	# Add bgfx 3rdparty directory (contains renderdoc header)
-	target_include_directories(Alpha126Cpp PRIVATE "external/bgfx/3rdparty")
-	
-	# Add bgfx khronos directory (contains vulkan-local headers)
-	target_include_directories(Alpha126Cpp PRIVATE "external/bgfx/3rdparty/khronos")
-	
-	# Add bimg include directories (required by bgfx)
-	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/include")
-	
-	# Add bimg 3rdparty directory (contains lodepng, tinyexr, etc.)
-	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty")
-	
-	# Add bimg astc-encoder include directory (for astcenc.h)
-	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/astc-encoder/include")
-	
-	# Add tinyexr deps/miniz directory (contains miniz.h)
-	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/tinyexr/deps/miniz")
-	
-	# Add iqa include directory (contains iqa.h)
-	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/iqa/include")
-	
-	# Add nvtt include directories (nvtt has internal structure with nvcore/nvmath subdirs)
-	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/nvtt")
-	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/nvtt/nvcore")
-	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/nvtt/nvmath")
-	
-	# BGFX platform-specific settings
-	# Note: bx auto-detects platform via platform.h, don't manually define BX_PLATFORM_*
-	if(WIN32)
-		# Windows-specific: link against necessary libraries
-		target_link_libraries(Alpha126Cpp PRIVATE gdi32 psapi ws2_32)
-		# bx uses SEH (__try/__except) on MSVC in thread.cpp, which requires /EHa
-		# to compile when C++ objects are in scope (allows mixing SEH with C++ exceptions)
-		if(MSVC)
-			target_compile_options(Alpha126Cpp PRIVATE
-				/Zc:__cplusplus /Zc:preprocessor /EHa
-			)
-		endif()
-	endif()
-	
-	# BGFX configuration
-	# BX_CONFIG_DEBUG must be defined (0 = release, 1 = debug)
-	target_compile_definitions(Alpha126Cpp PRIVATE 
-		$<$<CONFIG:Debug>:BX_CONFIG_DEBUG=1>
-		$<$<NOT:$<CONFIG:Debug>>:BX_CONFIG_DEBUG=0>
-		$<$<CONFIG:Debug>:BGFX_CONFIG_DEBUG=1>
-		$<$<NOT:$<CONFIG:Debug>>:BGFX_CONFIG_DEBUG=0>
-	)
-	
-	# Prefer Vulkan if available, fallback to OpenGL
-	target_compile_definitions(Alpha126Cpp PRIVATE BGFX_CONFIG_RENDERER_VULKAN=1)
-	
-	message(STATUS "BGFX support enabled - will use Vulkan renderer if available")
-endif()
 
 # OpenAL-Soft library - build from source
 # On Windows, the target is "OpenAL32", on other platforms it's "openal"
