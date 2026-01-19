@@ -12,6 +12,7 @@
 #include "client/renderer/DistanceChunkSorter.h"
 #include "client/renderer/entity/EntityRenderDispatcher.h"
 #include "client/renderer/tileentity/TileEntityRenderDispatcher.h"
+#include "client/renderer/tileentity/SignRenderer.h"
 #include "client/renderer/MobSkinTextureProcessor.h"
 
 #include "world/level/tile/Tile.h"
@@ -33,7 +34,9 @@
 LevelRenderer::LevelRenderer(Minecraft &mc, Textures &textures) : mc(mc), textures(textures)
 {
 	int_t maxChunksWidth = 64;
-	chunkLists = MemoryTracker::genLists(maxChunksWidth * maxChunksWidth * maxChunksWidth * 3);
+	// No longer need chunk display lists - chunks use VBOs now
+	// Keep chunkLists = 0 for backwards compatibility (not used anymore)
+	chunkLists = 0;
 	occlusionCheck = false;
 	
 	// Initialize thread pool (prepared for future CPU-side geometry building optimization)
@@ -211,7 +214,7 @@ void LevelRenderer::allChanged()
 		{
 			for (int_t z = 0; z < zChunks; z++)
 			{
-				auto chunk = Util::make_shared<Chunk>(*level, renderableTileEntities, x * 16, y * 16, z * 16, 16, chunkLists + id);
+				auto chunk = Util::make_shared<Chunk>(*level, renderableTileEntities, x * 16, y * 16, z * 16, 16);
 				chunks[(z * yChunks + y) * xChunks + x] = chunk;
 
 				if (occlusionCheck)
@@ -224,8 +227,6 @@ void LevelRenderer::allChanged()
 
 				sortedChunks[(z * yChunks + y) * xChunks + x] = chunk;
 				dirtyChunks.push_back(chunk);
-
-				id += 3;
 			}
 		}
 	}
@@ -253,6 +254,9 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 
 	// Beta: Prepare tile entity render dispatcher (LevelRenderer.java:288)
 	TileEntityRenderDispatcher::instance.prepare(level.get(), &textures, mc.font.get(), mc.player.get(), a);
+	
+	// Performance: Begin batched sign rendering frame
+	SignRenderer::beginFrame();
 	
 	EntityRenderDispatcher::instance.prepare(level, textures, *mc.font, mc.player, mc.options, a);
 	totalEntities = 0;
@@ -326,6 +330,9 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 	// Beta: Reset color after tile entity rendering (prevents dark color from affecting translucent blocks)
 	// TileEntityRenderDispatcher sets glColor3f(br, br, br) which can leave color darker than white
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	
+	// Performance: Flush batched sign rendering (renders all batched signs)
+	SignRenderer::endFrame();
 }
 
 jstring LevelRenderer::gatherStats1()
@@ -337,6 +344,7 @@ jstring LevelRenderer::gatherStats2()
 {
 	return u"E: " + String::toString(renderedEntities) + u"/" + String::toString(totalEntities) + u". B: " + String::toString(culledEntities) + u", I: " + String::toString(totalEntities - culledEntities - renderedEntities);
 }
+
 
 void LevelRenderer::resortChunks(int_t xc, int_t yc, int_t zc)
 {
@@ -513,8 +521,10 @@ int_t LevelRenderer::renderChunks(int_t from, int_t to, int_t layer, double alph
 
 		if (!sortedChunks[i]->empty[layer] && sortedChunks[i]->visible && sortedChunks[i]->occlusion_visible)
 		{
-			int_t list = sortedChunks[i]->getList(layer);
-			if (list >= 0)
+			GLuint vboId = 0;
+			int_t vertexCount = 0;
+			bool hasTex = false, hasCol = false, hasNorm = false;
+			if (sortedChunks[i]->getVBO(layer, vboId, vertexCount, hasTex, hasCol, hasNorm))
 			{
 				renderChunksList.push_back(sortedChunks[i]);
 				count++;
@@ -561,11 +571,13 @@ int_t LevelRenderer::renderChunks(int_t from, int_t to, int_t layer, double alph
 			renderLists[list].init(chunk->xRender, chunk->yRender, chunk->zRender, xOff, yOff, zOff);
 		}
 
-		// Use legacy display list
-		int_t listId = chunk->getList(layer);
-		if (listId >= 0)
+		// Use VBO instead of display list
+		GLuint vboId = 0;
+		int_t vertexCount = 0;
+		bool hasTex = false, hasCol = false, hasNorm = false;
+		if (chunk->getVBO(layer, vboId, vertexCount, hasTex, hasCol, hasNorm))
 		{
-			renderLists[list].add(listId);
+			renderLists[list].addChunk(chunk, layer);
 		}
 	}
 

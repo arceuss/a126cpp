@@ -28,6 +28,7 @@ public:
 	mutable GLuint textTexId = 0;  // GL texture ID for baked text (0 if not created)
 	mutable bool textDirty = true;  // True when text needs to be rebaked
 	mutable int_t cachedSelectedLine = -1;  // Track selectedLine for cache invalidation
+	mutable bool bakingQueued = false;  // True if baking is already queued (prevents duplicate queue entries)
 	
 	// Texture dimensions (fixed constants for all signs)
 	static constexpr int_t TEXT_TEX_WIDTH = 128;

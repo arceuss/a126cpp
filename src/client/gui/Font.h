@@ -9,6 +9,7 @@
 #include "java/Type.h"
 #include "java/String.h"
 #include "java/BufferedImage.h"
+#include "OpenGL.h"
 
 class Options;
 class Textures;
@@ -26,8 +27,20 @@ public:
 	Font(Options &options, const jstring &name, Textures &textures);
 
 private:
-	int_t listPos = 0;
-	std::vector<int_t> ib = MemoryTracker::createIntBuffer(1024);
+	// VBO for glyph rendering (replaces display lists)
+	GLuint glyphVBOs[256] = {0};  // One VBO per glyph (8 bytes per quad = 4 vertices * 2 floats per vertex)
+	GLuint glyphVAO = 0;  // Single VAO for all glyphs (shared layout)
+	bool glyphsInitialized = false;
+	
+	// Buffer for batching character rendering
+	std::vector<float> quadBuffer;  // Reusable buffer for building quads (x, y, u, v)
+	GLuint batchVBO = 0;  // Reusable VBO for batched quads
+	int_t currentColorR = 255, currentColorG = 255, currentColorB = 255;
+	float currentAlpha = 1.0f;
+	
+	// Cached font atlas image for CPU-side text baking (loaded once, reused many times)
+	mutable BufferedImage cachedFontAtlas;
+	mutable bool fontAtlasCached = false;
 
 public:
 	void drawShadow(const jstring &str, int_t x, int_t y, int_t color);
@@ -47,5 +60,13 @@ public:
 	
 	// Get font atlas image (reloads if needed)
 	// Used for CPU-side text baking
-	BufferedImage getFontAtlasImage() const;
+	// Returns a const reference to avoid copying (BufferedImage is non-copyable)
+	const BufferedImage &getFontAtlasImage() const;
+	
+private:
+	// Initialize glyph VBOs and VAO (called once in constructor)
+	void initializeGlyphs();
+	
+	// Render a batched quad buffer (helper for draw functions)
+	void renderBatchedQuads();
 };

@@ -27,6 +27,30 @@ Tesselator::Tesselator(int_t size)
 	{
 		vboIds = Util::make_unique<GLuint[]>(vboCounts);
 		glGenBuffers(vboCounts, vboIds.get());
+		
+		// Generate VAO for tesselator rendering (stores fixed-function vertex pointers)
+		// In compatibility profile, VAOs can store glVertexPointer/glTexCoordPointer state
+		glGenVertexArrays(1, &tesselatorVAO);
+		glBindVertexArray(tesselatorVAO);
+		
+		// Set up fixed-function vertex attribute pointers (VAO stores these)
+		// Position: 3 floats, stride 32, offset 0
+		glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(0));
+		// Texture: 2 floats, stride 32, offset 12
+		glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(12));
+		// Color: 4 bytes, stride 32, offset 20
+		glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<GLvoid *>(20));
+		// Normal: 3 bytes, stride 32, offset 24
+		glNormalPointer(GL_BYTE, 32, reinterpret_cast<GLvoid *>(24));
+		
+		// Enable client states (VAO stores these)
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+		glEnableClientState(GL_COLOR_ARRAY);
+		glEnableClientState(GL_NORMAL_ARRAY);
+		
+		// Unbind VAO (vertex pointer configuration remains stored)
+		glBindVertexArray(0);
 	}
 }
 
@@ -44,51 +68,116 @@ void Tesselator::end()
 	if (vertices > 0)
 	{
 		// Bind VBO - Using core OpenGL functions (OpenGL 4.6 compatibility profile)
-		if (vboMode)
+		if (vboMode && tesselatorVAO != 0)
 		{
 			vboId = (vboId + 1) % vboCounts;
 			glBindBuffer(GL_ARRAY_BUFFER, vboIds[vboId]);
 			glBufferData(GL_ARRAY_BUFFER, buffer_p - buffer.get(), buffer.get(), GL_STREAM_DRAW);
+			
+			// Bind VAO and update fixed-function vertex attribute pointers
+			// In compatibility profile, use glVertexPointer/glTexCoordPointer etc. (not glVertexAttribPointer)
+			// Ensure VBO is bound before binding VAO (VAO stores the VBO binding)
+			glBindVertexArray(tesselatorVAO);
+			// Re-bind VBO after VAO to ensure it's active for the draw call
+			glBindBuffer(GL_ARRAY_BUFFER, vboIds[vboId]);
+			
+			// Update fixed-function pipeline attributes (VAO stores these for efficiency)
+			char *vbo_base = reinterpret_cast<char *>(0);
+			
+			// Position: always enabled
+			glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 0));
+			glEnableClientState(GL_VERTEX_ARRAY);
+			
+			if (hasTexture)
+			{
+				glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 12));
+				glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+			}
+			else
+			{
+				glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+			}
+			
+			if (hasColor)
+			{
+				glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 20));
+				glEnableClientState(GL_COLOR_ARRAY);
+			}
+			else
+			{
+				glDisableClientState(GL_COLOR_ARRAY);
+			}
+			
+			if (hasNormal)
+			{
+				glNormalPointer(GL_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 24));
+				glEnableClientState(GL_NORMAL_ARRAY);
+			}
+			else
+			{
+				glDisableClientState(GL_NORMAL_ARRAY);
+			}
+
+			// Draw arrays
+			if (draw_mode == GL_QUADS && TRIANGLE_MODE)
+				glDrawArrays(GL_TRIANGLES, 0, vertices);
+			else
+				glDrawArrays(draw_mode, 0, vertices);
+
+			// Reset client states (VAO preserves the pointers, but we disable states)
+			glDisableClientState(GL_VERTEX_ARRAY);
+			if (hasTexture)
+				glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+			if (hasColor)
+				glDisableClientState(GL_COLOR_ARRAY);
+			if (hasNormal)
+				glDisableClientState(GL_NORMAL_ARRAY);
+
+			// Unbind VAO
+			glBindVertexArray(0);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
 		}
-
-		// Setup attributes
-		char *vbo_base = vboMode ? reinterpret_cast<char *>(0) : reinterpret_cast<char *>(buffer.get());
-
-		if (hasTexture)
-		{
-			glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 12));
-			glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-		}
-
-		if (hasColor)
-		{
-			glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 20));
-			glEnableClientState(GL_COLOR_ARRAY);
-		}
-
-		if (hasNormal)
-		{
-			glNormalPointer(GL_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 24));
-			glEnableClientState(GL_NORMAL_ARRAY);
-		}
-
-		glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 0));
-		glEnableClientState(GL_VERTEX_ARRAY);
-
-		// Draw arrays
-		if (draw_mode == GL_QUADS && TRIANGLE_MODE)
-			glDrawArrays(GL_TRIANGLES, 0, vertices);
 		else
-			glDrawArrays(draw_mode, 0, vertices);
+		{
+			// Fallback: Use deprecated client-side vertex attributes (for compatibility)
+			char *vbo_base = vboMode ? reinterpret_cast<char *>(0) : reinterpret_cast<char *>(buffer.get());
 
-		// Reset attributes
-		glDisableClientState(GL_VERTEX_ARRAY);
-		if (hasTexture)
-			glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-		if (hasColor)
-			glDisableClientState(GL_COLOR_ARRAY);
-		if (hasNormal)
-			glDisableClientState(GL_NORMAL_ARRAY);
+			if (hasTexture)
+			{
+				glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 12));
+				glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+			}
+
+			if (hasColor)
+			{
+				glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 20));
+				glEnableClientState(GL_COLOR_ARRAY);
+			}
+
+			if (hasNormal)
+			{
+				glNormalPointer(GL_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 24));
+				glEnableClientState(GL_NORMAL_ARRAY);
+			}
+
+			glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 0));
+			glEnableClientState(GL_VERTEX_ARRAY);
+
+			// Draw arrays
+			if (draw_mode == GL_QUADS && TRIANGLE_MODE)
+				glDrawArrays(GL_TRIANGLES, 0, vertices);
+			else
+				glDrawArrays(draw_mode, 0, vertices);
+
+			// Reset attributes
+			glDisableClientState(GL_VERTEX_ARRAY);
+			if (hasTexture)
+				glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+			if (hasColor)
+				glDisableClientState(GL_COLOR_ARRAY);
+			if (hasNormal)
+				glDisableClientState(GL_NORMAL_ARRAY);
+		}
 	}
 
 	clear();
@@ -108,8 +197,8 @@ void Tesselator::reset()
 	if (tesselating)
 	{
 		clear();
-		tesselating = false;
 	}
+	tesselating = false;
 }
 
 void Tesselator::begin()
@@ -297,6 +386,8 @@ GLuint Tesselator::buildVBO(int_t &vertexCount, bool &hasTex, bool &hasCol, bool
 		hasTex = false;
 		hasCol = false;
 		hasNorm = false;
+		// Reset tesselating state even if no vertices (prevents "Already tesselating!" errors)
+		tesselating = false;
 		return 0;
 	}
 	
@@ -348,43 +439,108 @@ void Tesselator::renderVBO(GLuint vboId, int_t vertexCount, bool hasTex, bool ha
 	if (vboId == 0 || vertexCount == 0)
 		return;
 	
-	glBindBuffer(GL_ARRAY_BUFFER, vboId);
-	
-	// Setup attributes
-	char *vbo_base = reinterpret_cast<char *>(0);
-	
-	if (hasTex)
+	// Use VAO for rendering if available (OpenGL 4.6 compatibility profile)
+	if (instance.tesselatorVAO != 0)
 	{
-		glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 12));
-		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+		// Bind VBO first, then VAO (VAO will restore its stored VBO binding)
+		glBindBuffer(GL_ARRAY_BUFFER, vboId);
+		glBindVertexArray(instance.tesselatorVAO);
+		// Re-bind VBO after VAO to ensure it's active for the draw call
+		glBindBuffer(GL_ARRAY_BUFFER, vboId);
+		
+		// Update fixed-function vertex attribute pointers for this VBO
+		char *vbo_base = reinterpret_cast<char *>(0);
+		
+		// Position: always enabled
+		glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 0));
+		glEnableClientState(GL_VERTEX_ARRAY);
+		
+		if (hasTex)
+		{
+			glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 12));
+			glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+		}
+		else
+		{
+			glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		}
+		
+		if (hasCol)
+		{
+			glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 20));
+			glEnableClientState(GL_COLOR_ARRAY);
+		}
+		else
+		{
+			glDisableClientState(GL_COLOR_ARRAY);
+		}
+		
+		if (hasNorm)
+		{
+			glNormalPointer(GL_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 24));
+			glEnableClientState(GL_NORMAL_ARRAY);
+		}
+		else
+		{
+			glDisableClientState(GL_NORMAL_ARRAY);
+		}
+		
+		// Draw arrays
+		glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+		
+		// Reset client states
+		glDisableClientState(GL_VERTEX_ARRAY);
+		if (hasTex)
+			glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		if (hasCol)
+			glDisableClientState(GL_COLOR_ARRAY);
+		if (hasNorm)
+			glDisableClientState(GL_NORMAL_ARRAY);
+		
+		// Unbind VAO and VBO
+		glBindVertexArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
 	}
-	
-	if (hasCol)
+	else
 	{
-		glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 20));
-		glEnableClientState(GL_COLOR_ARRAY);
+		// Fallback: Use deprecated client-side vertex attributes (for compatibility)
+		glBindBuffer(GL_ARRAY_BUFFER, vboId);
+		
+		char *vbo_base = reinterpret_cast<char *>(0);
+		
+		if (hasTex)
+		{
+			glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 12));
+			glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+		}
+		
+		if (hasCol)
+		{
+			glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 20));
+			glEnableClientState(GL_COLOR_ARRAY);
+		}
+		
+		if (hasNorm)
+		{
+			glNormalPointer(GL_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 24));
+			glEnableClientState(GL_NORMAL_ARRAY);
+		}
+		
+		glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 0));
+		glEnableClientState(GL_VERTEX_ARRAY);
+		
+		// Draw arrays
+		glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+		
+		// Reset attributes
+		glDisableClientState(GL_VERTEX_ARRAY);
+		if (hasTex)
+			glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		if (hasCol)
+			glDisableClientState(GL_COLOR_ARRAY);
+		if (hasNorm)
+			glDisableClientState(GL_NORMAL_ARRAY);
+		
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
 	}
-	
-	if (hasNorm)
-	{
-		glNormalPointer(GL_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 24));
-		glEnableClientState(GL_NORMAL_ARRAY);
-	}
-	
-	glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 0));
-	glEnableClientState(GL_VERTEX_ARRAY);
-	
-	// Draw arrays
-	glDrawArrays(GL_TRIANGLES, 0, vertexCount);
-	
-	// Reset attributes
-	glDisableClientState(GL_VERTEX_ARRAY);
-	if (hasTex)
-		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-	if (hasCol)
-		glDisableClientState(GL_COLOR_ARRAY);
-	if (hasNorm)
-		glDisableClientState(GL_NORMAL_ARRAY);
-	
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }

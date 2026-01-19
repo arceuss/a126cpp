@@ -9,6 +9,7 @@
 #include "world/level/tile/entity/TileEntity.h"
 
 #include "java/Type.h"
+#include "OpenGL.h"
 
 class Chunk
 {
@@ -16,7 +17,29 @@ public:
 	Level &level;
 
 private:
-	int_t lists = -1;
+	// VBO storage per layer (opaque=0, translucent=1)
+	struct ChunkLayerVBO {
+		GLuint vboId = 0;
+		int_t vertexCount = 0;
+		bool hasTexture = false;
+		bool hasColor = false;
+		bool hasNormal = false;
+		bool valid = false;
+		
+		void clear() {
+			if (vboId != 0) {
+				glDeleteBuffers(1, &vboId);
+				vboId = 0;
+			}
+			vertexCount = 0;
+			hasTexture = false;
+			hasColor = false;
+			hasNormal = false;
+			valid = false;
+		}
+	};
+	
+	ChunkLayerVBO layerVBOs[2];  // One VBO per render layer
 
 	static Tesselator &t;
 
@@ -57,7 +80,7 @@ private:
 	std::vector<std::shared_ptr<TileEntity>> &globalRenderableTileEntities;
 
 public:
-	Chunk(Level &level, std::vector<std::shared_ptr<TileEntity>> &globalRenderableTileEntities, int_t x, int_t y, int_t z, int_t size, int_t lists);
+	Chunk(Level &level, std::vector<std::shared_ptr<TileEntity>> &globalRenderableTileEntities, int_t x, int_t y, int_t z, int_t size);
 
 	void setPos(int_t x, int_t y, int_t z);
 
@@ -72,13 +95,15 @@ public:
 
 	void reset();
 	void remove();
+	
+	~Chunk();  // Cleanup VBOs
 
-	int_t getList(int_t layer);
-	int_t getAllLists(std::vector<int_t> displayLists, int_t p, int_t layer);
+	// Get VBO info for a layer (returns true if valid, false if empty/invalid)
+	bool getVBO(int_t layer, GLuint &vboId, int_t &vertexCount, bool &hasTex, bool &hasCol, bool &hasNorm) const;
 
 	void cull(Culler &culler);
 
-	void renderBB();
+	void renderBB();  // Still uses VBO for bounding box
 
 	bool isEmpty();
 

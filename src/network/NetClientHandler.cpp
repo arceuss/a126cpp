@@ -85,6 +85,7 @@
 #include "world/entity/Painting.h"
 #include "world/level/Explosion.h"
 #include "world/level/tile/entity/SignTileEntity.h"
+#include "client/renderer/tileentity/SignRenderer.h"
 #include "world/phys/ChunkCoordinates.h"
 #include "world/item/ItemStack.h"
 #include "java/System.h"
@@ -2118,6 +2119,8 @@ void NetClientHandler::handleSignUpdate(Packet130UpdateSign* var1)
 	//         }
 	//     }
 	// }
+	// Performance optimization: Only update and invalidate if text actually changed
+	// This prevents redundant texture rebakes when servers resend identical sign text
 	if (worldClient != nullptr && worldClient->hasChunkAt(var1->xPosition, var1->yPosition, var1->zPosition))
 	{
 		// Alpha: Get tile entity at position
@@ -2127,17 +2130,29 @@ void NetClientHandler::handleSignUpdate(Packet130UpdateSign* var1)
 			SignTileEntity* signEntity = dynamic_cast<SignTileEntity*>(tileEntity.get());
 			if (signEntity != nullptr)
 			{
-				// Alpha: Copy sign text from packet to tile entity
+				// Performance: Check if any line actually changed before invalidating
+				bool textChanged = false;
 				for (int_t i = 0; i < 4; ++i)
 				{
-					signEntity->messages[i] = var1->signLines[i];
+					if (signEntity->messages[i] != var1->signLines[i])
+					{
+						textChanged = true;
+						break;
+					}
 				}
-				// Performance: Invalidate caches after updating messages
-				signEntity->invalidateWidthCache();
-				signEntity->invalidateTextDisplayList();  // This invalidates baked texture
-				// Alpha: Call onInventoryChanged() to notify renderer
-				// Note: In our implementation, we might not have onInventoryChanged(), 
-				// but the sign will be re-rendered on next frame anyway
+				
+				// Only update and invalidate if text actually changed
+				if (textChanged)
+				{
+					// Alpha: Copy sign text from packet to tile entity
+					for (int_t i = 0; i < 4; ++i)
+					{
+						signEntity->messages[i] = var1->signLines[i];
+					}
+					// Performance: Invalidate caches after updating messages
+					signEntity->invalidateWidthCache();
+					signEntity->invalidateTextDisplayList();  // This invalidates baked texture
+				}
 			}
 		}
 	}

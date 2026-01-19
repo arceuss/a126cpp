@@ -44,7 +44,7 @@ private:
 	std::vector<std::shared_ptr<Chunk>> chunks;
 
 	int_t xChunks = 0, yChunks = 0, zChunks = 0;
-	int_t chunkLists = 0;
+	int_t chunkLists = 0;  // No longer used - chunks use VBOs now (kept for backwards compatibility)
 
 	Minecraft &mc;
 

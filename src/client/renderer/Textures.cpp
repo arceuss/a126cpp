@@ -109,8 +109,10 @@ void Textures::loadTexture(BufferedImage &img, int_t id)
 
 	if (clamp)
 	{
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+		// Use GL_CLAMP_TO_EDGE for OpenGL 4.6 (more performant than deprecated GL_CLAMP)
+		// GL_CLAMP_TO_EDGE clamps to edge texels, which is what we want for texture atlases
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	}
 	else
 	{
