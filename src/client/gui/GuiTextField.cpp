@@ -3,8 +3,10 @@
 #include "client/renderer/Tesselator.h"
 #include "pc/OpenGL.h"
 #include "lwjgl/Keyboard.h"
+#include "lwjgl/GLContext.h"
 #include "SharedConstants.h"
 
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
 
@@ -419,6 +421,20 @@ void GuiTextField::setFocused(bool focused)
 {
 	if (focused && !isFocused)
 		cursorCounter = 0;
+	
+	// SDL3: Enable/disable text input when focus changes
+	if (focused != isFocused)
+	{
+		SDL_Window *window = lwjgl::GLContext::detail::getWindow();
+		if (window)
+		{
+			if (focused)
+				SDL_StartTextInput(window);
+			else
+				SDL_StopTextInput(window);
+		}
+	}
+	
 	isFocused = focused;
 }
 

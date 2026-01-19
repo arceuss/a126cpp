@@ -5,7 +5,7 @@
 #include "java/Type.h"
 #include "java/String.h"
 
-#include "SDL_events.h"
+#include <SDL3/SDL.h>
 
 namespace lwjgl
 {

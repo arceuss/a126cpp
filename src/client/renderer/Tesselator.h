@@ -12,7 +12,7 @@ class Tesselator
 {
 private:
 	static constexpr bool TRIANGLE_MODE = true;
-	static constexpr bool USE_VBO = false;
+	static constexpr bool USE_VBO = true;  // Enabled for OpenGL 4.6 performance
 	static constexpr int_t MAX_MEMORY_USE = 0x1000000;
 	static constexpr int_t MAX_FLOATS = 0x200000;
 
@@ -68,6 +68,7 @@ public:
 	void clear();
 	void begin();
 	void begin(GLenum mode);
+	void reset();  // Reset tesselating state (for cleanup)
 	void tex(double u, double v);
 	void color(float r, float g, float b);
 	void color(float r, float g, float b, float a);
@@ -81,4 +82,11 @@ public:
 	void normal(float x, float y, float z);
 	void offset(double x, double y, double z);
 	void addOffset(float x, float y, float z);
+	
+	// VBO building for chunks (returns VBO ID, sets vertex count via reference)
+	// Returns 0 on failure, VBO ID on success
+	GLuint buildVBO(int_t &vertexCount, bool &hasTex, bool &hasCol, bool &hasNorm);
+	
+	// Render from a VBO (for chunk rendering)
+	static void renderVBO(GLuint vboId, int_t vertexCount, bool hasTex, bool hasCol, bool hasNorm);
 };

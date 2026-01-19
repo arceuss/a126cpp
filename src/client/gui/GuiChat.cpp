@@ -3,6 +3,9 @@
 #include "client/gui/GuiNewChat.h"
 #include "client/player/EntityClientPlayerMP.h"
 #include "pc/lwjgl/Keyboard.h"
+#include "lwjgl/GLContext.h"
+
+#include <SDL3/SDL.h>
 
 // Alpha 1.2.6: GuiChat constructor
 // Java: public GuiChat() { }
@@ -53,6 +56,11 @@ void GuiChat::removed()
 {
 	lwjgl::Keyboard::enableRepeatEvents(false);
 	minecraft.gui.getChatGUI().resetScroll();
+	
+	// SDL3: Stop text input when chat closes
+	SDL_Window *window = lwjgl::GLContext::detail::getWindow();
+	if (window)
+		SDL_StopTextInput(window);
 }
 
 // Alpha 1.2.6: updateScreen() - updates cursor counter

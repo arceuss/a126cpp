@@ -3,7 +3,7 @@
 #include <string>
 #include <set>
 
-#include "SDL.h"
+#include <SDL3/SDL.h>
 #include "glad/glad.h"
 
 namespace lwjgl

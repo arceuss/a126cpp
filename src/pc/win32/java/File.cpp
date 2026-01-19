@@ -2,7 +2,11 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+#ifdef __MINGW32__
+#include <shlobj.h>
+#else
 #include <ShlObj_core.h>
+#endif
 
 #include <queue>
 #include <string>
@@ -220,7 +224,8 @@ public:
 
 	std::istream *toStreamIn() const override
 	{
-		auto is = Util::make_unique<std::ifstream>(wpath, std::ios::binary);
+		// Convert wstring to char* for MinGW/GCC compatibility (C++20 requires path-like type)
+		auto is = Util::make_unique<std::ifstream>(wpath.c_str(), std::ios::binary);
 		if (!is->is_open() || !is->good())
 			return nullptr;
 		return is.release();
@@ -228,7 +233,8 @@ public:
 
 	std::ostream *toStreamOut() const override
 	{
-		auto os = Util::make_unique<std::ofstream>(wpath, std::ios::binary);
+		// Convert wstring to char* for MinGW/GCC compatibility (C++20 requires path-like type)
+		auto os = Util::make_unique<std::ofstream>(wpath.c_str(), std::ios::binary);
 		if (!os->is_open() || !os->good())
 			return nullptr;
 		return os.release();

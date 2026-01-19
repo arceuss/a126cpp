@@ -3,6 +3,8 @@
 
 #include "client/Minecraft.h"
 
+#include <cmath>
+
 SurvivalMode::SurvivalMode(Minecraft &minecraft) : GameMode(minecraft)
 {
 

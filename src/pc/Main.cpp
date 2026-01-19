@@ -1,5 +1,5 @@
 #define SDL_MAIN_HANDLED
-#include "SDL.h"
+#include <SDL3/SDL.h>
 
 #include <cstring>
 #include <string>
@@ -17,7 +17,7 @@
 
 int main(int argc, char *argv[])
 {
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO) < 0)
+	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
 		throw SDLException();
 	lwjgl::GLContext::instantiate();
 

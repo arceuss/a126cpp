@@ -14,4 +14,5 @@ public:
 	bool cubeFullyInFrustum(double x0, double y0, double z0, double x1, double y1, double z1) override;
 	bool cubeInFrustum(double x0, double y0, double z0, double x1, double y1, double z1) override;
 	bool isVisible(AABB &aabb) override;
+	double getY() const override { return yOff; }
 };

@@ -6,6 +6,14 @@ project(Alpha126Cpp
 	LANGUAGES C CXX
 )
 
+# Optional components
+# Set USE_BGFX=ON to enable bgfx with Vulkan backend instead of OpenGL
+option(USE_BGFX "Enable bgfx rendering library (Vulkan/OpenGL/D3D)" OFF)
+
+# Mesa3D with Zink support (optional)
+# Set MESA_ENABLE_ZINK=ON to enable Zink (OpenGL over Vulkan)
+option(MESA_ENABLE_ZINK "Enable Mesa3D Zink driver (OpenGL over Vulkan)" OFF)
+
 # Export compile commands for clangd and other tools
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -176,6 +184,8 @@ set(Alpha126Cpp_SOURCES
 	"src/client/renderer/Tesselator.h"
 	"src/client/renderer/Textures.cpp"
 	"src/client/renderer/Textures.h"
+	"src/client/renderer/ChunkRebuildThread.cpp"
+	"src/client/renderer/ChunkRebuildThread.h"
 	"src/client/renderer/HttpTexture.cpp"
 	"src/client/renderer/HttpTexture.h"
 	"src/client/renderer/HttpTextureProcessor.h"
@@ -947,6 +957,12 @@ add_executable(Alpha126Cpp
 	"src/pc/lwjgl/Display.h"
 	"src/pc/lwjgl/GLContext.cpp"
 	"src/pc/lwjgl/GLContext.h"
+	"src/pc/lwjgl/BGFXContext.cpp"
+	"src/pc/lwjgl/BGFXContext.h"
+	"src/pc/lwjgl/BGFXCompat.cpp"
+	"src/pc/lwjgl/BGFXCompat.h"
+	"src/pc/lwjgl/BGFXCompatGlue.h"
+	"src/pc/OpenGL_BGFX.h"
 	"src/pc/lwjgl/Keyboard.cpp"
 	"src/pc/lwjgl/Keyboard.h"
 	"src/pc/lwjgl/Mouse.cpp"
@@ -991,12 +1007,23 @@ elseif(UNIX)
 	target_compile_definitions(Alpha126Cpp PRIVATE MC_LINUX)
 endif()
 
-# Use C++17 (required for std::variant in DataWatcher)
+# Use C++20 when bgfx is enabled (required by bx library), otherwise C++17
+# C++17 is required for std::variant in DataWatcher
+if(USE_BGFX)
+	set_target_properties(Alpha126Cpp PROPERTIES
+		CXX_STANDARD 20
+		CXX_STANDARD_REQUIRED YES
+		CXX_EXTENSIONS NO
+	)
+	message(STATUS "Using C++20 (required by bgfx/bx)")
+else()
 set_target_properties(Alpha126Cpp PROPERTIES
 	CXX_STANDARD 17
 	CXX_STANDARD_REQUIRED YES
 	CXX_EXTENSIONS NO
 )
+	message(STATUS "Using C++17")
+endif()
 
 # Performance optimizations for Release builds
 if(MSVC)
@@ -1006,10 +1033,8 @@ if(MSVC)
 		$<$<CONFIG:RelWithDebInfo>:/O2 /Ob2 /Oi>
 	)
 	# Link-time optimizations
-	set_target_properties(Alpha126Cpp PROPERTIES
-		$<$<CONFIG:Release>:LINK_FLAGS> "/LTCG"
-		$<$<CONFIG:RelWithDebInfo>:LINK_FLAGS> "/LTCG"
-	)
+	set_property(TARGET Alpha126Cpp PROPERTY LINK_FLAGS_RELEASE "/LTCG")
+	set_property(TARGET Alpha126Cpp PROPERTY LINK_FLAGS_RELWITHDEBINFO "/LTCG")
 else()
 	# GCC/Clang: -O3 = maximum optimization, -march=native = use CPU-specific optimizations
 	target_compile_options(Alpha126Cpp PRIVATE
@@ -1017,18 +1042,43 @@ else()
 		$<$<CONFIG:RelWithDebInfo>:-O3 -march=native>
 	)
 	# Link-time optimizations
-	set_target_properties(Alpha126Cpp PROPERTIES
-		$<$<CONFIG:Release>:LINK_FLAGS> "-flto"
-		$<$<CONFIG:RelWithDebInfo>:LINK_FLAGS> "-flto"
-	)
+	set_property(TARGET Alpha126Cpp PROPERTY LINK_FLAGS_RELEASE "-flto")
+	set_property(TARGET Alpha126Cpp PROPERTY LINK_FLAGS_RELWITHDEBINFO "-flto")
 endif()
 
 # Third party
 add_subdirectory("external/glad" EXCLUDE_FROM_ALL)
 target_link_libraries(Alpha126Cpp PRIVATE glad)
 
-add_subdirectory("external/SDL2" EXCLUDE_FROM_ALL)
-target_link_libraries(Alpha126Cpp PRIVATE SDL2-static)
+# Ensure SDL_STATIC is enabled before adding SDL3 subdirectory
+# This must be set before add_subdirectory so SDL3's CMakeLists can see it
+# Force SDL_STATIC to ON to build static library
+set(SDL_STATIC ON CACHE BOOL "Build a static version of the library" FORCE)
+
+add_subdirectory("external/SDL3" EXCLUDE_FROM_ALL)
+
+# Check SDL_STATIC value after subdirectory (in case it was changed)
+get_property(SDL_STATIC_VALUE CACHE SDL_STATIC PROPERTY VALUE)
+message(STATUS "SDL_STATIC cache value: ${SDL_STATIC_VALUE}")
+message(STATUS "SDL_STATIC variable value: ${SDL_STATIC}")
+
+# Link to SDL3-static - CMake will error if target doesn't exist
+# The target is created in SDL3's CMakeLists at line 476 if SDL_STATIC is ON
+if(TARGET SDL3-static)
+	add_dependencies(Alpha126Cpp SDL3-static)
+target_link_libraries(Alpha126Cpp PRIVATE SDL3-static)
+	message(STATUS "Successfully linked to SDL3-static")
+else()
+	# Provide helpful error message
+	message(STATUS "Available SDL3 targets:")
+	get_property(SDL3_TARGETS DIRECTORY "external/SDL3" PROPERTY BUILDSYSTEM_TARGETS)
+	foreach(target ${SDL3_TARGETS})
+		message(STATUS "  - ${target}")
+	endforeach()
+	message(FATAL_ERROR "SDL3-static target not found. SDL_STATIC=${SDL_STATIC}. Try: cmake -DSDL_STATIC=ON ..")
+endif()
+# Explicitly add SDL3 include directory (SDL3-static should propagate this via SDL3::Headers, but adding explicitly ensures it works)
+target_include_directories(Alpha126Cpp PRIVATE "external/SDL3/include")
 
 add_subdirectory("external/zlib" EXCLUDE_FROM_ALL)
 
@@ -1042,9 +1092,142 @@ target_include_directories(Alpha126Cpp PRIVATE "external/cpp-httplib")
 
 target_include_directories(Alpha126Cpp PRIVATE "external/miniaudio")
 
+# BGFX rendering library
+if(USE_BGFX)
+	# Add bx (base library) - required by bgfx
+	target_sources(Alpha126Cpp PRIVATE
+		"external/bx/src/amalgamated.cpp"
+	)
+	
+	# Add bgfx source files using amalgamated build
+	target_sources(Alpha126Cpp PRIVATE
+		"external/bgfx/src/amalgamated.cpp"
+	)
+	
+	# Add bimg source files (required by bgfx for image processing)
+	target_sources(Alpha126Cpp PRIVATE
+		"external/bimg/src/image.cpp"
+		"external/bimg/src/image_decode.cpp"
+		"external/bimg/src/image_encode.cpp"
+		"external/bimg/src/image_cubemap_filter.cpp"
+		"external/bimg/src/image_gnf.cpp"
+	)
+	
+	# Add bimg 3rdparty source files
+	# astc-encoder (for ASTC texture compression)
+	file(GLOB_RECURSE ASTC_SOURCES "external/bimg/3rdparty/astc-encoder/source/*.cpp")
+	target_sources(Alpha126Cpp PRIVATE ${ASTC_SOURCES})
+	
+	# miniz (for zlib compression in tinyexr)
+	target_sources(Alpha126Cpp PRIVATE "external/bimg/3rdparty/tinyexr/deps/miniz/miniz.c")
+	
+	# iqa (for image quality assessment)
+	file(GLOB IQA_SOURCES "external/bimg/3rdparty/iqa/source/*.c")
+	target_sources(Alpha126Cpp PRIVATE ${IQA_SOURCES})
+	
+	# edtaa3 (for distance transform)
+	target_sources(Alpha126Cpp PRIVATE "external/bimg/3rdparty/edtaa3/edtaa3func.cpp")
+	
+	# libsquish (for DXT compression)
+	file(GLOB SQUISH_SOURCES "external/bimg/3rdparty/libsquish/*.cpp")
+	target_sources(Alpha126Cpp PRIVATE ${SQUISH_SOURCES})
+	
+	# etc1 (for ETC1 compression)
+	target_sources(Alpha126Cpp PRIVATE "external/bimg/3rdparty/etc1/etc1.cpp")
+	
+	# etc2 (for ETC2 compression)
+	target_sources(Alpha126Cpp PRIVATE 
+		"external/bimg/3rdparty/etc2/ProcessRGB.cpp"
+		"external/bimg/3rdparty/etc2/Tables.cpp"
+	)
+	
+	# pvrtc (for PVRTC compression)
+	target_sources(Alpha126Cpp PRIVATE
+		"external/bimg/3rdparty/pvrtc/PvrTcEncoder.cpp"
+		"external/bimg/3rdparty/pvrtc/PvrTcPacket.cpp"
+		"external/bimg/3rdparty/pvrtc/PvrTcDecoder.cpp"
+		"external/bimg/3rdparty/pvrtc/BitScale.cpp"
+		"external/bimg/3rdparty/pvrtc/MortonTable.cpp"
+	)
+	
+	# nvtt (for BC6H/BC7 compression)
+	file(GLOB_RECURSE NVTT_SOURCES "external/bimg/3rdparty/nvtt/*.cpp")
+	target_sources(Alpha126Cpp PRIVATE ${NVTT_SOURCES})
+	
+	# Add bx include directories (must be before bgfx)
+	target_include_directories(Alpha126Cpp PRIVATE "external/bx/include")
+	
+	# Add bx 3rdparty directory (contains ini library)
+	target_include_directories(Alpha126Cpp PRIVATE "external/bx/3rdparty")
+	
+	# On Windows, add compat directory for dirent.h (MSVC compat dirent has d_type support)
+	# MinGW's dirent doesn't have d_type, so use MSVC compat version
+	if(WIN32)
+		target_include_directories(Alpha126Cpp PRIVATE "external/bx/include/compat/msvc")
+	endif()
+	
+	# Add bgfx include directories
+	target_include_directories(Alpha126Cpp PRIVATE "external/bgfx/include")
+	
+	# Add bgfx 3rdparty directory (contains renderdoc header)
+	target_include_directories(Alpha126Cpp PRIVATE "external/bgfx/3rdparty")
+	
+	# Add bgfx khronos directory (contains vulkan-local headers)
+	target_include_directories(Alpha126Cpp PRIVATE "external/bgfx/3rdparty/khronos")
+	
+	# Add bimg include directories (required by bgfx)
+	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/include")
+	
+	# Add bimg 3rdparty directory (contains lodepng, tinyexr, etc.)
+	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty")
+	
+	# Add bimg astc-encoder include directory (for astcenc.h)
+	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/astc-encoder/include")
+	
+	# Add tinyexr deps/miniz directory (contains miniz.h)
+	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/tinyexr/deps/miniz")
+	
+	# Add iqa include directory (contains iqa.h)
+	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/iqa/include")
+	
+	# Add nvtt include directories (nvtt has internal structure with nvcore/nvmath subdirs)
+	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/nvtt")
+	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/nvtt/nvcore")
+	target_include_directories(Alpha126Cpp PRIVATE "external/bimg/3rdparty/nvtt/nvmath")
+	
+	# BGFX platform-specific settings
+	# Note: bx auto-detects platform via platform.h, don't manually define BX_PLATFORM_*
+	if(WIN32)
+		# Windows-specific: link against necessary libraries
+		target_link_libraries(Alpha126Cpp PRIVATE gdi32 psapi ws2_32)
+		# bx uses SEH (__try/__except) on MSVC in thread.cpp, which requires /EHa
+		# to compile when C++ objects are in scope (allows mixing SEH with C++ exceptions)
+		if(MSVC)
+			target_compile_options(Alpha126Cpp PRIVATE
+				/Zc:__cplusplus /Zc:preprocessor /EHa
+			)
+		endif()
+	endif()
+	
+	# BGFX configuration
+	# BX_CONFIG_DEBUG must be defined (0 = release, 1 = debug)
+	target_compile_definitions(Alpha126Cpp PRIVATE 
+		$<$<CONFIG:Debug>:BX_CONFIG_DEBUG=1>
+		$<$<NOT:$<CONFIG:Debug>>:BX_CONFIG_DEBUG=0>
+		$<$<CONFIG:Debug>:BGFX_CONFIG_DEBUG=1>
+		$<$<NOT:$<CONFIG:Debug>>:BGFX_CONFIG_DEBUG=0>
+	)
+	
+	# Prefer Vulkan if available, fallback to OpenGL
+	target_compile_definitions(Alpha126Cpp PRIVATE BGFX_CONFIG_RENDERER_VULKAN=1)
+	
+	message(STATUS "BGFX support enabled - will use Vulkan renderer if available")
+endif()
+
 # OpenAL-Soft library - build from source
 # On Windows, the target is "OpenAL32", on other platforms it's "openal"
 add_subdirectory("external/openal-soft" EXCLUDE_FROM_ALL)
+
 
 # Link against the built OpenAL library
 # OpenAL-Soft's CMakeLists.txt creates a target named ${LIBNAME}
@@ -1068,6 +1251,69 @@ else()
 		target_link_libraries(Alpha126Cpp PRIVATE openal)
 	else()
 		message(WARNING "openal target not found. Please check OpenAL-Soft CMakeLists.txt")
+	endif()
+endif()
+
+if(MESA_ENABLE_ZINK)
+	set(MESA_INSTALL_DIR "${CMAKE_SOURCE_DIR}/build/mesa-install")
+	set(MESA_BUILD_DIR "${CMAKE_SOURCE_DIR}/build/mesa-build")
+	
+	# Try to find Mesa libraries
+	if(WIN32)
+		# Windows: look for Mesa DLLs in install directory
+		find_library(MESA_GL_LIB
+			NAMES opengl32.lib opengl32
+			PATHS "${MESA_INSTALL_DIR}/lib"
+			NO_DEFAULT_PATH
+		)
+		# Mesa EGL library (if built)
+		find_library(MESA_EGL_LIB
+			NAMES libEGL.lib libEGL
+			PATHS "${MESA_INSTALL_DIR}/lib"
+			NO_DEFAULT_PATH
+		)
+	else()
+		# Linux/Unix: look for Mesa shared libraries
+		find_library(MESA_GL_LIB
+			NAMES libGL.so libGL
+			PATHS "${MESA_INSTALL_DIR}/lib" "${MESA_INSTALL_DIR}/lib/x86_64-linux-gnu"
+			NO_DEFAULT_PATH
+		)
+		find_library(MESA_EGL_LIB
+			NAMES libEGL.so libEGL
+			PATHS "${MESA_INSTALL_DIR}/lib" "${MESA_INSTALL_DIR}/lib/x86_64-linux-gnu"
+			NO_DEFAULT_PATH
+		)
+	endif()
+	
+	if(MESA_GL_LIB)
+		message(STATUS "Mesa3D found: ${MESA_GL_LIB}")
+		target_link_libraries(Alpha126Cpp PRIVATE ${MESA_GL_LIB})
+		target_include_directories(Alpha126Cpp PRIVATE "${MESA_INSTALL_DIR}/include")
+		
+		# Copy Mesa DLLs to output directory (Windows)
+		if(WIN32 AND EXISTS "${MESA_INSTALL_DIR}/bin")
+			file(GLOB MESA_DLLS "${MESA_INSTALL_DIR}/bin/*.dll")
+			foreach(dll ${MESA_DLLS})
+				get_filename_component(dll_name ${dll} NAME)
+				add_custom_command(TARGET Alpha126Cpp POST_BUILD
+					COMMAND ${CMAKE_COMMAND} -E copy_if_different
+					"${dll}"
+					"$<TARGET_FILE_DIR:Alpha126Cpp>/${dll_name}"
+					COMMENT "Copying ${dll_name} to output directory"
+				)
+			endforeach()
+		endif()
+		
+		# Set compile definition to enable Zink configuration
+		target_compile_definitions(Alpha126Cpp PRIVATE MESA_ENABLE_ZINK=1)
+		
+		message(STATUS "Mesa3D Zink support enabled")
+		message(STATUS "Set MESA_LOADER_DRIVER_OVERRIDE=zink and GALLIUM_DRIVER=zink at runtime")
+	else()
+		message(WARNING "Mesa3D libraries not found in ${MESA_INSTALL_DIR}")
+		message(WARNING "Run build-mesa-zink.bat (Windows) or build-mesa-zink.sh (Linux) to build Mesa")
+		message(WARNING "Continuing without Mesa - using system OpenGL")
 	endif()
 endif()
 

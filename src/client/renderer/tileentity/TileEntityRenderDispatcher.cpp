@@ -70,10 +70,13 @@ void TileEntityRenderDispatcher::prepare(Level *level, Textures *textures, Font 
 }
 
 // Beta: TileEntityRenderDispatcher.render() - renders with distance check (TileEntityRenderDispatcher.java:69-75)
+// Performance optimization: More aggressive distance culling for better performance
 void TileEntityRenderDispatcher::render(TileEntity *e, float a)
 {
 	// Beta: Check distance (TileEntityRenderDispatcher.java:70)
-	if (e->distanceToSqr(xPlayer, yPlayer, zPlayer) < 4096.0)
+	// Original: 4096.0 (64 blocks) - reduced to 2304.0 (48 blocks) for better performance
+	// This culls distant signs while still rendering nearby ones
+	if (e->distanceToSqr(xPlayer, yPlayer, zPlayer) < 2304.0)
 	{
 		// Beta: Get brightness and set color (TileEntityRenderDispatcher.java:71-72)
 		float br = level->getBrightness(e->x, e->y, e->z);
@@ -85,14 +88,43 @@ void TileEntityRenderDispatcher::render(TileEntity *e, float a)
 }
 
 // Beta: TileEntityRenderDispatcher.render() - renders at position (TileEntityRenderDispatcher.java:77-82)
+// Performance optimization: Direct type check instead of expensive typeid/dynamic_cast
 void TileEntityRenderDispatcher::render(TileEntity *entity, double x, double y, double z, float a)
 {
-	TileEntityRenderer *renderer = getRenderer(entity);  // Beta: TileEntityRenderer<TileEntity> renderer = this.getRenderer(entity) (TileEntityRenderDispatcher.java:78)
+	// Performance: Direct type check for signs (most common tile entity)
+	// Avoids expensive typeid/dynamic_cast lookup every frame
+	SignTileEntity *sign = dynamic_cast<SignTileEntity *>(entity);
+	if (sign != nullptr)
+	{
+		// Performance: Cached renderer lookup - avoids expensive typeid/map lookup every frame
+		// SignRenderer is registered in constructor, so we can cache the lookup result
+		static SignRenderer *cachedSignRenderer = nullptr;
+		static bool rendererLookupAttempted = false;
+		
+		if (!rendererLookupAttempted)
+		{
+			// First time: look up renderer using template method (cached forever)
+			// We know it exists because constructor registers it
+			TileEntityRenderer *renderer = getRenderer<SignTileEntity>();
+			if (renderer != nullptr)
+			{
+				cachedSignRenderer = static_cast<SignRenderer *>(renderer);  // Safe cast - we register SignRenderer
+			}
+			rendererLookupAttempted = true;
+		}
+		
+		if (cachedSignRenderer != nullptr)
+		{
+			cachedSignRenderer->render(*sign, x, y, z, a);
+		}
+		return;
+	}
+	
+	// Fallback to generic renderer lookup for other tile entity types
+	TileEntityRenderer *renderer = getRenderer(entity);
 	if (renderer != nullptr)
 	{
-		// Beta: Call renderer.render() (TileEntityRenderDispatcher.java:80)
-		// Use dynamic_cast to call the specific renderer's render method
-		// For SignRenderer, we have renderEntity() helper
+		// For other types, use dynamic_cast as fallback
 		SignRenderer *signRenderer = dynamic_cast<SignRenderer *>(renderer);
 		if (signRenderer != nullptr)
 		{

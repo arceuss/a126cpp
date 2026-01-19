@@ -6,7 +6,7 @@
 
 #include "external/SDLException.h"
 
-#include "SDL_events.h"
+#include <SDL3/SDL.h>
 
 namespace lwjgl
 {
@@ -34,28 +34,28 @@ static int_t keyLWJGLToSDL(int_t key)
 		case 52: return SDLK_PERIOD;
 		case 179: return SDLK_KP_COMMA;
 		case 51: return SDLK_COMMA;
-		case 50: return SDLK_m;
-		case 49: return SDLK_n;
-		case 48: return SDLK_b;
-		case 47: return SDLK_v;
-		case 46: return SDLK_c;
-		case 45: return SDLK_x;
-		case 44: return SDLK_z;
+		case 50: return SDLK_M;
+		case 49: return SDLK_N;
+		case 48: return SDLK_B;
+		case 47: return SDLK_V;
+		case 46: return SDLK_C;
+		case 45: return SDLK_X;
+		case 44: return SDLK_Z;
 		case 43: return SDLK_BACKSLASH;
 		case 42: return SDLK_LSHIFT;
-		case 41: return SDLK_BACKQUOTE;
-		case 40: return SDLK_QUOTE;
+		case 41: return SDLK_GRAVE;
+		case 40: return SDLK_APOSTROPHE;
 			// case 167: return SDLK_SECTION;
 		case 39: return SDLK_SEMICOLON;
-		case 38: return SDLK_l;
-		case 37: return SDLK_k;
-		case 36: return SDLK_j;
-		case 35: return SDLK_h;
-		case 34: return SDLK_g;
-		case 33: return SDLK_f;
-		case 32: return SDLK_d;
-		case 31: return SDLK_s;
-		case 30: return SDLK_a;
+		case 38: return SDLK_L;
+		case 37: return SDLK_K;
+		case 36: return SDLK_J;
+		case 35: return SDLK_H;
+		case 34: return SDLK_G;
+		case 33: return SDLK_F;
+		case 32: return SDLK_D;
+		case 31: return SDLK_S;
+		case 30: return SDLK_A;
 		case 157: return SDLK_RCTRL;
 		case 29: return SDLK_LCTRL;
 		case 156: return SDLK_KP_ENTER;
@@ -76,24 +76,24 @@ static int_t keyLWJGLToSDL(int_t key)
 			// case 14: return SDLK_AC_BACK;
 		case 141: return SDLK_KP_EQUALS;
 		case 15: return SDLK_TAB;
-		case 16: return SDLK_q;
-		case 17: return SDLK_w;
+		case 16: return SDLK_Q;
+		case 17: return SDLK_W;
 			// case 144: return SDLK_CIRCUMFLEX;
-		case 18: return SDLK_e;
+		case 18: return SDLK_E;
 		case 145: return SDLK_AT;
-		case 19: return SDLK_r;
+		case 19: return SDLK_R;
 		case 146: return SDLK_COLON;
-		case 20: return SDLK_t;
+		case 20: return SDLK_T;
 			// case 147: return SDLK_UNDERLINE;
-		case 21: return SDLK_y;
+		case 21: return SDLK_Y;
 			// case 148: return SDLK_KANJI;
-		case 22: return SDLK_u;
+		case 22: return SDLK_U;
 		case 149: return SDLK_STOP;
-		case 23: return SDLK_i;
+		case 23: return SDLK_I;
 			// case 150: return SDLK_AX;
-		case 24: return SDLK_o;
+		case 24: return SDLK_O;
 			// case 151: return SDLK_UNLABELED;
-		case 25: return SDLK_p;
+		case 25: return SDLK_P;
 		case 26: return SDLK_LEFTBRACKET;
 		case 27: return SDLK_RIGHTBRACKET;
 		case 28: return SDLK_RETURN;
@@ -164,29 +164,29 @@ static int_t keySDLToLWJGL(int_t key)
 		case SDLK_KP_MULTIPLY: return 55;
 		case SDLK_DELETE: return 211;
 		case SDLK_COMMA: return 51;
-		case SDLK_r: return 19;
-		case SDLK_t: return 20;
+		case SDLK_R: return 19;
+		case SDLK_T: return 20;
 			// case SDLK_AX: return 150;
-		case SDLK_BACKQUOTE: return 41;
+		case SDLK_GRAVE: return 41;
 		case SDLK_END: return 207;
-		case SDLK_k: return 37;
-		case SDLK_m: return 50;
-		case SDLK_x: return 45;
+		case SDLK_K: return 37;
+		case SDLK_M: return 50;
+		case SDLK_X: return 45;
 		case SDLK_DOWN: return 208;
-		case SDLK_g: return 34;
-		case SDLK_f: return 33;
-		case SDLK_c: return 46;
+		case SDLK_G: return 34;
+		case SDLK_F: return 33;
+		case SDLK_C: return 46;
 			// case SDLK_SECTION: return 167;
-		case SDLK_a: return 30;
+		case SDLK_A: return 30;
 			// case SDLK_SCROLL: return 70;
-		case SDLK_QUOTE: return 40;
+		case SDLK_APOSTROPHE: return 40;
 		case SDLK_KP_EQUALS: return 141;
-		case SDLK_z: return 44;
+		case SDLK_Z: return 44;
 			// case SDLK_AC_BACK: return 14;
 		case SDLK_6: return 7;
-		case SDLK_h: return 35;
+		case SDLK_H: return 35;
 		case SDLK_5: return 6;
-		case SDLK_v: return 47;
+		case SDLK_V: return 47;
 		case SDLK_BACKSLASH: return 43;
 		case SDLK_8: return 9;
 		case SDLK_EQUALS: return 13;
@@ -203,35 +203,35 @@ static int_t keySDLToLWJGL(int_t key)
 		case SDLK_LCTRL: return 29;
 		case SDLK_F10: return 68;
 		case SDLK_4: return 5;
-		case SDLK_e: return 18;
+		case SDLK_E: return 18;
 		case SDLK_SPACE: return 57;
 		case SDLK_2: return 3;
 		case SDLK_F11: return 87;
-		case SDLK_o: return 24;
+		case SDLK_O: return 24;
 		case SDLK_KP_5: return 76;
 		case SDLK_RGUI: return 220;
 		case SDLK_F13: return 100;
 		case SDLK_KP_DIVIDE: return 181;
 		case SDLK_KP_0: return 82;
 		case SDLK_9: return 10;
-		case SDLK_q: return 16;
+		case SDLK_Q: return 16;
 		case SDLK_KP_3: return 81;
 			// case SDLK_KANJI: return 148;
 		case SDLK_STOP: return 149;
-		case SDLK_b: return 48;
+		case SDLK_B: return 48;
 		case SDLK_RIGHT: return 205;
 		case SDLK_SEMICOLON: return 39;
 		case SDLK_MINUS: return 12;
-		case SDLK_l: return 38;
+		case SDLK_L: return 38;
 		case SDLK_RIGHTBRACKET: return 27;
-		case SDLK_w: return 17;
+		case SDLK_W: return 17;
 		case SDLK_TAB: return 15;
-		case SDLK_y: return 21;
+		case SDLK_Y: return 21;
 		case SDLK_NUMLOCKCLEAR: return 69;
 		case SDLK_KP_MINUS: return 74;
-		case SDLK_u: return 22;
+		case SDLK_U: return 22;
 		case SDLK_F17: return 104;
-		case SDLK_p: return 25;
+		case SDLK_P: return 25;
 		case SDLK_F4: return 62;
 		case SDLK_1: return 2;
 		case SDLK_0: return 11;
@@ -243,20 +243,20 @@ static int_t keySDLToLWJGL(int_t key)
 		case SDLK_F5: return 63;
 		case SDLK_F6: return 64;
 		case SDLK_F7: return 65;
-		case SDLK_i: return 23;
+		case SDLK_I: return 23;
 			// case SDLK_UNLABELED: return 151;
 		case SDLK_F16: return 103;
 		case SDLK_F8: return 66;
-		case SDLK_d: return 32;
+		case SDLK_D: return 32;
 		case SDLK_KP_7: return 71;
 		case SDLK_KP_8: return 72;
 		case SDLK_KP_9: return 73;
 		case SDLK_7: return 8;
 		case SDLK_KP_4: return 75;
 		case SDLK_KP_6: return 77;
-		case SDLK_j: return 36;
+		case SDLK_J: return 36;
 		case SDLK_HOME: return 199;
-		case SDLK_n: return 49;
+		case SDLK_N: return 49;
 		case SDLK_KP_1: return 79;
 		case SDLK_KP_ENTER: return 156;
 		case SDLK_KP_2: return 80;
@@ -264,7 +264,7 @@ static int_t keySDLToLWJGL(int_t key)
 			// case SDLK_CONVERT: return 121;
 		case SDLK_INSERT: return 210;
 			// case SDLK_RMENU: return 184;
-		case SDLK_s: return 31;
+		case SDLK_S: return 31;
 		case SDLK_KP_DECIMAL: return 83;
 		case SDLK_F14: return 101;
 		case SDLK_F15: return 102;
@@ -342,9 +342,9 @@ static void handleCharacter(int_t character)
 
 void pushEvent(const SDL_Event &e)
 {
-	if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
+	if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP)
 	{
-		handleKey(keySDLToLWJGL(e.key.keysym.sym), e.key.repeat, e.key.state == SDL_PRESSED);
+		handleKey(keySDLToLWJGL(e.key.key), e.key.repeat, e.key.down);
 	}
 	else
 	{
@@ -421,7 +421,7 @@ bool getEventKeyState()
 }
 
 // Polling
-static const Uint8 *keyboard_state = nullptr;
+static const bool *keyboard_state = nullptr;
 static int keyboard_state_size = 0;
 
 bool isKeyDown(int_t key)
@@ -436,12 +436,12 @@ bool isKeyDown(int_t key)
 	int_t sdl_key = keyLWJGLToSDL(key);
 	if (sdl_key == SDLK_UNKNOWN)
 		return false;
-	SDL_Scancode sc = SDL_GetScancodeFromKey(sdl_key);
+	SDL_Scancode sc = SDL_GetScancodeFromKey(sdl_key, nullptr);
 	if (sc == SDL_SCANCODE_UNKNOWN)
 		return false;
 	if (sc < 0 || sc >= keyboard_state_size)
 		return false;
-	return keyboard_state[sc] != 0;
+	return keyboard_state[sc];
 }
 
 

@@ -7,6 +7,10 @@
 
 #include "lwjgl/GLContext.h"
 
+#ifdef USE_BGFX
+#include "pc/lwjgl/BGFXCompatGlue.h"
+#endif
+
 Tesselator Tesselator::instance(MAX_FLOATS);
 
 Tesselator::Tesselator(int_t size)
@@ -20,12 +24,13 @@ Tesselator::Tesselator(int_t size)
 	buffer_p = buffer.get();
 	buffer_e = buffer.get() + (size * 4);
 
-	// Setup VBO
-	vboMode = USE_VBO && lwjgl::GLContext::getCapabilities()["GL_ARB_vertex_buffer_object"];
+	// Setup VBO - OpenGL 4.6 has VBOs as core functionality
+	// Using core OpenGL functions (OpenGL 4.6 compatibility profile)
+	vboMode = USE_VBO;
 	if (vboMode)
 	{
 		vboIds = Util::make_unique<GLuint[]>(vboCounts);
-		glGenBuffersARB(vboCounts, vboIds.get());
+		glGenBuffers(vboCounts, vboIds.get());
 	}
 }
 
@@ -42,12 +47,26 @@ void Tesselator::end()
 
 	if (vertices > 0)
 	{
-		// Bind VBO
+#ifdef USE_BGFX
+		// Check if we're compiling a display list - if so, capture vertex data for bgfx
+		if (bgfx_compiling_display_list())
+		{
+			// Capture vertex data for bgfx display list
+			const float* vertexData = reinterpret_cast<const float*>(buffer.get());
+			size_t vertexCount = static_cast<size_t>(vertices);
+			GLenum finalMode = (draw_mode == GL_QUADS && TRIANGLE_MODE) ? GL_TRIANGLES : draw_mode;
+			bgfx_capture_tesselator_data(vertexData, vertexCount, finalMode, hasTexture, hasColor, hasNormal);
+			clear();
+			return;
+		}
+#endif
+
+		// Bind VBO - Using core OpenGL functions (OpenGL 4.6 compatibility profile)
 		if (vboMode)
 		{
 			vboId = (vboId + 1) % vboCounts;
-			glBindBufferARB(GL_ARRAY_BUFFER_ARB, vboIds[vboId]);
-			glBufferDataARB(GL_ARRAY_BUFFER_ARB, buffer_p - buffer.get(), buffer.get(), GL_STREAM_DRAW_ARB);
+			glBindBuffer(GL_ARRAY_BUFFER, vboIds[vboId]);
+			glBufferData(GL_ARRAY_BUFFER, buffer_p - buffer.get(), buffer.get(), GL_STREAM_DRAW);
 		}
 
 		// Setup attributes
@@ -98,6 +117,17 @@ void Tesselator::clear()
 	vertices = 0;
 	buffer_p = buffer.get();
 	count = 0;
+	// Note: tesselating flag is NOT reset here - it should be reset by end() or begin()
+	// This allows buildVBO() to work correctly (it checks tesselating state)
+}
+
+void Tesselator::reset()
+{
+	if (tesselating)
+	{
+		clear();
+		tesselating = false;
+	}
 }
 
 void Tesselator::begin()
@@ -272,4 +302,107 @@ void Tesselator::addOffset(float x, float y, float z)
 	xo += x;
 	yo += y;
 	zo += z;
+}
+
+// Build VBO from current tesselation data (for chunk rendering)
+// Returns VBO ID, or 0 on failure
+// Note: This resets the tesselating state - caller should call clear() to reset buffer state
+GLuint Tesselator::buildVBO(int_t &vertexCount, bool &hasTex, bool &hasCol, bool &hasNorm)
+{
+	if (!tesselating || vertices == 0)
+	{
+		vertexCount = 0;
+		hasTex = false;
+		hasCol = false;
+		hasNorm = false;
+		return 0;
+	}
+	
+	size_t bufferSize = buffer_p - buffer.get();
+	if (bufferSize == 0)
+	{
+		vertexCount = 0;
+		hasTex = false;
+		hasCol = false;
+		hasNorm = false;
+		tesselating = false;  // Reset state even on failure
+		return 0;
+	}
+	
+	// Create VBO using core OpenGL functions (OpenGL 4.6 compatibility profile)
+	GLuint vboId = 0;
+	glGenBuffers(1, &vboId);
+	if (vboId == 0)
+	{
+		vertexCount = 0;
+		hasTex = false;
+		hasCol = false;
+		hasNorm = false;
+		tesselating = false;  // Reset state even on failure
+		return 0;
+	}
+	
+	// Upload data to VBO
+	glBindBuffer(GL_ARRAY_BUFFER, vboId);
+	glBufferData(GL_ARRAY_BUFFER, bufferSize, buffer.get(), GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	
+	// Return state BEFORE resetting
+	vertexCount = vertices;
+	hasTex = hasTexture;
+	hasCol = hasColor;
+	hasNorm = hasNormal;
+	
+	// Reset tesselating flag after building VBO
+	// Caller will call clear() to reset buffer state, but we reset the flag here
+	tesselating = false;
+	
+	return vboId;
+}
+
+// Render from a VBO
+void Tesselator::renderVBO(GLuint vboId, int_t vertexCount, bool hasTex, bool hasCol, bool hasNorm)
+{
+	if (vboId == 0 || vertexCount == 0)
+		return;
+	
+	glBindBuffer(GL_ARRAY_BUFFER, vboId);
+	
+	// Setup attributes
+	char *vbo_base = reinterpret_cast<char *>(0);
+	
+	if (hasTex)
+	{
+		glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 12));
+		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+	}
+	
+	if (hasCol)
+	{
+		glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 20));
+		glEnableClientState(GL_COLOR_ARRAY);
+	}
+	
+	if (hasNorm)
+	{
+		glNormalPointer(GL_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 24));
+		glEnableClientState(GL_NORMAL_ARRAY);
+	}
+	
+	glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 0));
+	glEnableClientState(GL_VERTEX_ARRAY);
+	
+	// Draw arrays
+	glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+	
+	// Reset attributes
+	glDisableClientState(GL_VERTEX_ARRAY);
+	if (hasTex)
+		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+	if (hasCol)
+		glDisableClientState(GL_COLOR_ARRAY);
+	if (hasNorm)
+		glDisableClientState(GL_NORMAL_ARRAY);
+	
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }

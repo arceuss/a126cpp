@@ -2132,6 +2132,9 @@ void NetClientHandler::handleSignUpdate(Packet130UpdateSign* var1)
 				{
 					signEntity->messages[i] = var1->signLines[i];
 				}
+				// Performance: Invalidate caches after updating messages
+				signEntity->invalidateWidthCache();
+				signEntity->invalidateTextDisplayList();  // This invalidates baked texture
 				// Alpha: Call onInventoryChanged() to notify renderer
 				// Note: In our implementation, we might not have onInventoryChanged(), 
 				// but the sign will be re-rendered on next frame anyway

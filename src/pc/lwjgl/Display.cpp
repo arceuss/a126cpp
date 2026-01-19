@@ -9,8 +9,12 @@
 
 #include "external/SDLException.h"
 
-#include "SDL.h"
+#include <SDL3/SDL.h>
 #include <glad/glad.h>
+
+#ifdef USE_BGFX
+#include "lwjgl/BGFXContext.h"
+#endif
 
 namespace lwjgl
 {
@@ -45,7 +49,7 @@ void setTitle(const jstring &string)
 
 void setFullscreen(bool fullscreen)
 {
-	if (SDL_SetWindowFullscreen(GLContext::detail::getWindow(), fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0))
+	if (!SDL_SetWindowFullscreen(GLContext::detail::getWindow(), fullscreen))
 		throw SDLException();
 	
 	// Update display mode
@@ -54,14 +58,21 @@ void setFullscreen(bool fullscreen)
 		int w, h;
 		int freq, bpp;
 
-		SDL_DisplayMode sdl_mode;
-		if (SDL_GetWindowDisplayMode(GLContext::detail::getWindow(), &sdl_mode))
-			throw SDLException();
+		// In SDL3, get the current display mode from the window's display
+		const SDL_DisplayMode *sdl_mode = SDL_GetWindowFullscreenMode(GLContext::detail::getWindow());
+		if (sdl_mode == nullptr)
+		{
+			// If no exclusive fullscreen mode is set, use desktop display mode
+			SDL_DisplayID display_id = SDL_GetDisplayForWindow(GLContext::detail::getWindow());
+			sdl_mode = SDL_GetDesktopDisplayMode(display_id);
+			if (sdl_mode == nullptr)
+				throw SDLException();
+		}
 
-		w = sdl_mode.w;
-		h = sdl_mode.h;
-		freq = sdl_mode.refresh_rate;
-		bpp = SDL_BITSPERPIXEL(sdl_mode.format);
+		w = sdl_mode->w;
+		h = sdl_mode->h;
+		freq = (int)sdl_mode->refresh_rate;
+		bpp = SDL_BITSPERPIXEL(sdl_mode->format);
 
 		current_display_mode = DisplayMode(w, h, bpp, freq);
 	}
@@ -81,7 +92,7 @@ bool isCloseRequested()
 bool isVisible()
 {
 	auto flags = SDL_GetWindowFlags(GLContext::detail::getWindow());
-	return (flags & SDL_WINDOW_SHOWN) != 0;
+	return (flags & SDL_WINDOW_HIDDEN) == 0;
 }
 
 bool isActive()
@@ -97,18 +108,18 @@ void processMessages()
 	{
 		switch (e.type)
 		{
-			case SDL_QUIT:
+			case SDL_EVENT_QUIT:
 				close_requested = true;
 				break;
-			case SDL_MOUSEMOTION:
-			case SDL_MOUSEBUTTONDOWN:
-			case SDL_MOUSEBUTTONUP:
-			case SDL_MOUSEWHEEL:
+			case SDL_EVENT_MOUSE_MOTION:
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
+			case SDL_EVENT_MOUSE_BUTTON_UP:
+			case SDL_EVENT_MOUSE_WHEEL:
 				Mouse::detail::pushEvent(e);
 				break;
-			case SDL_KEYDOWN:
-			case SDL_KEYUP:
-			case SDL_TEXTINPUT:
+			case SDL_EVENT_KEY_DOWN:
+			case SDL_EVENT_KEY_UP:
+			case SDL_EVENT_TEXT_INPUT:
 				Keyboard::detail::pushEvent(e);
 				break;
 		}
@@ -125,7 +136,12 @@ void processMessages()
 
 void swapBuffers()
 {
+#ifdef USE_BGFX
+	// When using bgfx, call bgfx::frame() instead of SDL_GL_SwapWindow
+	BGFXContext::frame();
+#else
 	SDL_GL_SwapWindow(GLContext::detail::getWindow());
+#endif
 }
 
 void update(bool doProcessMessages)
