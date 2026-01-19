@@ -346,8 +346,9 @@ void pushEvent(const SDL_Event &e)
 	{
 		handleKey(keySDLToLWJGL(e.key.key), e.key.repeat, e.key.down);
 	}
-	else
+	else if (e.type == SDL_EVENT_TEXT_INPUT)
 	{
+		// SDL3: Handle text input events (SDL_EVENT_TEXT_INPUT)
 		// Iterate through unicode codepoints
 		std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
 		std::u32string utf32 = conv.from_bytes(e.text.text);

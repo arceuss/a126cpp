@@ -14,16 +14,26 @@ int_t Chunk::updates = 0;
 
 Tesselator &Chunk::t = Tesselator::instance;
 
-Chunk::Chunk(Level &level, std::vector<std::shared_ptr<TileEntity>> &globalRenderableTileEntities, int_t x, int_t y, int_t z, int_t size, int_t lists) : level(level), globalRenderableTileEntities(globalRenderableTileEntities)
+Chunk::Chunk(Level &level, std::vector<std::shared_ptr<TileEntity>> &globalRenderableTileEntities, int_t x, int_t y, int_t z, int_t size) : level(level), globalRenderableTileEntities(globalRenderableTileEntities)
 {
 	xs = ys = zs = size;
 	radius = Mth::sqrt(static_cast<float>(xs * xs + ys * ys + zs * zs)) / 2.0f;
-	this->lists = lists;
+	
+	// Initialize VBO storage
+	layerVBOs[0] = ChunkLayerVBO();
+	layerVBOs[1] = ChunkLayerVBO();
 
 	this->x = -999;
 	setPos(x, y, z);
 
 	dirty = false;
+}
+
+Chunk::~Chunk()
+{
+	// Cleanup VBOs
+	layerVBOs[0].clear();
+	layerVBOs[1].clear();
 }
 
 void Chunk::setPos(int_t x, int_t y, int_t z)
@@ -47,10 +57,6 @@ void Chunk::setPos(int_t x, int_t y, int_t z)
 
 	float g = 6.0f;
 	bb.reset(AABB::newPermanent(x - g, y - g, z - g, x + xs + g, y + ys + g, z + zs + g));
-
-	glNewList(lists + 2, GL_COMPILE);
-	EntityRenderer::renderFlat(*bb);
-	glEndList();
 
 	setDirty();
 }
@@ -111,20 +117,14 @@ void Chunk::rebuild()
 					{
 						started = true;
 
-							// Legacy display list (for compatibility)
-							glNewList(lists + i, GL_COMPILE);
-							
-							glPushMatrix();
-							translateToPos();
+						// Clear old VBO for this layer before rebuilding
+						layerVBOs[i].clear();
 
-							float ss = 1.0000001f;
-							glTranslatef(-this->zs / 2.0f, -this->ys / 2.0f, -this->zs / 2.0f);
-							glScalef(ss, ss, ss);
-							glTranslatef(this->zs / 2.0f, this->ys / 2.0f, this->zs / 2.0f);
-
-							// Ensure tesselator is clean before starting
+						// Ensure tesselator is clean before starting
 						t.reset();
 						t.begin();
+						// Apply chunk offset to convert world coords to chunk-local coords
+						// The render offset and scaling will be applied at render time
 						t.offset(-this->x, -this->y, -this->z);
 					}
 
@@ -158,9 +158,25 @@ void Chunk::rebuild()
 
 		if (started)
 		{
-			t.end();
-			glPopMatrix();
-			glEndList();
+			// Build VBO from tesselator data instead of ending display list
+			int_t vertexCount = 0;
+			bool hasTex = false;
+			bool hasCol = false;
+			bool hasNorm = false;
+			GLuint vboId = t.buildVBO(vertexCount, hasTex, hasCol, hasNorm);
+			
+			if (vboId != 0 && vertexCount > 0) {
+				layerVBOs[i].vboId = vboId;
+				layerVBOs[i].vertexCount = vertexCount;
+				layerVBOs[i].hasTexture = hasTex;
+				layerVBOs[i].hasColor = hasCol;
+				layerVBOs[i].hasNormal = hasNorm;
+				layerVBOs[i].valid = true;
+			} else {
+				layerVBOs[i].valid = false;
+			}
+			
+			t.clear();
 			t.offset(0.0, 0.0, 0.0);
 		}
 		else
@@ -197,6 +213,7 @@ void Chunk::reset()
 	empty.fill(true);
 	visible = false;
 	compiled = false;
+	// Don't clear VBOs here - they're still valid until rebuild()
 }
 
 void Chunk::remove()
@@ -204,17 +221,20 @@ void Chunk::remove()
 	reset();
 }
 
-int_t Chunk::getList(int_t layer)
+bool Chunk::getVBO(int_t layer, GLuint &vboId, int_t &vertexCount, bool &hasTex, bool &hasCol, bool &hasNorm) const
 {
-	if (!visible) return -1;
-	if (!empty[layer]) return lists + layer;
-	return -1;
-}
-int_t Chunk::getAllLists(std::vector<int_t> displayLists, int_t p, int_t layer)
-{
-	if (!visible) return p;
-	if (!empty[layer]) displayLists[p++] = lists + layer;
-	return p;
+	if (!visible || layer < 0 || layer >= 2) {
+		return false;
+	}
+	if (empty[layer] || !layerVBOs[layer].valid) {
+		return false;
+	}
+	vboId = layerVBOs[layer].vboId;
+	vertexCount = layerVBOs[layer].vertexCount;
+	hasTex = layerVBOs[layer].hasTexture;
+	hasCol = layerVBOs[layer].hasColor;
+	hasNorm = layerVBOs[layer].hasNormal;
+	return true;
 }
 
 void Chunk::cull(Culler &culler)
@@ -239,7 +259,10 @@ void Chunk::cull(Culler &culler)
 
 void Chunk::renderBB()
 {
-	glCallList(lists + 2);
+	// Use EntityRenderer for bounding box rendering (debug rendering only)
+	if (bb != nullptr) {
+		EntityRenderer::renderFlat(*bb);
+	}
 }
 
 bool Chunk::isEmpty()

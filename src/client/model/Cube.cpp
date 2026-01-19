@@ -2,6 +2,8 @@
 
 #include "client/MemoryTracker.h"
 #include "client/renderer/Tesselator.h"
+#include "OpenGL.h"
+#include <vector>
 
 Cube::Cube(int_t xTexOffs, int_t yTexOffs)
 {
@@ -111,7 +113,26 @@ void Cube::render(float scale)
 	if (neverRender) return;
 	if (!visible) return;
 	if (!compiled) compile(scale);
+	
+	if (cubeVAO == 0 || vertexCount == 0)
+		return;
 
+	// Bind VAO and VBO before rendering
+	// In compatibility profile, VAOs store the vertex pointers but we need to ensure VBO is bound
+	glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
+	glBindVertexArray(cubeVAO);
+	
+	// Re-enable client states (VAO stores pointers but not enabled state in compatibility profile)
+	glEnableClientState(GL_VERTEX_ARRAY);
+	if (hasTex)
+		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+	if (hasCol)
+		glEnableClientState(GL_COLOR_ARRAY);
+	if (hasNorm)
+		glEnableClientState(GL_NORMAL_ARRAY);
+	
+	// Note: VBO was built with TRIANGLE_MODE=true, so quads are converted to triangles
+	// The vertexCount reflects the triangle count (6 vertices per original quad)
 	if (xRot != 0.0f || yRot != 0.0f || zRot != 0.0f)
 	{
 		glPushMatrix();
@@ -119,20 +140,31 @@ void Cube::render(float scale)
 		if (zRot != 0.0f) glRotatef(zRot * c, 0.0f, 0.0f, 1.0f);
 		if (yRot != 0.0f) glRotatef(yRot * c, 0.0f, 1.0f, 0.0f);
 		if (xRot != 0.0f) glRotatef(xRot * c, 1.0f, 0.0f, 0.0f);
-		glCallList(list);
+		glDrawArrays(GL_TRIANGLES, 0, vertexCount);
 		glPopMatrix();
 	}
 	else if (x != 0.0f || y != 0.0f || z != 0.0f)
 	{
 		glPushMatrix();
 		glTranslatef(x * scale, y * scale, z * scale);
-		glCallList(list);
+		glDrawArrays(GL_TRIANGLES, 0, vertexCount);
 		glPopMatrix();
 	}
 	else
 	{
-		glCallList(list);
+		glDrawArrays(GL_TRIANGLES, 0, vertexCount);
 	}
+	
+	// Disable client states and unbind VAO and VBO
+	glDisableClientState(GL_VERTEX_ARRAY);
+	if (hasTex)
+		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+	if (hasCol)
+		glDisableClientState(GL_COLOR_ARRAY);
+	if (hasNorm)
+		glDisableClientState(GL_NORMAL_ARRAY);
+	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 void Cube::translateTo(float scale)
@@ -156,13 +188,92 @@ void Cube::translateTo(float scale)
 
 void Cube::compile(float scale)
 {
-	list = MemoryTracker::genLists(1);
-
-	glNewList(list, GL_COMPILE);
+	// Build VBO/IBO/VAO instead of display list using Tesselator (preserves normals and exact behavior)
 	Tesselator &t = Tesselator::instance;
+	
+	// Reset tesselator and build geometry using existing Poly::render() logic
+	// Poly::render() calls t.begin() and t.end() for each polygon, so we don't need to call it here
+	// Always reset tesselator to ensure it's in a clean state
+	t.reset();
+	
+	// Collect all polygon data into tesselator
+	// Each Poly::render() calls t.begin() and t.end(), which will render immediately
+	// Instead, we need to build the VBO without calling end() for each polygon
+	// So we'll manually build the geometry
+	t.begin();
+	
+	// Manually build geometry from polygons (similar to Poly::render() but without calling end())
 	for (auto &p : polygons)
-		p.render(t, scale);
-	glEndList();
-
+	{
+		if (p.vertexCount == 0)
+			continue;
+		
+		// Calculate normal (same as Poly::render())
+		Vec3 *v0 = p.vertices[1].pos.vectorTo(p.vertices[0].pos);
+		Vec3 *v1 = p.vertices[1].pos.vectorTo(p.vertices[2].pos);
+		Vec3 *n = v1->cross(*v0)->normalize();
+		
+		// Set normal
+		if (p.shouldFlipNormal())
+			t.normal(-n->x, -n->y, -n->z);
+		else
+			t.normal(n->x, n->y, n->z);
+		
+		// Add vertices
+		for (int_t i = 0; i < p.vertexCount; i++)
+		{
+			Vertex &v = p.vertices[i];
+			t.vertexUV(v.pos.x * scale, v.pos.y * scale, v.pos.z * scale, v.u, v.v);
+		}
+	}
+	
+	// Build VBO from tesselator data (matches chunk rendering approach)
+	cubeVBO = t.buildVBO(vertexCount, hasTex, hasCol, hasNorm);
+	
+	if (cubeVBO == 0 || vertexCount == 0)
+	{
+		compiled = true;
+		return;
+	}
+	
+	// Generate VAO for cube rendering (fixed-function pipeline)
+	glGenVertexArrays(1, &cubeVAO);
+	glBindVertexArray(cubeVAO);
+	
+	// Bind VBO
+	glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
+	
+	// Setup fixed-function vertex attribute pointers (VAO stores these)
+	char *vbo_base = reinterpret_cast<char *>(0);
+	
+	// Position: always enabled
+	glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 0));
+	glEnableClientState(GL_VERTEX_ARRAY);
+	
+	if (hasTex)
+	{
+		glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 12));
+		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+	}
+	
+	if (hasCol)
+	{
+		glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 20));
+		glEnableClientState(GL_COLOR_ARRAY);
+	}
+	
+	if (hasNorm)
+	{
+		glNormalPointer(GL_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 24));
+		glEnableClientState(GL_NORMAL_ARRAY);
+	}
+	
+	// Unbind VAO (vertex pointer configuration remains stored)
+	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	
+	// Index count equals vertex count (GL_QUADS mode, 4 vertices per quad)
+	indexCount = vertexCount;
+	
 	compiled = true;
 }

@@ -25,4 +25,5 @@ public:
 	void render(Tesselator &t, float scale);
 	
 	Poly &flipNormal();
+	bool shouldFlipNormal() const { return flipNormalFlag; }
 };

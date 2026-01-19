@@ -10,8 +10,10 @@
 #include "network/NetClientHandler.h"
 #include "SharedConstants.h"
 #include "lwjgl/Keyboard.h"
+#include "lwjgl/GLContext.h"
 #include "OpenGL.h"
 #include "util/Memory.h"
+#include <SDL3/SDL.h>
 
 // Beta: TextEditScreen(SignTileEntity sign) (TextEditScreen.java:20-22)
 TextEditScreen::TextEditScreen(Minecraft &minecraft, std::shared_ptr<SignTileEntity> sign)
@@ -25,12 +27,22 @@ void TextEditScreen::init()
 	buttons.clear();
 	lwjgl::Keyboard::enableRepeatEvents(true);
 	buttons.push_back(std::make_shared<Button>(0, width / 2 - 100, height / 4 + 120, u"Done"));
+	
+	// SDL3: Start text input when sign editing screen opens
+	SDL_Window *window = lwjgl::GLContext::detail::getWindow();
+	if (window)
+		SDL_StartTextInput(window);
 }
 
 // Beta: TextEditScreen.removed() (TextEditScreen.java:31-37)
 void TextEditScreen::removed()
 {
 	lwjgl::Keyboard::enableRepeatEvents(false);
+	
+	// SDL3: Stop text input when sign editing screen closes
+	SDL_Window *window = lwjgl::GLContext::detail::getWindow();
+	if (window)
+		SDL_StopTextInput(window);
 	
 	// Beta: if (this.minecraft.level.isOnline) { send SignUpdatePacket } (TextEditScreen.java:34-35)
 	if (minecraft.level != nullptr && minecraft.level->isOnline)
@@ -97,6 +109,9 @@ void TextEditScreen::keyPressed(char_t eventCharacter, int_t eventKey)
 	if (eventKey == 14 && sign->messages[line].length() > 0)  // Backspace
 	{
 		sign->messages[line] = sign->messages[line].substr(0, sign->messages[line].length() - 1);
+		// Invalidate texture cache when text changes (so it updates in real-time while editing)
+		sign->invalidateWidthCache();
+		sign->invalidateTextDisplayList();
 	}
 	
 	// Beta: if (allowedChars.indexOf(ch) >= 0 && this.sign.messages[this.line].length() < 15) { ... } (TextEditScreen.java:68-70)
@@ -104,6 +119,9 @@ void TextEditScreen::keyPressed(char_t eventCharacter, int_t eventKey)
 	if (allowedChars.find(static_cast<char16_t>(eventCharacter)) != jstring::npos && sign->messages[line].length() < 15)
 	{
 		sign->messages[line] += static_cast<char16_t>(eventCharacter);
+		// Invalidate texture cache when text changes (so it updates in real-time while editing)
+		sign->invalidateWidthCache();
+		sign->invalidateTextDisplayList();
 	}
 }
 

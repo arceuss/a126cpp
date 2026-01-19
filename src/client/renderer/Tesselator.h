@@ -54,6 +54,9 @@ private:
 	std::unique_ptr<GLuint[]> vboIds;
 	int_t vboId = 0;
 	int_t vboCounts = 10;
+	
+	// VAO for rendering (replaces client-side vertex attributes)
+	GLuint tesselatorVAO = 0;
 
 	// Buffer state
 	int_t size = 0;

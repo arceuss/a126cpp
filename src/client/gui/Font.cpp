@@ -4,6 +4,7 @@
 #include "client/Options.h"
 #include "client/renderer/Textures.h"
 #include "client/renderer/Tesselator.h"
+#include "OpenGL.h"
 
 #include "java/Resource.h"
 #include "java/BufferedImage.h"
@@ -45,32 +46,8 @@ Font::Font(Options &options, const jstring &name, Textures &textures)
 
 	fontTexture = textures.getTexture(img);
 
-	listPos = MemoryTracker::genLists(256 + 32);
-	Tesselator &t = Tesselator::instance;
-	for (int_t j = 0; j < 256; j++)
-	{
-		glNewList(listPos + j, GL_COMPILE);
-
-		t.begin();
-		
-		int_t ix = j % 16 * 8;
-		int_t iy = j / 16 * 8;
-
-		float s = 7.99f;
-
-		float uo = 0.0f;
-		float vo = 0.0f;
-
-		t.vertexUV(0.0, (0.0f + s), 0.0, (ix / 128.0f + uo), ((iy + s) / 128.0f + vo));
-		t.vertexUV((0.0f + s), (0.0f + s), 0.0, ((ix + s) / 128.0f + uo), ((iy + s) / 128.0f + vo));
-		t.vertexUV((0.0f + s), 0.0, 0.0, ((ix + s) / 128.0f + uo), (iy / 128.0f + vo));
-		t.vertexUV(0.0, 0.0, 0.0, (ix / 128.0f + uo), (iy / 128.0f + vo));
-
-		t.end();
-
-		glTranslatef(charWidths[j], 0.0f, 0.0f);
-		glEndList();
-	}
+	// Initialize glyph VBOs and VAO (replaces display lists)
+	initializeGlyphs();
 
 	for (int_t j = 0; j < 32; j++)
 	{
@@ -100,14 +77,9 @@ Font::Font(Options &options, const jstring &name, Textures &textures)
 			b /= 4;
 		}
 
-		// Alpha 1.2.6: Color code display lists store RGB colors
+		// Alpha 1.2.6: Color code RGB values stored for fast lookup (replaces display lists)
 		// Java: this.field_22009_h[var7] = (var9 & 255) << 16 | (var10 & 255) << 8 | var11 & 255;
-		// Store RGB values for fast lookup (like original Java)
 		colorCodeRGBs[j] = (r & 0xFF) << 16 | (g & 0xFF) << 8 | (b & 0xFF);
-		
-		glNewList(listPos + 256 + j, GL_COMPILE);
-		glColor3f(r / 255.0f, g / 255.0f, b / 255.0f);  // RGB only, alpha preserved from glColor4f call
-		glEndList();
 	}
 }
 
@@ -163,15 +135,19 @@ void Font::draw(const jstring &str, int_t x, int_t y, int_t color, bool darken)
 
 	// Alpha 1.2.6: Set initial color (Java sets this.alpha and initial glColor4f)
 	// Java: GL11.glColor4f((float)(var4 >> 16 & 255) / 255.0F, (float)(var4 >> 8 & 255) / 255.0F, (float)(var4 & 255) / 255.0F, this.alpha);
-	float r = ((color >> 16) & 0xFF) / 255.0f;
-	float g = ((color >> 8) & 0xFF) / 255.0f;
-	float b = (color & 0xFF) / 255.0f;
-	glColor4f(r, g, b, alpha);
+	int_t r = ((color >> 16) & 0xFF);
+	int_t g = ((color >> 8) & 0xFF);
+	int_t b = (color & 0xFF);
+	currentColorR = r;
+	currentColorG = g;
+	currentColorB = b;
+	currentAlpha = alpha;
 
-	ib.clear();
-	glPushMatrix();
-	glTranslatef(x, y, 0.0f);
-
+	// Clear quad buffer for batching
+	quadBuffer.clear();
+	
+	float currentX = static_cast<float>(x);
+	
 	// Alpha 1.2.6: Parse color codes (Java uses character 167 = 0xA7 = §)
 	// Java: renderStringImpl() processes each character individually and renders immediately
 	// Java: if(var4 == 167 && var3 + 1 < var1.length()) {
@@ -181,7 +157,7 @@ void Font::draw(const jstring &str, int_t x, int_t y, int_t color, bool darken)
 	//     GL11.glColor4f((float)(var7 >> 16) / 255.0F, (float)(var7 >> 8 & 255) / 255.0F, (float)(var7 & 255) / 255.0F, this.alpha);
 	//     ++var3;
 	// }
-	// To match Java behavior: render characters in segments when color codes change
+	// To match Java behavior: batch characters in segments when color codes change
 	static const jstring colorCodes = u"0123456789abcdef";
 	
 	for (int_t i = 0; i < str.length(); i++)
@@ -189,11 +165,13 @@ void Font::draw(const jstring &str, int_t x, int_t y, int_t color, bool darken)
 		char_t ch = str[i];
 		if (ch == 167 && i + 1 < str.length())  // 167 = 0xA7 = § (section symbol)
 		{
-			// Render accumulated characters before changing color
-			if (!ib.empty())
+				// Render accumulated quads before changing color
+			if (!quadBuffer.empty())
 			{
-				glCallLists(ib.size(), GL_UNSIGNED_INT, ib.data());
-				ib.clear();
+				// Set current color before rendering batch
+				glColor4f(currentColorR / 255.0f, currentColorG / 255.0f, currentColorB / 255.0f, currentAlpha);
+				renderBatchedQuads();
+				quadBuffer.clear();
 			}
 			
 			char_t codeChar = str[i + 1];
@@ -210,19 +188,15 @@ void Font::draw(const jstring &str, int_t x, int_t y, int_t color, bool darken)
 			if (codeIndex == jstring::npos || codeIndex > 15)
 				codeIndex = 15;
 			
-		// Performance optimization: Set color directly like original Java code
-		// Java: int var7 = this.field_22009_h[var5 + (var2 ? 16 : 0)];
-		//       GL11.glColor4f((float)(var7 >> 16) / 255.0F, (float)(var7 >> 8 & 255) / 255.0F, (float)(var7 & 255) / 255.0F, this.alpha);
-		// Original code calls glColor4f directly - NO glGetFloatv query! This is MUCH faster.
-		// Look up stored RGB values (includes anaglyph3d transformation if enabled)
-		int_t colorIndex = codeIndex + (darken ? 16 : 0);
-		int_t rgb = colorCodeRGBs[colorIndex];
-		int_t r = (rgb >> 16) & 0xFF;
-		int_t g = (rgb >> 8) & 0xFF;
-		int_t b = rgb & 0xFF;
-		
-		// Set color directly with alpha (like original Java) - NO glGetFloatv!
-		glColor4f(r / 255.0f, g / 255.0f, b / 255.0f, alpha);
+			// Performance optimization: Set color directly like original Java code
+			// Java: int var7 = this.field_22009_h[var5 + (var2 ? 16 : 0)];
+			//       GL11.glColor4f((float)(var7 >> 16) / 255.0F, (float)(var7 >> 8 & 255) / 255.0F, (float)(var7 & 255) / 255.0F, this.alpha);
+			// Look up stored RGB values (includes anaglyph3d transformation if enabled)
+			int_t colorIndex = codeIndex + (darken ? 16 : 0);
+			int_t rgb = colorCodeRGBs[colorIndex];
+			currentColorR = (rgb >> 16) & 0xFF;
+			currentColorG = (rgb >> 8) & 0xFF;
+			currentColorB = rgb & 0xFF;
 			
 			i++;  // Skip the color code character
 		}
@@ -230,14 +204,52 @@ void Font::draw(const jstring &str, int_t x, int_t y, int_t color, bool darken)
 		{
 			int_t chIndex = SharedConstants::acceptableLetters.find(ch);
 			if (chIndex != jstring::npos)
-				ib.push_back(listPos + chIndex + 32);
+			{
+				int_t glyphIndex = chIndex + 32;
+				// Add glyph quad to buffer (x, y, u, v per vertex)
+				// Each glyph is 8x8 pixels, stored in 128x128 atlas
+				int_t ix = glyphIndex % 16 * 8;
+				int_t iy = glyphIndex / 16 * 8;
+				float s = 7.99f;
+				float u0 = ix / 128.0f;
+				float v0 = iy / 128.0f;
+				float u1 = (ix + s) / 128.0f;
+				float v1 = (iy + s) / 128.0f;
+				
+				// Quad vertices: bottom-left, bottom-right, top-right, top-left
+				// Vertex format: x, y, u, v (color set via glColor4f before rendering)
+				quadBuffer.push_back(currentX);                    // x
+				quadBuffer.push_back(static_cast<float>(y) + s);   // y
+				quadBuffer.push_back(u0);                          // u
+				quadBuffer.push_back(v1);                          // v
+				
+				quadBuffer.push_back(currentX + s);                // x
+				quadBuffer.push_back(static_cast<float>(y) + s);   // y
+				quadBuffer.push_back(u1);                          // u
+				quadBuffer.push_back(v1);                          // v
+				
+				quadBuffer.push_back(currentX + s);                // x
+				quadBuffer.push_back(static_cast<float>(y));       // y
+				quadBuffer.push_back(u1);                          // u
+				quadBuffer.push_back(v0);                          // v
+				
+				quadBuffer.push_back(currentX);                    // x
+				quadBuffer.push_back(static_cast<float>(y));       // y
+				quadBuffer.push_back(u0);                          // u
+				quadBuffer.push_back(v0);                          // v
+				
+				currentX += charWidths[glyphIndex];
+			}
 		}
 	}
 
-	// Render any remaining accumulated characters
-	if (!ib.empty())
-		glCallLists(ib.size(), GL_UNSIGNED_INT, ib.data());
-	glPopMatrix();
+	// Render any remaining accumulated quads
+	if (!quadBuffer.empty())
+	{
+		// Set current color before rendering final batch
+		glColor4f(currentColorR / 255.0f, currentColorG / 255.0f, currentColorB / 255.0f, currentAlpha);
+		renderBatchedQuads();
+	}
 }
 
 int_t Font::width(const jstring &str)
@@ -351,14 +363,135 @@ jstring Font::trimStringToWidth(const jstring &str, int_t width, bool reverse)
 }
 
 // Get font atlas image for CPU-side text baking
-// Reloads the font texture image so we can sample glyphs
-BufferedImage Font::getFontAtlasImage() const
+// Caches the font texture image so we can sample glyphs without reloading from disk
+// Returns a const reference to avoid copying (BufferedImage contains unique_ptr and is non-copyable)
+const BufferedImage &Font::getFontAtlasImage() const
 {
-	// Reload the font atlas image from resource
+	// Cache the font atlas image to avoid expensive disk reads every frame
 	// This is used for CPU-side text baking in SignRenderer
-	// Note: Font constructor loads from the name passed to it, typically "/font/default.png"
-	// We reload it here for CPU-side access
-	using namespace Resource;
-	std::unique_ptr<std::istream> is(getResource(u"/font/default.png"));
-	return BufferedImage::ImageIO_read(*is);
+	// The image is only loaded once and then reused
+	if (!fontAtlasCached)
+	{
+		using namespace Resource;
+		std::unique_ptr<std::istream> is(getResource(u"/font/default.png"));
+		cachedFontAtlas = BufferedImage::ImageIO_read(*is);
+		fontAtlasCached = true;
+	}
+	return cachedFontAtlas;  // Return reference to avoid copy
+}
+
+// Initialize glyph VBOs and VAO (replaces display lists)
+void Font::initializeGlyphs()
+{
+	if (glyphsInitialized)
+		return;
+	
+	// Generate glyph VBOs (one per glyph, storing quad vertices)
+	glGenBuffers(256, glyphVBOs);
+	
+	// Create VAO for font rendering (shared layout for all glyphs)
+	glGenVertexArrays(1, &glyphVAO);
+	glBindVertexArray(glyphVAO);
+	
+	// Each glyph VBO contains 4 vertices with format: x, y, u, v
+	// Position: location 0, 2 floats
+	// Texture: location 1, 2 floats
+	for (int_t j = 0; j < 256; j++)
+	{
+		int_t ix = j % 16 * 8;
+		int_t iy = j / 16 * 8;
+		float s = 7.99f;
+		
+		float u0 = ix / 128.0f;
+		float v0 = iy / 128.0f;
+		float u1 = (ix + s) / 128.0f;
+		float v1 = (iy + s) / 128.0f;
+		
+		// Quad vertices: x, y, u, v per vertex (4 vertices)
+		float quadData[] = {
+			0.0f, s,     u0, v1,  // bottom-left
+			s,    s,     u1, v1,  // bottom-right
+			s,    0.0f,  u1, v0,  // top-right
+			0.0f, 0.0f,  u0, v0   // top-left
+		};
+		
+		glBindBuffer(GL_ARRAY_BUFFER, glyphVBOs[j]);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(quadData), quadData, GL_STATIC_DRAW);
+	}
+	
+	// Set up fixed-function vertex attribute pointers in VAO (position and texture coords)
+	// Use first VBO for attribute setup (VAO stores the layout)
+	glBindBuffer(GL_ARRAY_BUFFER, glyphVBOs[0]);
+	char *vbo_base = reinterpret_cast<char *>(0);
+	
+	// Position: 2 floats, stride 4 floats, offset 0
+	glVertexPointer(2, GL_FLOAT, 4 * sizeof(float), reinterpret_cast<GLvoid *>(vbo_base + 0));
+	glEnableClientState(GL_VERTEX_ARRAY);
+	
+	// Texture: 2 floats, stride 4 floats, offset 2 floats
+	glTexCoordPointer(2, GL_FLOAT, 4 * sizeof(float), reinterpret_cast<GLvoid *>(vbo_base + 2 * sizeof(float)));
+	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+	
+	// Unbind VAO (VBO binding and attribute layout remain stored in VAO)
+	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	
+	glyphsInitialized = true;
+}
+
+// Render batched quads from quadBuffer
+void Font::renderBatchedQuads()
+{
+	if (quadBuffer.empty())
+		return;
+	
+	// Create reusable batch VBO if needed
+	if (batchVBO == 0)
+	{
+		glGenBuffers(1, &batchVBO);
+	}
+	
+	// Use VAO for rendering if available, otherwise fall back to immediate mode
+	if (glyphVAO != 0)
+	{
+		// Upload batched quad data to VBO
+		glBindBuffer(GL_ARRAY_BUFFER, batchVBO);
+		glBufferData(GL_ARRAY_BUFFER, quadBuffer.size() * sizeof(float), quadBuffer.data(), GL_STREAM_DRAW);
+		
+		// Bind VAO (which stores the attribute layout)
+		glBindVertexArray(glyphVAO);
+		
+		// Update fixed-function vertex attribute pointers for this VBO
+		glBindBuffer(GL_ARRAY_BUFFER, batchVBO);
+		char *vbo_base = reinterpret_cast<char *>(0);
+		
+		// Position: 2 floats, stride 4 floats, offset 0
+		glVertexPointer(2, GL_FLOAT, 4 * sizeof(float), reinterpret_cast<GLvoid *>(vbo_base + 0));
+		glEnableClientState(GL_VERTEX_ARRAY);
+		
+		// Texture: 2 floats, stride 4 floats, offset 2 floats
+		glTexCoordPointer(2, GL_FLOAT, 4 * sizeof(float), reinterpret_cast<GLvoid *>(vbo_base + 2 * sizeof(float)));
+		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+		
+		// Draw batched quads (GL_QUADS mode, 4 vertices per quad)
+		int_t quadCount = static_cast<int_t>(quadBuffer.size()) / (4 * 4);  // 4 floats per vertex, 4 vertices per quad
+		glDrawArrays(GL_QUADS, 0, quadCount * 4);
+		
+		// Disable client states and cleanup
+		glDisableClientState(GL_VERTEX_ARRAY);
+		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		glBindVertexArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+	}
+	else
+	{
+		// Fallback: immediate mode rendering (shouldn't happen if glyphsInitialized is true)
+		glBegin(GL_QUADS);
+		for (size_t i = 0; i < quadBuffer.size(); i += 4)
+		{
+			glTexCoord2f(quadBuffer[i + 2], quadBuffer[i + 3]);
+			glVertex2f(quadBuffer[i], quadBuffer[i + 1]);
+		}
+		glEnd();
+	}
 }

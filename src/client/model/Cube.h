@@ -4,6 +4,7 @@
 
 #include "client/model/Vertex.h"
 #include "client/model/Polygon.h"
+#include "OpenGL.h"
 
 #include "util/Mth.h"
 
@@ -20,7 +21,13 @@ public:
 
 private:
 	bool compiled = false;
-	int_t list = 0;
+	GLuint cubeVBO = 0;
+	GLuint cubeVAO = 0;
+	int_t vertexCount = 0;
+	int_t indexCount = 0;  // For compatibility, equals vertexCount (GL_QUADS mode)
+	bool hasTex = false;
+	bool hasCol = false;
+	bool hasNorm = false;
 
 public:
 	bool mirror = false;
