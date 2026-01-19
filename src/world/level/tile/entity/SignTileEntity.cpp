@@ -1,6 +1,7 @@
 #include "world/level/tile/entity/SignTileEntity.h"
 
 #include "nbt/CompoundTag.h"
+#include "pc/OpenGL.h"
 
 // Beta: SignTileEntity() - constructor (SignTileEntity.java:7-9)
 SignTileEntity::SignTileEntity()
@@ -11,6 +12,17 @@ SignTileEntity::SignTileEntity()
 	messages[2] = u"";
 	messages[3] = u"";
 	selectedLine = -1;
+}
+
+// Destructor: Clean up baked texture
+SignTileEntity::~SignTileEntity()
+{
+	// Clean up baked texture if allocated
+	if (textTexId != 0)
+	{
+		glDeleteTextures(1, &textTexId);
+		textTexId = 0;
+	}
 }
 
 // Beta: SignTileEntity.save() - saves Text1-4 to NBT (SignTileEntity.java:12-18)
@@ -41,4 +53,8 @@ void SignTileEntity::load(CompoundTag &tag)
 			messages[i] = messages[i].substr(0, 15);
 		}
 	}
+	
+	// Performance: Invalidate caches after loading
+	invalidateWidthCache();
+	invalidateTextDisplayList();  // This now invalidates baked texture
 }
