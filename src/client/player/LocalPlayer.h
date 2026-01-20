@@ -27,6 +27,7 @@ public:
 
 private:
 	bool isInsidePortal = false;
+	bool wasInWaterLastTick = false;  // Track water entry for rumble (Controlify-style)
 
 public:
 	LocalPlayer(Minecraft &minecraft, Level &level, User *user, int_t dimension);
@@ -61,6 +62,11 @@ public:
 
 	bool isSneaking() override;
 	
+	// Controller input switching (Controlify-style)
+	void updatePlayerInput();
+	void ensureCorrectInput();
+	static bool shouldBeControllerInput();
+	
 	// Beta 1.2: LocalPlayer.handleInsidePortal() - matches newb12 LocalPlayer.java:158-165
 	void handleInsidePortal() override;
 	
@@ -71,4 +77,7 @@ public:
 	virtual void chat(const jstring& message);
 
 	void respawn() override;
+	
+	// Override actuallyHurt to add rumble support (Controlify-style)
+	void actuallyHurt(int_t dmg) override;
 };

@@ -652,3 +652,45 @@ const ItemStack& WorkbenchScreen::getCraftSlot(int_t slot) const
 	static const ItemStack empty;
 	return empty;
 }
+
+void WorkbenchScreen::collectSlotSnapPoints(std::vector<std::pair<int_t, int_t>> &points)
+{
+	// Collect all slot center positions for snapping (Controlify-style)
+	int_t xo = (width - imageWidth) / 2;
+	int_t yo = (height - imageHeight) / 2;
+	
+	// Crafting slots (3x3 grid at 30 + col*18, 17 + row*18) - matches render positions
+	for (int_t row = 0; row < 3; ++row)
+	{
+		for (int_t col = 0; col < 3; ++col)
+		{
+			int_t slotX = xo + 30 + col * 18;
+			int_t slotY = yo + 17 + row * 18;
+			points.push_back({slotX + 8, slotY + 8}); // Center of 16x16 slot
+		}
+	}
+	
+	// Result slot at 124, 35 - matches render position
+	int_t resultSlotX = xo + 124;
+	int_t resultSlotY = yo + 35;
+	points.push_back({resultSlotX + 8, resultSlotY + 8});
+	
+	// Player inventory slots (3 rows of 9, starting at yo + 84)
+	for (int_t row = 0; row < 3; ++row)
+	{
+		for (int_t col = 0; col < 9; ++col)
+		{
+			int_t slotX = xo + 8 + col * 18;
+			int_t slotY = yo + 84 + row * 18;
+			points.push_back({slotX + 8, slotY + 8});
+		}
+	}
+	
+	// Hotbar slots (9 slots at y=142)
+	for (int_t i = 0; i < 9; ++i)
+	{
+		int_t slotX = xo + 8 + i * 18;
+		int_t slotY = yo + 142;
+		points.push_back({slotX + 8, slotY + 8});
+	}
+}

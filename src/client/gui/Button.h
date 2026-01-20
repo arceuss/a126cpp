@@ -10,13 +10,11 @@ class Minecraft;
 
 class Button : public GuiComponent
 {
-protected:
-	int_t w = 200;
-	int_t h = 20;
-
 public:
 	int_t x = 0;
 	int_t y = 0;
+	int_t w = 200;
+	int_t h = 20;
 
 	jstring msg;
 

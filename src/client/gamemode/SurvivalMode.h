@@ -13,6 +13,10 @@ private:
 	float oDestroyProgress = 0.0f;
 	float destroyTicks = 0.0f;
 	int_t destroyDelay = 0;
+	
+	// Rumble for block breaking (Controlify-style)
+	float blockBreakRumbleStrength = 0.0f;  // Current rumble strength (0.0 = stopped)
+	int_t blockBreakRumbleTicks = 0;  // Ticks since starting to break
 
 public:
 	SurvivalMode(Minecraft &minecraft);
@@ -33,4 +37,10 @@ public:
 	void initLevel(std::shared_ptr<Level> level) override;
 
 	void tick() override;
+
+private:
+	// Rumble helpers for block breaking (Controlify-style)
+	void startBlockBreakRumble(int_t x, int_t y, int_t z);
+	void updateBlockBreakRumble();  // Call every tick while breaking
+	void stopBlockBreakRumble();
 };

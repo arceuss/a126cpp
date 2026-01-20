@@ -3,6 +3,7 @@
 #include "client/Minecraft.h"
 #include "client/Lighting.h"
 #include "client/gui/ScreenSizeCalculator.h"
+#include "client/player/ControllerInput.h"
 
 #include "client/renderer/culling/FrustumCuller.h"
 
@@ -16,6 +17,9 @@
 #include "lwjgl/Display.h"
 #include "lwjgl/GLContext.h"
 #include "lwjgl/Keyboard.h"
+#include "lwjgl/Mouse.h"
+#include <algorithm>
+#include <cmath>
 
 #include "java/System.h"
 #include "world/phys/Vec3.h"
@@ -318,16 +322,27 @@ void GameRenderer::render(float a)
 		lastActiveTime = System::currentTimeMillis();
 	}
 
-	// Mouse movement
+	// Mouse movement or controller look
 	if (mc.mouseGrabbed)
 	{
-		mc.mouseHandler.poll();
-		float sens = mc.options.mouseSensitivity * 0.6f + 0.2f;
-		float sens2 = sens * sens * sens * 8.0f;
-		float dx = mc.mouseHandler.xd * sens2;
-		float dy = mc.mouseHandler.yd * sens2;
+		// Check if using controller input
+		auto* controllerInput = dynamic_cast<ControllerInput*>(mc.player->input.get());
+		if (controllerInput != nullptr)
+		{
+			// Use controller right stick for look (pass partial tick as deltaTime, matching Controlify)
+			controllerInput->updateLook(*mc.player, mc.options.mouseSensitivity, a);
+		}
+		else
+		{
+			// Use mouse for look
+			mc.mouseHandler.poll();
+			float sens = mc.options.mouseSensitivity * 0.6f + 0.2f;
+			float sens2 = sens * sens * sens * 8.0f;
+			float dx = mc.mouseHandler.xd * sens2;
+			float dy = mc.mouseHandler.yd * sens2;
 
-		mc.player->turn(dx, dy * (mc.options.invertYMouse ? -1 : 1));
+			mc.player->turn(dx, dy * (mc.options.invertYMouse ? -1 : 1));
+		}
 	}
 
 	if (mc.noRender)
@@ -337,8 +352,25 @@ void GameRenderer::render(float a)
 	int_t w = ssc.getWidth();
 	int_t h = ssc.getHeight();
 
-	int_t xm = lwjgl::Mouse::getX() * w / mc.width;
-	int_t ym = h - lwjgl::Mouse::getY() * h / mc.height - 1;
+	int_t xm, ym;
+	
+	// Use controller cursor position if controller input is active, otherwise use real mouse
+	// This allows proper hover detection for both input methods
+	if (mc.controllerInputActive && mc.screen != nullptr)
+	{
+		// Use controller virtual cursor position
+		ScreenSizeCalculator ssc(mc.width, mc.height, mc.options);
+		int_t screenW = ssc.getWidth();
+		int_t screenH = ssc.getHeight();
+		xm = static_cast<int_t>(mc.controllerCursorX);
+		ym = static_cast<int_t>(mc.controllerCursorY);
+	}
+	else
+	{
+		// Use real mouse position
+		xm = lwjgl::Mouse::getX() * w / mc.width;
+		ym = h - lwjgl::Mouse::getY() * h / mc.height - 1;
+	}
 
 	if (mc.level != nullptr)
 	{
@@ -360,6 +392,11 @@ void GameRenderer::render(float a)
 	{
 		glClear(GL_DEPTH_BUFFER_BIT);
 		mc.screen->render(xm, ym, a);
+		// Render controller cursor if active (rendered from Screen so it uses proper coordinate system)
+		if (mc.controllerCursorVisible && mc.controllerCursorTexture >= 0)
+		{
+			mc.screen->renderControllerCursor(xm, ym, mc.controllerCursorTexture);
+		}
 	}
 }
 

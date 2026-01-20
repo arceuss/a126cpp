@@ -234,6 +234,40 @@ void FurnaceScreen::setFurnaceSlot(int_t slot, std::shared_ptr<ItemStack> stack)
 	}
 }
 
+void FurnaceScreen::collectSlotSnapPoints(std::vector<std::pair<int_t, int_t>> &points)
+{
+	// Collect all slot center positions for snapping (Controlify-style)
+	int_t xo = (width - imageWidth) / 2;
+	int_t yo = (height - imageHeight) / 2;
+	
+	// Furnace slots
+	// Slot 0: Input (56, 17)
+	points.push_back({xo + 56 + 8, yo + 17 + 8});
+	// Slot 1: Fuel (56, 53)
+	points.push_back({xo + 56 + 8, yo + 53 + 8});
+	// Slot 2: Output (116, 35)
+	points.push_back({xo + 116 + 8, yo + 35 + 8});
+	
+	// Player inventory slots (3 rows of 9, starting at yo + 84)
+	for (int_t row = 0; row < 3; ++row)
+	{
+		for (int_t col = 0; col < 9; ++col)
+		{
+			int_t slotX = xo + 8 + col * 18;
+			int_t slotY = yo + 84 + row * 18;
+			points.push_back({slotX + 8, slotY + 8});
+		}
+	}
+	
+	// Hotbar slots (9 slots at y=142)
+	for (int_t i = 0; i < 9; ++i)
+	{
+		int_t slotX = xo + 8 + i * 18;
+		int_t slotY = yo + 142;
+		points.push_back({slotX + 8, slotY + 8});
+	}
+}
+
 // Beta: FurnaceScreen.mouseClicked() - handles mouse clicks
 void FurnaceScreen::mouseClicked(int_t x, int_t y, int_t buttonNum)
 {

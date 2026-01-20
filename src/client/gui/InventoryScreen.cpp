@@ -796,6 +796,56 @@ void InventoryScreen::handleSlotClick(ItemStack &slotStack, ItemStack *carried, 
 }
 
 // Beta: Update crafting result when grid changes (InventoryMenu.java:62-64)
+void InventoryScreen::collectSlotSnapPoints(std::vector<std::pair<int_t, int_t>> &points)
+{
+	// Collect all slot center positions for snapping (Controlify-style)
+	int_t xo = (width - imageWidth) / 2;
+	int_t yo = (height - imageHeight) / 2;
+	
+	// Crafting slots (2x2 grid at 88, 26)
+	for (int_t row = 0; row < 2; ++row)
+	{
+		for (int_t col = 0; col < 2; ++col)
+		{
+			int_t slotX = xo + 88 + col * 18;
+			int_t slotY = yo + 26 + row * 18;
+			points.push_back({slotX + 8, slotY + 8}); // Center of 16x16 slot
+		}
+	}
+	
+	// Result slot at 144, 36
+	int_t resultSlotX = xo + 144;
+	int_t resultSlotY = yo + 36;
+	points.push_back({resultSlotX + 8, resultSlotY + 8});
+	
+	// Armor slots at 8, 8 + i*18
+	for (int_t i = 0; i < 4; ++i)
+	{
+		int_t slotX = xo + 8;
+		int_t slotY = yo + 8 + i * 18;
+		points.push_back({slotX + 8, slotY + 8});
+	}
+	
+	// Main inventory slots (3 rows of 9)
+	for (int_t row = 0; row < 3; ++row)
+	{
+		for (int_t col = 0; col < 9; ++col)
+		{
+			int_t slotX = xo + 8 + col * 18;
+			int_t slotY = yo + 84 + row * 18;
+			points.push_back({slotX + 8, slotY + 8});
+		}
+	}
+	
+	// Hotbar slots (9 slots at y=142)
+	for (int_t i = 0; i < 9; ++i)
+	{
+		int_t slotX = xo + 8 + i * 18;
+		int_t slotY = yo + 142;
+		points.push_back({slotX + 8, slotY + 8});
+	}
+}
+
 void InventoryScreen::updateCraftingResult()
 {
 	// Beta: Use Recipes system to find matching recipe (InventoryMenu.java:63)

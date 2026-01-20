@@ -252,6 +252,16 @@ void Options::load()
 			username = String::fromUTF8(value);
 		if (key == "lastServer")
 			lastMpIp = String::fromUTF8(value);
+		if (key == "calibratedLeftStickDeadzone")
+			calibratedLeftStickDeadzone = readFloat(value);
+		if (key == "calibratedRightStickDeadzone")
+			calibratedRightStickDeadzone = readFloat(value);
+		if (key == "deadzonesCalibrated")
+			deadzonesCalibrated = value == "true";
+		if (key == "controllerHorizontalLookSensitivity")
+			controllerHorizontalLookSensitivity = readFloat(value);
+		if (key == "controllerVerticalLookSensitivity")
+			controllerVerticalLookSensitivity = readFloat(value);
 
 		jstring jkey = String::fromUTF8(key);
 		for (int_t i = 0; i < keyMappings.size(); i++)
@@ -294,6 +304,11 @@ void Options::save()
 	*os << "skin:" << String::toUTF8(skin) << '\n';
 	*os << "username:" << String::toUTF8(username) << '\n';
 	*os << "lastServer:" << String::toUTF8(lastMpIp) << '\n';
+	*os << "calibratedLeftStickDeadzone:" << calibratedLeftStickDeadzone << '\n';
+	*os << "calibratedRightStickDeadzone:" << calibratedRightStickDeadzone << '\n';
+	*os << "deadzonesCalibrated:" << deadzonesCalibrated << '\n';
+	*os << "controllerHorizontalLookSensitivity:" << controllerHorizontalLookSensitivity << '\n';
+	*os << "controllerVerticalLookSensitivity:" << controllerVerticalLookSensitivity << '\n';
 
 	for (int_t i = 0; i < keyMappings.size(); i++)
 		*os << "key_" << String::toUTF8(keyMappings[i]->name) << ':' << keyMappings[i]->key << '\n';

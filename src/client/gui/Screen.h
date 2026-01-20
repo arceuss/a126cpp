@@ -23,7 +23,7 @@ public:
 	int_t width = 0;
 	int_t height = 0;
 
-protected:
+	// Public for controller navigation
 	std::vector<std::shared_ptr<Button>> buttons;
 
 public:
@@ -47,8 +47,11 @@ public:
 private:
 	std::shared_ptr<Button> clickedButton = nullptr;
 
-protected:
+public:
+	// Public for controller GUI navigation
 	virtual void mouseClicked(int_t x, int_t y, int_t buttonNum);
+
+protected:
 	virtual void mouseReleased(int_t x, int_t y, int_t buttonNum);
 
 	virtual void buttonClicked(Button &button);
@@ -71,4 +74,23 @@ public:
 	virtual bool isPauseScreen();
 
 	virtual void confirmResult(bool result, int_t id);
+	
+	// Controller slot snapping support (Controlify-style)
+	virtual void collectSlotSnapPoints(std::vector<std::pair<int_t, int_t>> &points); // Collect (x, y) slot centers
+	
+	// Controller cursor rendering (Controlify-style)
+	void renderControllerCursor(int_t xm, int_t ym, int_t cursorTexture);
+	
+	// Check if screen has slots (container screen) vs buttons (menu screen)
+	virtual bool hasSlots() const { return false; } // Override in container screens
+	
+	// Get button centers for D-pad navigation
+	void collectButtonCenters(std::vector<std::pair<int_t, int_t>> &points);
+	
+	// Get currently focused button index for button navigation
+	int_t getFocusedButtonIndex() const { return focusedButtonIndex; }
+	void setFocusedButtonIndex(int_t index) { focusedButtonIndex = index; }
+
+private:
+	int_t focusedButtonIndex = -1; // -1 = no focus, >= 0 = button index
 };

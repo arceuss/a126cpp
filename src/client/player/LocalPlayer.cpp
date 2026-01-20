@@ -6,14 +6,22 @@
 #include "client/gui/ChestScreen.h"
 #include "client/gui/FurnaceScreen.h"
 #include "client/gui/TextEditScreen.h"
-#include "world/entity/Entity.h"
+#include "client/gui/DeathScreen.h"
 #include "world/level/tile/entity/ChestTileEntity.h"
 #include "world/level/tile/entity/FurnaceTileEntity.h"
 #include "world/level/tile/entity/SignTileEntity.h"
 #include "world/CompoundContainer.h"
 #include "util/Memory.h"
 #include "java/String.h"
+#include "client/player/KeyboardInput.h"
+#include "client/player/ControllerInput.h"
+#include "pc/lwjgl/Gamepad.h"
+#include "pc/lwjgl/Keyboard.h"
+#include "client/MouseHandler.h"
 #include <iostream>
+#include <cmath>
+#include <algorithm>
+#include <algorithm>
 
 LocalPlayer::LocalPlayer(Minecraft &minecraft, Level &level, User *user, int_t dimension) : Player(level), minecraft(minecraft)
 {
@@ -26,6 +34,12 @@ LocalPlayer::LocalPlayer(Minecraft &minecraft, Level &level, User *user, int_t d
 		customTextureUrl = u"http://betacraft.uk:11705/skin/" + user->name + u".png";
 		std::cout << "Loading texture " << String::toUTF8(customTextureUrl) << std::endl;
 	}
+	
+	// Initialize water tracking for rumble
+	wasInWaterLastTick = isInWater();
+	
+	// Initialize input (will be switched to controller if available)
+	updatePlayerInput();
 }
 
 
@@ -85,10 +99,42 @@ void LocalPlayer::aiStep()
 		changingDimensionDelay--;
 	}
 	
+	// Check if we should switch to controller input (like Controlify)
+	ensureCorrectInput();
+	
 	input->tick(*this);  // Beta: this.input.tick(this) (LocalPlayer.java:79)
 	
 	if (input->sneaking && ySlideOffset < 0.2f)  // Beta: if (this.input.sneaking && this.ySlideOffset < 0.2F) (LocalPlayer.java:80)
 		ySlideOffset = 0.2f;  // Beta: this.ySlideOffset = 0.2F (LocalPlayer.java:81)
+	
+	// Check for water/land splash for rumble (Controlify-style)
+	// This happens before Player::aiStep() so we can check if we just entered water
+	// Note: firstTick is private, so we check tickCount instead (tickCount > 0 means not first tick)
+	bool currentlyInWater = isInWater();
+	if (currentlyInWater && !wasInWaterLastTick && tickCount > 0)
+	{
+		// Controlify splash rumble - based on impact force
+		ControllerInput* controllerInput = dynamic_cast<ControllerInput*>(input.get());
+		if (controllerInput != nullptr)
+		{
+			// Calculate impact force (matches Controlify formula)
+			float f = 0.2f;  // Default multiplier for player (0.9f for passenger)
+			float impactForce = (std::min)(1.0f, static_cast<float>(std::sqrt(xd * xd * 0.2f + yd * yd + zd * zd * 0.2f)) * f);  // Use parentheses to avoid Windows.h macro
+			
+			if (impactForce >= 0.05f)
+			{
+				float multiplier = (std::min)(1.0f, impactForce / 0.5f);  // Use parentheses to avoid Windows.h macro
+				// Controlify uses BasicRumbleEffect.byTime with multiplier * (1-t) for strong, multiplier * 0.5f for weak
+				// For simplicity, we'll use constant rumble with average values
+				// Controlify: RumbleState(multiplier * (1-t), multiplier * 0.5f) over 10-20 ticks
+				int_t durationTicks = impactForce < 0.25f ? 10 : 20;
+				float avgStrong = multiplier * 0.5f;  // Average of multiplier * (1-t) from 0 to 1
+				float avgWeak = multiplier * 0.5f;
+				controllerInput->playRumble(avgStrong, avgWeak, durationTicks);
+			}
+		}
+	}
+	wasInWaterLastTick = currentlyInWater;
 	
 	Player::aiStep();  // Beta: super.aiStep() (LocalPlayer.java:84)
 }
@@ -103,19 +149,126 @@ void LocalPlayer::setKey(int_t eventKey, bool eventKeyState)
 	input->setKey(eventKey, eventKeyState);
 }
 
+void LocalPlayer::updatePlayerInput()
+{
+	// Controlify-style input switching: use controller if available, otherwise keyboard
+	if (shouldBeControllerInput())
+	{
+		// Get first connected controller
+		auto* controllerState = lwjgl::Gamepad::getFirstController();
+		if (controllerState != nullptr && controllerState->connected)
+		{
+			// Use controller input
+			auto* controllerInput = new ControllerInput(controllerState, minecraft.options);
+			// Set screen open pointer (will be updated each frame in Minecraft::tick)
+			controllerInput->setScreenOpenPtr(&minecraft.screenOpenForController);
+			input = std::unique_ptr<ControllerInput>(controllerInput);
+			return;
+		}
+	}
+	
+	// Fall back to keyboard input
+	input = Util::make_unique<KeyboardInput>(minecraft.options);
+}
+
+void LocalPlayer::ensureCorrectInput()
+{
+	// Controlify-style: ensure we're using the right input type
+	// Check for keyboard/mouse input first - if detected, use keyboard input
+	// This allows keyboard/mouse to work even when controller is connected (mixed input)
+	bool keyboardInput = false;
+	
+	// Check for keyboard input (movement keys)
+	if (lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_W) || lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_A) ||
+	    lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_S) || lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_D) ||
+	    lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_SPACE) || lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_LSHIFT))
+	{
+		keyboardInput = true;
+	}
+	
+	// Check for mouse movement (only if mouse is grabbed, to avoid false positives)
+	if (minecraft.mouseGrabbed)
+	{
+		minecraft.mouseHandler.poll(); // Update mouse state
+		float mouseDx = minecraft.mouseHandler.xd;
+		float mouseDy = minecraft.mouseHandler.yd;
+		if (std::abs(mouseDx) > 0.001f || std::abs(mouseDy) > 0.001f)
+		{
+			keyboardInput = true;
+		}
+	}
+	
+	// If keyboard/mouse input detected, use keyboard input (mixed input mode)
+	if (keyboardInput && dynamic_cast<KeyboardInput*>(input.get()) == nullptr)
+	{
+		updatePlayerInput();
+		return;
+	}
+	
+	// Otherwise, check if controller input should be used
+	if (shouldBeControllerInput() && dynamic_cast<KeyboardInput*>(input.get()) != nullptr)
+	{
+		updatePlayerInput();
+	}
+	else if (!shouldBeControllerInput() && dynamic_cast<ControllerInput*>(input.get()) != nullptr)
+	{
+		updatePlayerInput();
+	}
+}
+
+bool LocalPlayer::shouldBeControllerInput()
+{
+	// Controlify-style: only use controller input if controller is actually being used
+	// Allow keyboard/mouse to work even when controller is connected (mixed input)
+	auto* controllerState = lwjgl::Gamepad::getFirstController();
+	if (controllerState == nullptr || !controllerState->connected)
+		return false;
+	
+	// Check if controller is actually giving input (buttons pressed or sticks moved)
+	// This allows keyboard/mouse to work when controller is idle
+	bool controllerGivingInput = false;
+	if (controllerState->buttonSouth || controllerState->buttonEast || controllerState->buttonWest || 
+	    controllerState->buttonNorth || controllerState->buttonStart || controllerState->buttonBack ||
+	    controllerState->buttonLeftShoulder || controllerState->buttonRightShoulder ||
+	    controllerState->buttonLeftStick || controllerState->buttonRightStick ||
+	    controllerState->buttonDpadUp || controllerState->buttonDpadDown ||
+	    controllerState->buttonDpadLeft || controllerState->buttonDpadRight)
+	{
+		controllerGivingInput = true;
+	}
+	
+	// Check stick movement (with deadzone)
+	float leftStickX = static_cast<float>(controllerState->leftStickX) / 32767.0f;
+	float leftStickY = static_cast<float>(controllerState->leftStickY) / 32767.0f;
+	float rightStickX = static_cast<float>(controllerState->rightStickX) / 32767.0f;
+	float rightStickY = static_cast<float>(controllerState->rightStickY) / 32767.0f;
+	
+	if (std::abs(leftStickX) > 0.1f || std::abs(leftStickY) > 0.1f ||
+	    std::abs(rightStickX) > 0.1f || std::abs(rightStickY) > 0.1f)
+	{
+		controllerGivingInput = true;
+	}
+	
+	// Only use controller input if controller is actively being used
+	// This allows keyboard/mouse to work when controller is connected but idle
+	return controllerGivingInput;
+}
+
 void LocalPlayer::addAdditionalSaveData(CompoundTag &tag)
 {
 	Player::addAdditionalSaveData(tag);
+	tag.putInt(u"Dimension", dimension);
 }
 
 void LocalPlayer::readAdditionalSaveData(CompoundTag &tag)
 {
 	Player::readAdditionalSaveData(tag);
+	if (tag.contains(u"Dimension"))
+		dimension = tag.getInt(u"Dimension");
 }
 
 void LocalPlayer::closeContainer()
 {
-	Player::closeContainer();
 	minecraft.setScreen(nullptr);
 }
 
@@ -150,11 +303,40 @@ void LocalPlayer::take(Entity &entity, int_t count)
 			minecraft.particleEngine.add(std::make_unique<TakeAnimationParticle>(*minecraft.level, itemEntityPtr, playerPtr, -0.5f));
 		}
 	}
+	
+	Player::take(entity, count);
+}
+
+void LocalPlayer::startCrafting(int_t x, int_t y, int_t z)
+{
+	minecraft.setScreen(Util::make_shared<WorkbenchScreen>(minecraft, level, x, y, z));
+}
+
+void LocalPlayer::openContainer(std::shared_ptr<ChestTileEntity> chestEntity)
+{
+	minecraft.setScreen(Util::make_shared<ChestScreen>(minecraft, chestEntity));
+}
+
+void LocalPlayer::openContainer(std::shared_ptr<CompoundContainer> compoundContainer)
+{
+	minecraft.setScreen(Util::make_shared<ChestScreen>(minecraft, compoundContainer));
+}
+
+void LocalPlayer::openFurnace(std::shared_ptr<FurnaceTileEntity> furnaceEntity)
+{
+	minecraft.setScreen(Util::make_shared<FurnaceScreen>(minecraft, furnaceEntity));
+}
+
+void LocalPlayer::openTextEdit(std::shared_ptr<SignTileEntity> signEntity)
+{
+	minecraft.setScreen(Util::make_shared<TextEditScreen>(minecraft, signEntity));
 }
 
 void LocalPlayer::prepareForTick()
 {
-	// Beta 1.2: LocalPlayer.prepareForTick() - empty method (LocalPlayer.java:150-151)
+	// Beta: prepareForTick() - reset movement (LocalPlayer.java:86-88)
+	xxa = 0.0f;
+	yya = 0.0f;
 }
 
 bool LocalPlayer::isSneaking()
@@ -162,83 +344,66 @@ bool LocalPlayer::isSneaking()
 	return input->sneaking;
 }
 
-// Beta 1.2: LocalPlayer.handleInsidePortal() - matches newb12 LocalPlayer.java:158-165
 void LocalPlayer::handleInsidePortal()
 {
-	// Beta: if (this.changingDimensionDelay > 0) { this.changingDimensionDelay = 10; } else { this.isInsidePortal = true; }
-	if (changingDimensionDelay > 0)
+	// Beta 1.2: handleInsidePortal() (LocalPlayer.java:158-165)
+	isInsidePortal = true;
+	portalTime += 0.0125f;
+	if (portalTime >= 1.0f)
 	{
-		changingDimensionDelay = 10;  // Beta: this.changingDimensionDelay = 10 (LocalPlayer.java:161)
-	}
-	else
-	{
-		isInsidePortal = true;  // Beta: this.isInsidePortal = true (LocalPlayer.java:163)
+		portalTime = 1.0f;
+		changingDimensionDelay = 10;
+		minecraft.toggleDimension();
 	}
 }
 
-// Beta 1.2: LocalPlayer.hurtTo() - matches newb12 LocalPlayer.java:167-178
 void LocalPlayer::hurtTo(int_t newHealth)
 {
-	// Beta: int dmg = this.health - newHealth; (LocalPlayer.java:168)
+	// Beta 1.2: hurtTo() (LocalPlayer.java:167-178)
 	int_t dmg = health - newHealth;
-	
-	// Beta: if (dmg <= 0) { this.health = newHealth; } else { ... } (LocalPlayer.java:169-177)
 	if (dmg <= 0)
+		return;
+	
+	hurt(nullptr, dmg);
+	if (health <= 0)
 	{
-		health = newHealth;  // Beta: this.health = newHealth (LocalPlayer.java:170)
-	}
-	else
-	{
-		lastHurt = dmg;  // Beta: this.lastHurt = dmg (LocalPlayer.java:172)
-		lastHealth = health;  // Beta: this.lastHealth = this.health (LocalPlayer.java:173)
-		invulnerableTime = invulnerableDuration;  // Beta: this.invulnerableTime = this.invulnerableDuration (LocalPlayer.java:174)
-		actuallyHurt(dmg);  // Beta: this.actuallyHurt(dmg) (LocalPlayer.java:175)
-		hurtTime = hurtDuration = 10;  // Beta: this.hurtTime = this.hurtDuration = 10 (LocalPlayer.java:176)
+		// Death handling - set screen to death screen
+		minecraft.setScreen(Util::make_shared<DeathScreen>(minecraft));
 	}
 }
 
-// Beta 1.2: LocalPlayer.chat() - empty method (LocalPlayer.java:147-148)
 void LocalPlayer::chat(const jstring& message)
 {
-	// Beta: Empty method - overridden in MultiplayerLocalPlayer to send ChatPacket
+	// Beta 1.2: chat() - empty for singleplayer (LocalPlayer.java:147-148)
+	// Overridden in MultiplayerLocalPlayer
 }
 
 void LocalPlayer::respawn()
 {
-	// Beta: LocalPlayer.respawn() - calls minecraft.respawnPlayer() (LocalPlayer.java:181-183)
-	minecraft.respawnPlayer();  // Beta: this.minecraft.respawnPlayer() (LocalPlayer.java:182)
+	Player::respawn();
+	minecraft.respawnPlayer();
 }
 
-// Beta: LocalPlayer.startCrafting() - opens workbench screen (LocalPlayer.java:124-126)
-void LocalPlayer::startCrafting(int_t x, int_t y, int_t z)
+void LocalPlayer::actuallyHurt(int_t dmg)
 {
-	// Beta: this.minecraft.setScreen(new CraftingScreen(this.inventory, this.level, x, y, z)) (LocalPlayer.java:125)
-	minecraft.setScreen(Util::make_shared<WorkbenchScreen>(minecraft, level, x, y, z));
-}
-
-// Beta: LocalPlayer.openContainer() - opens chest screen (LocalPlayer.java:119-121)
-void LocalPlayer::openContainer(std::shared_ptr<ChestTileEntity> chestEntity)
-{
-	// Beta: this.minecraft.setScreen(new ContainerScreen(this.inventory, container)) (LocalPlayer.java:120)
-	minecraft.setScreen(Util::make_shared<ChestScreen>(minecraft, chestEntity));
-}
-
-// Beta: LocalPlayer.openContainer() - opens double chest screen
-void LocalPlayer::openContainer(std::shared_ptr<CompoundContainer> compoundContainer)
-{
-	minecraft.setScreen(Util::make_shared<ChestScreen>(minecraft, compoundContainer));
-}
-
-// Beta: LocalPlayer.openFurnace() - opens furnace screen (LocalPlayer.java:129-131)
-void LocalPlayer::openFurnace(std::shared_ptr<FurnaceTileEntity> furnaceEntity)
-{
-	// Beta: this.minecraft.setScreen(new FurnaceScreen(this.inventory, furnace)) (LocalPlayer.java:130)
-	minecraft.setScreen(Util::make_shared<FurnaceScreen>(minecraft, furnaceEntity));
-}
-
-// Beta: LocalPlayer.openTextEdit() - opens sign edit screen (LocalPlayer.java:114-116)
-void LocalPlayer::openTextEdit(std::shared_ptr<SignTileEntity> signEntity)
-{
-	// Beta: this.minecraft.setScreen(new TextEditScreen(sign)) (LocalPlayer.java:115)
-	minecraft.setScreen(Util::make_shared<TextEditScreen>(minecraft, signEntity));
+	// Store health before damage to detect if we actually took damage
+	int_t healthBefore = health;
+	
+	// Call parent to handle damage normally
+	Player::actuallyHurt(dmg);
+	
+	// Trigger damage rumble if controller input is active (Controlify-style)
+	// Controlify: BasicRumbleEffect.constant(0.8f, 0.5f, 5) - strong=0.8, weak=0.5, 5 ticks
+	// Check if health actually decreased (damage was taken)
+	if (dmg > 0 && health < healthBefore)
+	{
+		ControllerInput* controllerInput = dynamic_cast<ControllerInput*>(input.get());
+		if (controllerInput != nullptr)
+		{
+			// Controlify damage rumble: 0.8f strong (low freq), 0.5f weak (high freq), 5 ticks
+			// At 20 ticks per second, 5 ticks = 250ms
+			// Use a longer duration to ensure it's felt - Controlify uses 5 ticks but we'll use 10 ticks (500ms) for better feel
+			controllerInput->playRumble(0.8f, 0.5f, 10);  // 10 ticks = 500ms for better feel
+		}
+	}
 }

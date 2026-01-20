@@ -109,6 +109,17 @@ public:
 
 	jstring lastMpIp = u"";
 
+	// Controller calibration (Controlify-style)
+	// Calibrated deadzones for left and right sticks
+	// These are calculated during calibration: maxAbs + 0.08f
+	float calibratedLeftStickDeadzone = 0.0f;   // 0.0f = not calibrated, use default
+	float calibratedRightStickDeadzone = 0.0f; // 0.0f = not calibrated, use default
+	bool deadzonesCalibrated = false;          // Whether calibration has been performed
+	
+	// Controller look sensitivity (Controlify defaults: hLookSensitivity = 1f, vLookSensitivity = 0.9f)
+	float controllerHorizontalLookSensitivity = 1.0f;  // Horizontal look sensitivity (0.1-2.0)
+	float controllerVerticalLookSensitivity = 0.9f;      // Vertical look sensitivity (0.1-2.0)
+
 	Options(Minecraft &minecraft);
 	void open(File *optionsFile);
 

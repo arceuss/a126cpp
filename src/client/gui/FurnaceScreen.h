@@ -61,4 +61,10 @@ private:
 	
 	// Beta: renderSlot() - renders a single inventory slot
 	void renderSlot(int_t slot, int_t x, int_t y, ItemStack &itemStack);
+	
+	// Controller slot snapping support (Controlify-style)
+	void collectSlotSnapPoints(std::vector<std::pair<int_t, int_t>> &points) override;
+	
+	// Container screens have slots
+	bool hasSlots() const override { return true; }
 };

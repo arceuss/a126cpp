@@ -10,6 +10,8 @@
 #include "network/Packet102WindowClick.h"
 #include "network/Packet18ArmAnimation.h"
 #include "client/player/EntityClientPlayerMP.h"
+#include "client/player/LocalPlayer.h"
+#include "client/player/ControllerInput.h"
 #include "world/item/ItemStack.h"
 #include "world/level/tile/Tile.h"
 #include "Facing.h"
@@ -19,6 +21,7 @@
 #include "world/level/Level.h"
 #include "util/Memory.h"
 #include <cmath>
+#include <algorithm>
 
 MultiplayerMode::MultiplayerMode(Minecraft &minecraft, NetClientHandler* netHandler)
 	: GameMode(minecraft)
@@ -108,6 +111,7 @@ void MultiplayerMode::continueDestroyBlock(int_t x, int_t y, int_t z, Facing fac
 			if (blockId == 0)
 			{
 				isHittingBlock = false;
+				stopBlockBreakRumble();  // Stop rumble if block is air
 				return;
 			}
 			
@@ -137,6 +141,10 @@ void MultiplayerMode::continueDestroyBlock(int_t x, int_t y, int_t z, Facing fac
 					// Alpha 1.2.6: Send block dig packet with status 2 (finished)
 					// Use the stored face from when we started breaking, not the current hit result face
 					netHandler->addToSendQueue(new Packet14BlockDig(2, x, y, z, static_cast<int>(currentBlockFace)));
+					
+					// Stop block break rumble before destroying block (Controlify-style)
+					stopBlockBreakRumble();
+					
 					destroyBlock(x, y, z, currentBlockFace);
 					curBlockDamageMP = 0.0f;
 					prevBlockDamageMP = 0.0f;
@@ -144,6 +152,8 @@ void MultiplayerMode::continueDestroyBlock(int_t x, int_t y, int_t z, Facing fac
 					blockHitDelay = 5;
 					currentBlockFace = Facing::NONE;
 				}
+				// Note: Block break rumble is updated in tick() method every frame
+				// No need to call updateBlockBreakRumble() here
 			}
 		}
 		else
@@ -164,6 +174,9 @@ void MultiplayerMode::stopDestroyBlock()
 	// The server will cancel breaking when it doesn't receive continue packets
 	curBlockDamageMP = 0.0f;
 	isHittingBlock = false;
+	
+	// Stop block break rumble (Controlify-style)
+	stopBlockBreakRumble();
 }
 
 void MultiplayerMode::render(float a)
@@ -244,6 +257,12 @@ void MultiplayerMode::tick()
 	syncCurrentPlayItem();
 	prevBlockDamageMP = curBlockDamageMP;
 	// Note: Sound stopping (func_4033_c) is handled elsewhere
+	
+	// Update block break rumble every tick while breaking (Controlify-style)
+	if (isHittingBlock && blockBreakRumbleStrength > 0.0f)
+	{
+		updateBlockBreakRumble();
+	}
 }
 
 void MultiplayerMode::initLevel(std::shared_ptr<Level> level)
@@ -446,6 +465,8 @@ void MultiplayerMode::clickBlock(int_t x, int_t y, int_t z, Facing face)
 				// Alpha 1.2.6: Send status 2 (finished) before removing block
 				// Java: In sendBlockRemoving, sends Packet14BlockDig(2) then sendBlockRemoved
 				netHandler->addToSendQueue(new Packet14BlockDig(2, x, y, z, static_cast<int>(face)));
+				
+				// No need to start/stop rumble for instantly breakable blocks
 				destroyBlock(x, y, z, face);
 			}
 			else
@@ -459,7 +480,96 @@ void MultiplayerMode::clickBlock(int_t x, int_t y, int_t z, Facing face)
 				curBlockDamageMP = 0.0f;
 				prevBlockDamageMP = 0.0f;
 				field_9441_h = 0.0f;
+				
+				// Start block break rumble (Controlify-style)
+				startBlockBreakRumble(x, y, z);
 			}
 		}
 	}
+}
+
+void MultiplayerMode::startBlockBreakRumble(int_t x, int_t y, int_t z)
+{
+	// Only rumble for LocalPlayer with controller input
+	LocalPlayer* localPlayer = dynamic_cast<LocalPlayer*>(minecraft.player.get());
+	if (localPlayer == nullptr)
+		return;
+	
+	ControllerInput* controllerInput = dynamic_cast<ControllerInput*>(localPlayer->input.get());
+	if (controllerInput == nullptr)
+		return;
+	
+	// Get block properties to calculate rumble strength
+	Level &level = *minecraft.level;
+	int_t blockId = level.getTile(x, y, z);
+	if (blockId == 0)
+		return;
+	
+	Tile *tile = Tile::tiles[blockId];
+	if (tile == nullptr)
+		return;
+	
+	// Controlify formula: 0.02f + easeInQuad(min(1, destroyTime/20)) * 0.25f
+	// Note: destroySpeed is actually the destroy time (hardness), not speed
+	float destroyTime = tile->getDestroySpeed();  // This is the actual destroy time in seconds
+	
+	// Handle edge cases: unbreakable blocks (-1.0f) and instant-break blocks (0.0f)
+	if (destroyTime < 0.0f)
+		destroyTime = 20.0f;  // Treat unbreakable as max hardness
+	else if (destroyTime < 0.01f)
+		destroyTime = 0.01f;  // Minimum for instant-break blocks
+	
+	destroyTime = (std::min)(20.0f, destroyTime);  // Cap at 20 seconds (use parentheses to avoid Windows.h macro)
+	
+	// Controlify uses easeInQuad: t * t
+	float t = destroyTime / 20.0f;
+	float easeInQuad = t * t;
+	
+	// Calculate rumble strength: 0.02f + easeInQuad * 0.25f
+	// Clamp to valid range (0.0-1.0) - though Gamepad.cpp already does this, it's good practice
+	blockBreakRumbleStrength = (std::max)(0.0f, (std::min)(1.0f, 0.02f + easeInQuad * 0.25f));
+	blockBreakRumbleTicks = 0;
+	
+	// Start rumble with constant strength (Controlify uses 5000ms duration, refreshed every tick)
+	// 5000ms = 100 ticks at 20 tps
+	controllerInput->playRumble(blockBreakRumbleStrength, 0.01f, 100);  // 100 ticks = 5000ms, matches Controlify
+}
+
+void MultiplayerMode::updateBlockBreakRumble()
+{
+	// Only rumble for LocalPlayer with controller input
+	LocalPlayer* localPlayer = dynamic_cast<LocalPlayer*>(minecraft.player.get());
+	if (localPlayer == nullptr)
+		return;
+	
+	ControllerInput* controllerInput = dynamic_cast<ControllerInput*>(localPlayer->input.get());
+	if (controllerInput == nullptr)
+		return;
+	
+	if (blockBreakRumbleStrength <= 0.0f || !isHittingBlock)
+		return;
+	
+	// Refresh rumble every tick with constant strength (Controlify uses 5000ms duration, refreshed every tick)
+	// 5000ms = 100 ticks at 20 tps
+	// SDL_RumbleGamepad cancels previous rumble, so we need to refresh it continuously
+	controllerInput->playRumble(blockBreakRumbleStrength, 0.01f, 100);  // 100 ticks = 5000ms, matches Controlify
+	blockBreakRumbleTicks++;
+}
+
+void MultiplayerMode::stopBlockBreakRumble()
+{
+	blockBreakRumbleStrength = 0.0f;
+	blockBreakRumbleTicks = 0;
+	
+	// Stop rumble by sending zero intensity
+	LocalPlayer* localPlayer = dynamic_cast<LocalPlayer*>(minecraft.player.get());
+	if (localPlayer == nullptr)
+		return;
+	
+	ControllerInput* controllerInput = dynamic_cast<ControllerInput*>(localPlayer->input.get());
+	if (controllerInput == nullptr)
+		return;
+	
+	// Stop rumble with zero intensity
+	controllerInput->playRumble(0.0f, 0.0f, 1);
 }
