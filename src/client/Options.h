@@ -74,7 +74,8 @@ public:
 	int_t viewDistance = 0;
 	bool bobView = true;
 	bool anaglyph3d = false;
-	bool limitFramerate = false;
+	int_t limitFramerate = 120; // FPS limit (10-260, 260 = unlimited)
+	bool vsync = false; // VSync enabled
 	bool fancyGraphics = true;
 	float fovSetting = 0.0f;
 	int_t guiScale = 0;
