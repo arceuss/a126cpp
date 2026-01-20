@@ -3,6 +3,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <thread>
+#include <chrono>
 #include <typeinfo>
 
 #include "SharedConstants.h"
@@ -531,8 +532,37 @@ void Minecraft::run()
 			if (level != nullptr)
 				level->updateLights();
 
-			if (options.limitFramerate)
-				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			// Limit framerate if set (260 = unlimited)
+			// VSync is handled by SDL_GL_SetSwapInterval, so we only need to limit if VSync is disabled
+			if (!options.vsync && options.limitFramerate < 260)
+			{
+				// Calculate target frame time in milliseconds
+				// fps = 1000 / frameTimeMs
+				// frameTimeMs = 1000 / fps
+				long_t targetFrameTime = 1000 / options.limitFramerate;
+				long_t currentTime = System::currentTimeMillis();
+				static long_t lastFrameTime = 0;
+				if (lastFrameTime == 0)
+					lastFrameTime = currentTime;
+				long_t elapsed = currentTime - lastFrameTime;
+				
+				if (elapsed < targetFrameTime)
+				{
+					// Sleep to limit framerate
+					std::this_thread::sleep_for(std::chrono::milliseconds(targetFrameTime - elapsed));
+					lastFrameTime = System::currentTimeMillis();
+				}
+				else
+				{
+					lastFrameTime = currentTime;
+				}
+			}
+			else if (options.vsync)
+			{
+				// VSync is enabled - reset lastFrameTime so it doesn't interfere
+				static long_t lastFrameTime = 0;
+				lastFrameTime = 0;
+			}
 
 			if (!lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_F7))
 				lwjgl::Display::update();
