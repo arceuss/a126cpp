@@ -3,6 +3,9 @@
 #include "client/Minecraft.h"
 #include "client/Options.h"
 #include "client/gui/GuiTextField.h"
+#include "client/gui/ControllerCalibrationScreen.h"
+#include "client/gui/ControllerSettingsScreen.h"
+#include "pc/lwjgl/Gamepad.h"
 #include "lwjgl/Keyboard.h"
 #include "java/String.h"
 #include <iostream>
@@ -19,13 +22,23 @@ void ClientOptionsScreen::init()
 	title = u"Client Options";
 	
 	// Username text field
-	usernameField = std::make_unique<GuiTextField>(font, width / 2 - 100, height / 2 - 20, 200, 20);
+	usernameField = std::make_unique<GuiTextField>(font, width / 2 - 100, height / 2 - 40, 200, 20);
 	usernameField->setMaxStringLength(16); // Minecraft username limit
 	usernameField->setText(options.username);
 	usernameField->setFocused(true);
 	
+	// Controller Calibration button (only show if controller is connected)
+	if (lwjgl::Gamepad::getFirstController() != nullptr && lwjgl::Gamepad::getFirstController()->connected)
+	{
+		jstring calibText = options.deadzonesCalibrated ? u"Recalibrate Controller" : u"Calibrate Controller";
+		buttons.push_back(std::make_shared<Button>(102, width / 2 - 100, height / 2 - 20, calibText));
+		
+		// Controller Settings button
+		buttons.push_back(std::make_shared<Button>(103, width / 2 - 100, height / 2 + 4, u"Controller Settings"));
+	}
+	
 	// Done button
-	buttons.push_back(std::make_shared<Button>(200, width / 2 - 100, height / 2 + 24, u"Done"));
+	buttons.push_back(std::make_shared<Button>(200, width / 2 - 100, height / 2 + 28, u"Done"));
 }
 
 void ClientOptionsScreen::removed()
@@ -68,6 +81,18 @@ void ClientOptionsScreen::buttonClicked(Button &button)
 {
 	if (!button.active)
 		return;
+	
+	if (button.id == 102) // Calibrate Controller
+	{
+		minecraft.setScreen(std::make_shared<ControllerCalibrationScreen>(minecraft, minecraft.screen, options));
+		return;
+	}
+	
+	if (button.id == 103) // Controller Settings
+	{
+		minecraft.setScreen(std::make_shared<ControllerSettingsScreen>(minecraft, minecraft.screen, options));
+		return;
+	}
 	
 	if (button.id == 200) // Done
 	{
@@ -133,7 +158,7 @@ void ClientOptionsScreen::render(int_t xm, int_t ym, float a)
 	drawCenteredString(font, title, width / 2, 20, 0xFFFFFF);
 	
 	// Draw "Username:" label
-	drawString(font, u"Username:", width / 2 - 100, height / 2 - 32, 0xFFFFFF);
+	drawString(font, u"Username:", width / 2 - 100, height / 2 - 52, 0xFFFFFF);
 	
 	// Draw text field
 	usernameField->drawTextBox();

@@ -15,6 +15,9 @@ private:
 
 public:
 	SlideButton(int_t id, int_t x, int_t y, Options::Option::Element *option, const jstring &msg, float value);
+	
+	// Getter for option (needed for controller slider support)
+	Options::Option::Element* getOption() const { return option; }
 
 protected:
 	int_t getYImage(bool hovered) override;

@@ -37,6 +37,8 @@
 
 #include "util/Memory.h"
 
+class ControllerInput; // Forward declaration
+
 class Minecraft
 {
 public:
@@ -120,6 +122,37 @@ private:
 
 public:
 	bool mouseGrabbed = false;
+	
+	// Controller virtual mouse cursor (Controlify-style)
+	float controllerCursorX = 0.0f;
+	float controllerCursorY = 0.0f;
+	bool controllerInputActive = false; // Track if controller is currently being used for input
+	bool controllerCursorVisible = false;
+	float controllerCursorSpeed = 8.0f; // Pixels per frame movement speed
+	int_t controllerCursorTexture = -1; // Texture ID for cursor sprite
+	bool screenOpenForController = false; // Cached screen state for controller input
+	float prevCursorStickX = 0.0f; // Previous frame stick input for snap detection
+	float prevCursorStickY = 0.0f;
+	bool prevDpadUp = false; // Previous frame D-pad state for button navigation
+	bool prevDpadDown = false;
+	bool prevDpadLeft = false;
+	bool prevDpadRight = false;
+	
+	// Left stick navigation state (for repeat delay like Controlify)
+	bool prevStickUp = false;
+	bool prevStickDown = false;
+	bool prevStickLeft = false;
+	bool prevStickRight = false;
+	int_t stickNavRepeatDelay = 0; // Tick counter for stick navigation repeat delay
+	const int_t STICK_NAV_INITIAL_DELAY = 10; // Initial delay: 10 ticks (0.5s at 20 TPS)
+	const int_t STICK_NAV_REPEAT_DELAY = 3; // Repeat delay: 3 ticks (0.15s at 20 TPS)
+	
+	// Slider adjustment state (for repeat delay like Controlify)
+	int_t sliderAdjustRepeatDelay = 0; // Tick counter for slider adjustment repeat delay
+	const int_t SLIDER_ADJUST_INITIAL_DELAY = 15; // Initial delay: 15 ticks (Controlify uses 15)
+	const int_t SLIDER_ADJUST_REPEAT_DELAY = 1; // Repeat delay: 1 tick (Controlify uses 1)
+	bool prevSliderDpadLeft = false;
+	bool prevSliderDpadRight = false;
 
 private:
 	int_t lastClickTick = 0;
@@ -149,6 +182,11 @@ public:
 	static const std::shared_ptr<File> &getWorkingDirectory();
 
 	void setScreen(std::shared_ptr<Screen> screen);
+	
+	// Controller GUI navigation (Controlify-style)
+	void updateControllerCursor(ControllerInput* controllerInput);
+	void handleControllerGUIClick(ControllerInput* controllerInput);
+	void renderControllerCursor(int_t xm, int_t ym, float a);
 
 private:
 	void checkGlError(const std::string &at);
@@ -171,6 +209,10 @@ public:
 
 	void handleMouseDown(int_t button, bool down);
 	void handleMouseClick(int_t button);
+	
+	// Controller-specific functions (1:1 copies of mouse behavior)
+	void handleControllerTriggerClick(int_t button); // button: 0 = right trigger (attack), 1 = left trigger (use)
+	void handleControllerTriggerDown(int_t button, bool down); // button: 0 = right trigger (attack)
 
 	void toggleFullscreen();
 	void resize(int_t w, int_t h);

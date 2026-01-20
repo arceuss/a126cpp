@@ -25,8 +25,11 @@ void SlideButton::renderBg(Minecraft &minecraft, int_t xm, int_t ym)
 		value = static_cast<float>(xm - (x + 4)) / static_cast<float>(w - 8);
 		if (value < 0.0f) value = 0.0f;
 		if (value > 1.0f) value = 1.0f;
-		minecraft.options.set(*option, value);
-		msg = minecraft.options.getMessage(*option);
+		if (option != nullptr)
+		{
+			minecraft.options.set(*option, value);
+			msg = minecraft.options.getMessage(*option);
+		}
 	}
 
 	glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
@@ -41,8 +44,11 @@ bool SlideButton::clicked(Minecraft &minecraft, int_t xm, int_t xy)
 		value = static_cast<float>(xm - (x + 4)) / static_cast<float>(w - 8);
 		if (value < 0.0f) value = 0.0f;
 		if (value > 1.0f) value = 1.0f;
-		minecraft.options.set(*option, value);
-		msg = minecraft.options.getMessage(*option);
+		if (option != nullptr)
+		{
+			minecraft.options.set(*option, value);
+			msg = minecraft.options.getMessage(*option);
+		}
 		sliding = true;
 		return true;
 	}

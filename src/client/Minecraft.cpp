@@ -22,9 +22,12 @@
 #include "client/gui/InventoryScreen.h"
 #include "client/gui/DeathScreen.h"
 #include "client/gui/GuiChat.h"
+#include "client/gui/SlideButton.h"
 #include "client/title/TitleScreen.h"
 #include "client/player/KeyboardInput.h"
+#include "client/player/ControllerInput.h"
 #include "client/player/EntityClientPlayerMP.h"
+#include <SDL3/SDL_gamepad.h> // For SDL_GAMEPAD_BUTTON enum
 
 #include "client/gamemode/SurvivalMode.h"
 
@@ -51,6 +54,10 @@
 
 #include "lwjgl/Display.h"
 #include "lwjgl/Keyboard.h"
+#include "lwjgl/Mouse.h"
+#include "lwjgl/Gamepad.h"
+#include <algorithm>
+#include <cmath>
 
 #include "CrashHandler.h"
 
@@ -102,6 +109,9 @@ void Minecraft::init()
 	lwjgl::Display::setTitle(u"Minecraft Minecraft " + VERSION_STRING);
 
 	lwjgl::Display::create();
+	
+	// Initialize gamepad subsystem
+	lwjgl::Gamepad::init();
 
 	// TODO
 	// EntityRenderDispatcher.instance.itemInHandRenderer = new ItemInHandRenderer(this);
@@ -110,6 +120,10 @@ void Minecraft::init()
 
 	options.open(workingDirectory.get());
 	texturePackRepository.updateListAndSelect();
+	
+	// Load controller cursor texture (Controlify-style) - must be after texture pack repository is initialized
+	// Texture paths use /gui/ format, not /resource/gui/
+	controllerCursorTexture = textures.loadTexture(u"/gui/virtual_mouse.png");
 
 	font = Util::make_unique<Font>(options, u"/font/default.png", textures);
 	
@@ -268,6 +282,20 @@ void Minecraft::setScreen(std::shared_ptr<Screen> screen)
 		int_t h = ssc.getHeight();
 		this->screen->init(w, h);  // Beta: var1.init(this, var3, var4) (Minecraft.java:382)
 		noRender = false;  // Beta: this.noRender = false (Minecraft.java:383)
+		
+		// Initialize controller virtual cursor position (center of screen)
+		controllerCursorX = w / 2.0f;
+		controllerCursorY = h / 2.0f;
+		controllerCursorVisible = false; // Will be set based on screen type
+		
+		// Reset D-pad state
+		prevDpadUp = false;
+		prevDpadDown = false;
+		prevDpadLeft = false;
+		prevDpadRight = false;
+		
+		// Reset button focus for menu screens
+		this->screen->setFocusedButtonIndex(-1);
 	}
 	else  // Beta: else (Minecraft.java:384)
 	{
@@ -808,6 +836,121 @@ void Minecraft::handleMouseClick(int_t button)
 	}
 }
 
+void Minecraft::handleControllerTriggerDown(int_t button, bool down)
+{
+	// 1:1 copy of handleMouseDown for controller triggers
+	// button: 0 = right trigger (attack), 1 = left trigger (use)
+	// Beta: handleMouseDown() (Minecraft.java:835-849)
+	if (!gameMode->instaBuild)
+	{
+		if (button != 0 || missTime <= 0)
+		{
+			if (down && hitResult.type == HitResult::Type::TILE && button == 0)
+			{
+				int_t x = hitResult.x;
+				int_t y = hitResult.y;
+				int_t z = hitResult.z;
+				Facing f = hitResult.f;
+				gameMode->continueDestroyBlock(x, y, z, f);
+				particleEngine.crack(x, y, z, static_cast<int_t>(f));
+			}
+			else
+			{
+				gameMode->stopDestroyBlock();
+			}
+		}
+	}
+}
+
+void Minecraft::handleControllerTriggerClick(int_t button)
+{
+	// 1:1 copy of handleMouseClick for controller triggers
+	// button: 0 = right trigger (attack), 1 = left trigger (use)
+	if (button == 0 && missTime > 0)
+		return;
+	if (button == 0)
+		player->swing();
+
+	bool canUseItem = true;
+
+	if (hitResult.type == HitResult::Type::NONE)
+	{
+		if (button == 0 && !gameMode->isCreativeMode())
+			missTime = 10;
+	}
+	else if (hitResult.type == HitResult::Type::ENTITY)
+	{
+		auto player = std::static_pointer_cast<Player>(this->player);
+
+		if (button == 0)
+			gameMode->attack(player, hitResult.entity);
+		else if (button == 1)
+			gameMode->interact(player, hitResult.entity);
+	}
+	else if (hitResult.type == HitResult::Type::TILE)
+	{
+		int_t x = hitResult.x;
+		int_t y = hitResult.y;
+		int_t z = hitResult.z;
+		Facing f = hitResult.f;
+
+		Tile &t = *Tile::tiles[level->getTile(x, y, z)];
+
+		if (button == 0)
+		{
+			level->extinguishFire(x, y, z, hitResult.f);
+			// Alpha 1.2.6: Check userType >= 100 for block breaking (Minecraft.java:876-878)
+			// Java: if (var7 != Tile.unbreakable || this.player.userType >= 100) {
+			//     this.gameMode.startDestroyBlock(var3, var4, var5, this.hitResult.f);
+			// }
+			if (t.id != 7 || player->userType >= 100)  // Tile 7 is bedrock (unbreakable)
+			{
+				gameMode->startDestroyBlock(x, y, z, hitResult.f);
+			}
+		}
+		else if (button == 1)
+		{
+			// Beta: Right-click block placement (Minecraft.java:879-895)
+			auto playerPtr = std::static_pointer_cast<Player>(this->player);
+			ItemStack *item = playerPtr->inventory.getSelected();  // Beta: ItemInstance var8 = this.player.inventory.getSelected() (Minecraft.java:880)
+			int_t oldCount = item != nullptr ? item->stackSize : 0;  // Beta: int var9 = var8 != null ? var8.count : 0 (Minecraft.java:881)
+			
+			if (gameMode->useItemOn(playerPtr, level, item, x, y, z, f))  // Beta: this.gameMode.useItemOn(this.player, this.level, var8, var3, var4, var5, var6) (Minecraft.java:882)
+			{
+				canUseItem = false;  // Beta: var2 = false (Minecraft.java:883)
+				playerPtr->swing();  // Beta: this.player.swing() (Minecraft.java:884)
+			}
+			
+			if (item != nullptr)
+			{
+				// Beta: if (var8.count == 0) this.player.inventory.items[this.player.inventory.selected] = null (Minecraft.java:891-892)
+				if (item->isEmpty())
+				{
+					ItemStack *selected = playerPtr->inventory.getSelected();
+					if (selected != nullptr)
+						*selected = ItemStack();  // Clear stack
+				}
+				// Beta: else if (var8.count != var9) this.gameRenderer.itemInHandRenderer.itemPlaced() (Minecraft.java:893-894)
+				else if (item->stackSize != oldCount)
+				{
+					gameRenderer.itemInHandRenderer.itemPlaced();
+				}
+			}
+		}
+	}
+
+	if (canUseItem && button == 1)
+	{
+		// Beta: Right-click item use (Minecraft.java:899-903)
+		auto playerPtr = std::static_pointer_cast<Player>(this->player);
+		ItemStack *item = playerPtr->inventory.getSelected();  // Beta: ItemInstance var10 = this.player.inventory.getSelected() (Minecraft.java:900)
+		if (item != nullptr && !item->isEmpty() && gameMode->useItem(playerPtr, level, item))  // Beta: if (var10 != null && this.gameMode.useItem(this.player, this.level, var10)) (Minecraft.java:901)
+		{
+			gameRenderer.itemInHandRenderer.itemUsed();  // Beta: this.gameRenderer.itemInHandRenderer.itemUsed() (Minecraft.java:902)
+		}
+	}
+}
+
 void Minecraft::toggleFullscreen()
 {
 	fullscreen = !fullscreen;
@@ -871,6 +1014,17 @@ void Minecraft::tick()
 
 	gameRenderer.pick(1.0f);
 
+	// Update controller input screen state (for preventing movement/jump in GUI)
+	screenOpenForController = (screen != nullptr);
+	if (player != nullptr)
+	{
+		auto* controllerInput = dynamic_cast<ControllerInput*>(player->input.get());
+		if (controllerInput != nullptr)
+		{
+			controllerInput->setScreenOpenPtr(&screenOpenForController);
+		}
+	}
+
 	// Update chunk caching
 	if (player != nullptr)
 	{
@@ -899,17 +1053,170 @@ void Minecraft::tick()
 	if (screen == nullptr && player != nullptr && player->health <= 0)
 		setScreen(nullptr);
 
+	// Update gamepad state (must be called every frame to get D-pad state)
+	lwjgl::Gamepad::update();
+	
+	// Get controller state once for use throughout tick() function
+	auto* controllerState = lwjgl::Gamepad::getFirstController();
+	
+	// Controller button actions (Controlify-style, handled before second update call)
+	// Check for controller buttons even if player isn't using controller input
+	// Must be done here BEFORE the second Gamepad::update() call to preserve prevButton states
+	if (screen == nullptr && player != nullptr && controllerState != nullptr && controllerState->connected)
+	{
+		// Y button (North) = Open inventory (Controlify default binding, console edition style)
+		bool yButtonPressed = controllerState->buttonNorth && !controllerState->prevButtonNorth;
+		if (yButtonPressed)
+		{
+			setScreen(Util::make_shared<InventoryScreen>(*this));
+		}
+		
+		// Start button = Open pause menu (Controlify default binding)
+		bool startButtonPressed = controllerState->buttonStart && !controllerState->prevButtonStart;
+		if (startButtonPressed)
+		{
+			pauseGame();
+		}
+	}
+	
 	// Tick screen
 	if (screen != nullptr)
 		lastClickTick = ticks + 10000;
 	if (screen != nullptr)
 	{
 		std::shared_ptr<Screen> screen_ptr = screen; // Ensure that the screen is not deleted while processing events
-		screen->updateEvents();
+		
+		// Dynamic input switching: check both controller and mouse/keyboard, process whichever is active
+		// This allows seamless switching between input methods (mixed input mode)
+		
+		// Check which input device is actively being used
+		// This determines which cursor position to use and which input to process
+		bool controllerActive = false;
+		bool mouseKeyboardActive = false;
+		ControllerInput* activeControllerInput = nullptr;
+		
+		// Get controller input from player (if player is using controller)
+		ControllerInput* controllerInput = (player != nullptr) ? dynamic_cast<ControllerInput*>(player->input.get()) : nullptr;
+		
+		// Check for controller input activity
+		if (controllerInput != nullptr)
+		{
+			// Player is using controller input - check if controller is active
+			auto* state = controllerInput->getControllerState();
+			if (state != nullptr)
+			{
+				if (state->buttonSouth || state->buttonEast || state->buttonWest || 
+				    state->buttonNorth || state->buttonStart || state->buttonBack ||
+				    state->buttonDpadUp || state->buttonDpadDown ||
+				    state->buttonDpadLeft || state->buttonDpadRight)
+				{
+					controllerActive = true;
+				}
+				
+				float leftStickX = static_cast<float>(state->leftStickX) / 32767.0f;
+				float leftStickY = static_cast<float>(state->leftStickY) / 32767.0f;
+				float rightStickX = static_cast<float>(state->rightStickX) / 32767.0f;
+				float rightStickY = static_cast<float>(state->rightStickY) / 32767.0f;
+				
+				if (std::abs(leftStickX) > 0.1f || std::abs(leftStickY) > 0.1f ||
+				    std::abs(rightStickX) > 0.1f || std::abs(rightStickY) > 0.1f)
+				{
+					controllerActive = true;
+				}
+			}
+			
+			if (controllerActive)
+			{
+				activeControllerInput = controllerInput;
+			}
+		}
+		else if (controllerState != nullptr && controllerState->connected)
+		{
+			// Controller is connected but player isn't using it - check if controller is active for menu navigation
+			if (controllerState->buttonSouth || controllerState->buttonEast || controllerState->buttonWest || 
+			    controllerState->buttonNorth || controllerState->buttonStart || controllerState->buttonBack ||
+			    controllerState->buttonDpadUp || controllerState->buttonDpadDown ||
+			    controllerState->buttonDpadLeft || controllerState->buttonDpadRight)
+			{
+				controllerActive = true;
+			}
+			
+			float leftStickX = static_cast<float>(controllerState->leftStickX) / 32767.0f;
+			float leftStickY = static_cast<float>(controllerState->leftStickY) / 32767.0f;
+			float rightStickX = static_cast<float>(controllerState->rightStickX) / 32767.0f;
+			float rightStickY = static_cast<float>(controllerState->rightStickY) / 32767.0f;
+			
+			if (std::abs(leftStickX) > 0.1f || std::abs(leftStickY) > 0.1f ||
+			    std::abs(rightStickX) > 0.1f || std::abs(rightStickY) > 0.1f)
+			{
+				controllerActive = true;
+			}
+			
+			if (controllerActive)
+			{
+				// Create a temporary controller input just for menu navigation
+				static ControllerInput tempControllerInput(controllerState, options);
+				activeControllerInput = &tempControllerInput;
+			}
+		}
+		
+		// Check for mouse/keyboard input activity
+		// Check for mouse button events
+		if (lwjgl::Mouse::getEventButton() >= 0)
+		{
+			mouseKeyboardActive = true;
+		}
+		
+		// Check for keyboard events
+		if (lwjgl::Keyboard::getEventKey() >= 0)
+		{
+			mouseKeyboardActive = true;
+		}
+		
+		// Check for significant mouse movement (only if controller is not active)
+		if (!controllerActive)
+		{
+			int_t mouseX = lwjgl::Mouse::getX();
+			int_t mouseY = lwjgl::Mouse::getY();
+			// Use a threshold to detect actual mouse movement
+			if (std::abs(mouseX - width / 2) > 10 || std::abs(mouseY - height / 2) > 10)
+			{
+				mouseKeyboardActive = true;
+			}
+		}
+		
+		// Process controller input if controller is active
+		// Controller input takes priority when both are active
+		if (controllerActive && activeControllerInput != nullptr)
+		{
+			controllerInputActive = true;
+			updateControllerCursor(activeControllerInput);
+		}
+		else
+		{
+			controllerInputActive = false;
+		}
+		
+		// Always process mouse/keyboard events (they work even when controller is connected)
+		// Both input methods can coexist - mouse/keyboard won't interfere with controller navigation
+		screen_ptr->updateEvents();
 		if (screen != nullptr)
-			screen->tick();
+			screen_ptr->tick();
 	}
 
+	// Update gamepad states (must be called every frame to read button/axis states)
+	lwjgl::Gamepad::update();
+	
+	// Handle controller button actions (third person view, etc.)
+	if (player != nullptr)
+	{
+		auto* controllerInput = dynamic_cast<ControllerInput*>(player->input.get());
+		if (controllerInput != nullptr)
+		{
+			controllerInput->updateButtonActions(*player);
+		}
+	}
+	
 	// Event processing
 	if (screen == nullptr || screen->passEvents)
 	{
@@ -1049,7 +1356,43 @@ void Minecraft::tick()
 					}
 				}
 			}
+			}
 		}
+		
+		// Declare controllerInput once for use in both GUI navigation and trigger handling
+		ControllerInput* controllerInput = nullptr;
+		
+		// Controller GUI navigation (when screen is open)
+		// Check both player's controller input and standalone controller for GUI actions
+		if (screen != nullptr)
+		{
+			controllerInput = (player != nullptr) ? dynamic_cast<ControllerInput*>(player->input.get()) : nullptr;
+			if (controllerInput == nullptr && controllerState != nullptr && controllerState->connected)
+			{
+				// Create temporary controller input for menu navigation
+				static ControllerInput tempControllerInput(controllerState, options);
+				controllerInput = &tempControllerInput;
+			}
+			
+			if (controllerInput != nullptr)
+			{
+				// Back button = Close menu screens (ESC equivalent, Controlify-style)
+				// B button (East) closing for container screens is handled in updateControllerCursor()
+				if (!screen->hasSlots()) // Menu screen (title, pause, options, etc.)
+				{
+					// Back button closes menu screens (but not pause screen)
+					if (controllerInput->wasButtonJustPressed(SDL_GAMEPAD_BUTTON_BACK))
+					{
+						if (!screen->isPauseScreen())
+						{
+							setScreen(nullptr);
+							grabMouse();
+						}
+					}
+				}
+			}
+		}
+	
 
 		if (screen == nullptr)
 		{
@@ -1063,10 +1406,48 @@ void Minecraft::tick()
 				handleMouseClick(1);
 				lastClickTick = ticks;
 			}
+			
+			// Handle controller trigger clicks when screen is closed
+			controllerInput = (player != nullptr && mouseGrabbed) 
+				? dynamic_cast<ControllerInput*>(player->input.get()) : nullptr;
+			
+			if (controllerInput != nullptr)
+			{
+				// Controller trigger clicks (same order as mouse event handling)
+				// Right trigger: Attack/Mining (left click equivalent)
+				if (controllerInput->wasRightTriggerJustPressed())
+				{
+					handleControllerTriggerClick(0);
+					lastClickTick = ticks;
+				}
+				// Left trigger: Place/Use (right click equivalent)
+				if (controllerInput->wasLeftTriggerJustPressed())
+				{
+					handleControllerTriggerClick(1);
+					lastClickTick = ticks;
+				}
+				
+				// Continuous trigger clicks (same as continuous mouse clicks)
+				if (controllerInput->isRightTriggerPressed() && static_cast<float>(ticks - lastClickTick) >= (timer.ticksPerSecond / 4.0f))
+				{
+					handleControllerTriggerClick(0);
+					lastClickTick = ticks;
+				}
+				if (controllerInput->isLeftTriggerPressed() && static_cast<float>(ticks - lastClickTick) >= (timer.ticksPerSecond / 4.0f))
+				{
+					handleControllerTriggerClick(1);
+					lastClickTick = ticks;
+				}
+				
+				// Continuous trigger down (for block breaking)
+				handleControllerTriggerDown(0, controllerInput->isRightTriggerPressed());
+			}
+			else
+			{
+				// Mouse input (only if not using controller)
+				handleMouseDown(0, (screen == nullptr && lwjgl::Mouse::isButtonDown(0) && mouseGrabbed));
+			}
 		}
-
-		handleMouseDown(0, (screen == nullptr && lwjgl::Mouse::isButtonDown(0) && mouseGrabbed));
-	}
 
 	// Level tick
 	if (level != nullptr)
@@ -1106,8 +1487,614 @@ void Minecraft::tick()
 	// Beta 1.2/newb12: Tick GUI (increments ticks for chat messages)
 	// Java: this.gui.tick();
 	gui.tick();
+	
+	// Update controller trigger states at end of frame (for "just pressed" detection next frame)
+	if (player != nullptr)
+	{
+		auto* controllerInput = dynamic_cast<ControllerInput*>(player->input.get());
+		if (controllerInput != nullptr)
+		{
+			controllerInput->updateTriggerStates();
+		}
+	}
 
 	lastTickTime = System::currentTimeMillis();
+}
+
+void Minecraft::updateControllerCursor(ControllerInput* controllerInput)
+{
+	if (controllerInput == nullptr || screen == nullptr)
+		return;
+	
+	// Get screen dimensions
+	ScreenSizeCalculator ssc(width, height, options);
+	int_t w = ssc.getWidth();
+	int_t h = ssc.getHeight();
+	
+	// Check if this is a container screen (has slots) or menu screen (has buttons)
+	bool hasSlots = screen->hasSlots();
+	
+	// Only show cursor for container screens (inventory, chest, etc.)
+	controllerCursorVisible = hasSlots;
+	
+	// Get D-pad state
+	auto* controllerState = controllerInput->getControllerState();
+	bool dpadUp = (controllerState != nullptr && controllerState->buttonDpadUp);
+	bool dpadDown = (controllerState != nullptr && controllerState->buttonDpadDown);
+	bool dpadLeft = (controllerState != nullptr && controllerState->buttonDpadLeft);
+	bool dpadRight = (controllerState != nullptr && controllerState->buttonDpadRight);
+	
+	if (hasSlots)
+	{
+		// Container screen: D-pad snaps to slots, right stick moves cursor smoothly
+		
+		// Get right stick input for cursor movement (Controlify-style)
+		float stickX = controllerInput->getRightStickX();
+		float stickY = controllerInput->getRightStickY();
+		
+		// Move cursor based on stick input (Controlify-style)
+		float speed = controllerCursorSpeed;
+		controllerCursorX += stickX * speed;
+		controllerCursorY += stickY * speed; // Up on stick = negative Y = moves cursor up (correct)
+		
+		// Snap to nearest slot when stick is released (Controlify-style)
+		if (stickX == 0.0f && stickY == 0.0f && (prevCursorStickX != 0.0f || prevCursorStickY != 0.0f))
+		{
+			// Just released stick - snap to nearest slot
+			std::vector<std::pair<int_t, int_t>> snapPoints;
+			screen->collectSlotSnapPoints(snapPoints);
+			
+			if (!snapPoints.empty())
+			{
+				float minDist = 1e9f;
+				int_t bestX = static_cast<int_t>(controllerCursorX);
+				int_t bestY = static_cast<int_t>(controllerCursorY);
+				
+				for (const auto& point : snapPoints)
+				{
+					float dx = static_cast<float>(point.first) - controllerCursorX;
+					float dy = static_cast<float>(point.second) - controllerCursorY;
+					float dist = dx * dx + dy * dy;
+					if (dist < minDist)
+					{
+						minDist = dist;
+						bestX = point.first;
+						bestY = point.second;
+					}
+				}
+				
+				controllerCursorX = static_cast<float>(bestX);
+				controllerCursorY = static_cast<float>(bestY);
+			}
+		}
+		
+		prevCursorStickX = stickX;
+		prevCursorStickY = stickY;
+		
+		// D-pad snaps directly to slots (Controlify-style)
+		if (dpadUp && !prevDpadUp)
+		{
+			// Snap to nearest slot in direction
+			std::vector<std::pair<int_t, int_t>> snapPoints;
+			screen->collectSlotSnapPoints(snapPoints);
+			
+			if (!snapPoints.empty())
+			{
+				// Find nearest slot above current cursor
+				std::pair<int_t, int_t> bestSlot = snapPoints[0];
+				float minDist = 1e9f;
+				
+				for (const auto& point : snapPoints)
+				{
+					if (point.second < static_cast<int_t>(controllerCursorY)) // Above cursor
+					{
+						float dx = static_cast<float>(point.first) - controllerCursorX;
+						float dy = static_cast<float>(point.second) - controllerCursorY;
+						float dist = dx * dx + dy * dy;
+						if (dist < minDist)
+						{
+							minDist = dist;
+							bestSlot = point;
+						}
+					}
+				}
+				
+				if (minDist < 1e9f)
+				{
+					controllerCursorX = static_cast<float>(bestSlot.first);
+					controllerCursorY = static_cast<float>(bestSlot.second);
+				}
+			}
+		}
+		else if (dpadDown && !prevDpadDown)
+		{
+			// Snap to nearest slot below current cursor
+			std::vector<std::pair<int_t, int_t>> snapPoints;
+			screen->collectSlotSnapPoints(snapPoints);
+			
+			if (!snapPoints.empty())
+			{
+				std::pair<int_t, int_t> bestSlot = snapPoints[0];
+				float minDist = 1e9f;
+				
+				for (const auto& point : snapPoints)
+				{
+					if (point.second > static_cast<int_t>(controllerCursorY)) // Below cursor
+					{
+						float dx = static_cast<float>(point.first) - controllerCursorX;
+						float dy = static_cast<float>(point.second) - controllerCursorY;
+						float dist = dx * dx + dy * dy;
+						if (dist < minDist)
+						{
+							minDist = dist;
+							bestSlot = point;
+						}
+					}
+				}
+				
+				if (minDist < 1e9f)
+				{
+					controllerCursorX = static_cast<float>(bestSlot.first);
+					controllerCursorY = static_cast<float>(bestSlot.second);
+				}
+			}
+		}
+		else if (dpadLeft && !prevDpadLeft)
+		{
+			// Snap to nearest slot to the left
+			std::vector<std::pair<int_t, int_t>> snapPoints;
+			screen->collectSlotSnapPoints(snapPoints);
+			
+			if (!snapPoints.empty())
+			{
+				std::pair<int_t, int_t> bestSlot = snapPoints[0];
+				float minDist = 1e9f;
+				
+				for (const auto& point : snapPoints)
+				{
+					if (point.first < static_cast<int_t>(controllerCursorX)) // Left of cursor
+					{
+						float dx = static_cast<float>(point.first) - controllerCursorX;
+						float dy = static_cast<float>(point.second) - controllerCursorY;
+						float dist = dx * dx + dy * dy;
+						if (dist < minDist)
+						{
+							minDist = dist;
+							bestSlot = point;
+						}
+					}
+				}
+				
+				if (minDist < 1e9f)
+				{
+					controllerCursorX = static_cast<float>(bestSlot.first);
+					controllerCursorY = static_cast<float>(bestSlot.second);
+				}
+			}
+		}
+		else if (dpadRight && !prevDpadRight)
+		{
+			// Snap to nearest slot to the right
+			// Prefer slots with similar Y coordinates (e.g., output slot from crafting grid)
+			std::vector<std::pair<int_t, int_t>> snapPoints;
+			screen->collectSlotSnapPoints(snapPoints);
+			
+			if (!snapPoints.empty())
+			{
+				std::pair<int_t, int_t> bestSlot = snapPoints[0];
+				float minDist = 1e9f;
+				
+				for (const auto& point : snapPoints)
+				{
+					if (point.first > static_cast<int_t>(controllerCursorX)) // Right of cursor
+					{
+						float dx = static_cast<float>(point.first) - controllerCursorX;
+						float dy = static_cast<float>(point.second) - controllerCursorY;
+						
+						// Weight vertical distance more heavily to prefer slots at similar Y level
+						// This makes horizontal navigation prioritize same-row slots
+						float dist = dx * dx + dy * dy * 3.0f; // Weight Y distance 3x more
+						
+						if (dist < minDist)
+						{
+							minDist = dist;
+							bestSlot = point;
+						}
+					}
+				}
+				
+				if (minDist < 1e9f)
+				{
+					controllerCursorX = static_cast<float>(bestSlot.first);
+					controllerCursorY = static_cast<float>(bestSlot.second);
+				}
+			}
+		}
+		
+		// Clamp cursor to screen bounds
+		if (controllerCursorX < 0.0f)
+			controllerCursorX = 0.0f;
+		if (controllerCursorX >= static_cast<float>(w))
+			controllerCursorX = static_cast<float>(w - 1);
+		if (controllerCursorY < 0.0f)
+			controllerCursorY = 0.0f;
+		if (controllerCursorY >= static_cast<float>(h))
+			controllerCursorY = static_cast<float>(h - 1);
+	}
+	else
+	{
+		// Menu screen: D-pad or left stick navigates between buttons, no cursor visible
+		// Move cursor to focused button center when button is focused
+		
+		// Get list of active, visible buttons
+		std::vector<int_t> buttonIndices;
+		for (size_t i = 0; i < screen->buttons.size(); ++i)
+		{
+			if (screen->buttons[i]->visible && screen->buttons[i]->active)
+			{
+				buttonIndices.push_back(static_cast<int_t>(i));
+			}
+		}
+		
+		if (!buttonIndices.empty())
+		{
+			int_t currentFocus = screen->getFocusedButtonIndex();
+			
+			// If no button is focused, focus the first one
+			if (currentFocus < 0 || currentFocus >= static_cast<int_t>(screen->buttons.size()) || 
+			    !screen->buttons[currentFocus]->visible || !screen->buttons[currentFocus]->active)
+			{
+				currentFocus = buttonIndices[0];
+				screen->setFocusedButtonIndex(currentFocus);
+			}
+			
+			// Get left stick input for button navigation (alternative to D-pad)
+			float leftStickX = controllerInput->getLeftStickX();
+			float leftStickY = controllerInput->getLeftStickY();
+			const float stickDeadzone = 0.5f; // Threshold for stick input
+			bool stickUp = leftStickY < -stickDeadzone;
+			bool stickDown = leftStickY > stickDeadzone;
+			bool stickLeft = leftStickX < -stickDeadzone;
+			bool stickRight = leftStickX > stickDeadzone;
+			
+			// Update stick navigation repeat delay (Controlify-style: 10 ticks initial, 3 ticks repeat)
+			// Check if stick was just pressed (wasn't pressed before)
+			bool stickJustPressed = (stickUp && !prevStickUp) || (stickDown && !prevStickDown) || 
+			                        (stickLeft && !prevStickLeft) || (stickRight && !prevStickRight);
+			
+			// Check if stick is currently pressed in any direction
+			bool stickPressed = stickUp || stickDown || stickLeft || stickRight;
+			
+			if (stickJustPressed)
+			{
+				// Stick just pressed - reset to initial delay and allow immediate navigation
+				stickNavRepeatDelay = STICK_NAV_INITIAL_DELAY;
+			}
+			else if (stickPressed)
+			{
+				// Stick is held - decrement delay each tick
+				if (stickNavRepeatDelay > 0)
+					stickNavRepeatDelay--;
+			}
+			else
+			{
+				// Stick released - reset delay
+				stickNavRepeatDelay = 0;
+			}
+			
+			// Check if navigation is allowed (Controlify-style: allow if delay elapsed OR first press)
+			bool canStickNavigate = (stickNavRepeatDelay <= 0) || stickJustPressed;
+			
+			// Handle D-pad or left stick navigation
+			if ((dpadUp && !prevDpadUp) || (stickUp && canStickNavigate))
+			{
+				// Find button above current focused button
+				auto* currentButton = screen->buttons[currentFocus].get();
+				int_t bestIndex = currentFocus;
+				float bestY = -1e9f;
+				
+				for (int_t idx : buttonIndices)
+				{
+					if (idx == currentFocus) continue;
+					auto* btn = screen->buttons[idx].get();
+					if (btn->y < currentButton->y && btn->y > bestY)
+					{
+						bestY = static_cast<float>(btn->y);
+						bestIndex = idx;
+					}
+				}
+				
+				if (bestIndex != currentFocus)
+				{
+					screen->setFocusedButtonIndex(bestIndex);
+					currentFocus = bestIndex;
+					// Reset delay after successful navigation (Controlify-style)
+					stickNavRepeatDelay = STICK_NAV_REPEAT_DELAY;
+				}
+			}
+			else if ((dpadDown && !prevDpadDown) || (stickDown && canStickNavigate))
+			{
+				// Find button below current focused button
+				auto* currentButton = screen->buttons[currentFocus].get();
+				int_t bestIndex = currentFocus;
+				float bestY = 1e9f;
+				
+				for (int_t idx : buttonIndices)
+				{
+					if (idx == currentFocus) continue;
+					auto* btn = screen->buttons[idx].get();
+					if (btn->y > currentButton->y && btn->y < bestY)
+					{
+						bestY = static_cast<float>(btn->y);
+						bestIndex = idx;
+					}
+				}
+				
+				if (bestIndex != currentFocus)
+				{
+					screen->setFocusedButtonIndex(bestIndex);
+					currentFocus = bestIndex;
+					// Reset delay after successful navigation (Controlify-style)
+					stickNavRepeatDelay = STICK_NAV_REPEAT_DELAY;
+				}
+			}
+			else if ((dpadLeft && !prevDpadLeft) || (stickLeft && canStickNavigate))
+			{
+				// Check if focused button is a slider - if so, adjust slider instead of navigating (Controlify-style)
+				if (currentFocus >= 0 && currentFocus < static_cast<int_t>(screen->buttons.size()))
+				{
+					auto* focusedButton = screen->buttons[currentFocus].get();
+					SlideButton* slideButton = dynamic_cast<SlideButton*>(focusedButton);
+					if (slideButton != nullptr && slideButton->active)
+					{
+						// This is a slider - adjust value instead of navigating (Controlify-style)
+						// Use repeat delay for slider adjustment (Controlify: 15 ticks initial, 1 tick repeat)
+						bool sliderJustPressed = (dpadLeft && !prevSliderDpadLeft) || (stickLeft && canStickNavigate);
+						bool canAdjustSlider = (sliderAdjustRepeatDelay >= SLIDER_ADJUST_INITIAL_DELAY) || sliderJustPressed;
+						
+						if (canAdjustSlider)
+						{
+							// Step size: 1.0 / (width - 8) for smooth adjustment, matching SlideButton's internal step
+							float step = 1.0f / static_cast<float>(focusedButton->w - 8);
+							slideButton->value -= step;
+							if (slideButton->value < 0.0f) slideButton->value = 0.0f;
+							
+							// Update the option if it's linked to one (standard sliders)
+							Options::Option::Element* option = slideButton->getOption();
+							if (option != nullptr)
+							{
+								options.set(*option, slideButton->value);
+								slideButton->msg = options.getMessage(*option);
+								options.save();
+							}
+							// Custom sliders (like ControllerSettingsScreen) will be handled in their tick() method
+							
+							if (sliderJustPressed)
+								sliderAdjustRepeatDelay = 0;
+							else
+								sliderAdjustRepeatDelay = 0; // Reset to 0, will increment next tick
+						}
+						
+						if (dpadLeft || stickLeft)
+							sliderAdjustRepeatDelay++;
+						else
+							sliderAdjustRepeatDelay = 0;
+						
+						prevSliderDpadLeft = dpadLeft;
+						// Don't navigate - slider handled the input
+					}
+					else
+					{
+						// Not a slider - navigate to button on the left
+						sliderAdjustRepeatDelay = 0; // Reset slider delay when not on slider
+						auto* currentButton = screen->buttons[currentFocus].get();
+						int_t bestIndex = currentFocus;
+						float bestX = -1e9f;
+						
+						for (int_t idx : buttonIndices)
+						{
+							if (idx == currentFocus) continue;
+							auto* btn = screen->buttons[idx].get();
+							if (btn->x < currentButton->x && btn->x > bestX)
+							{
+								bestX = static_cast<float>(btn->x);
+								bestIndex = idx;
+							}
+						}
+						
+						if (bestIndex != currentFocus)
+						{
+							screen->setFocusedButtonIndex(bestIndex);
+							currentFocus = bestIndex;
+							// Reset delay after successful navigation (Controlify-style)
+							stickNavRepeatDelay = STICK_NAV_REPEAT_DELAY;
+						}
+					}
+				}
+			}
+			else if ((dpadRight && !prevDpadRight) || (stickRight && canStickNavigate))
+			{
+				// Check if focused button is a slider - if so, adjust slider instead of navigating (Controlify-style)
+				if (currentFocus >= 0 && currentFocus < static_cast<int_t>(screen->buttons.size()))
+				{
+					auto* focusedButton = screen->buttons[currentFocus].get();
+					SlideButton* slideButton = dynamic_cast<SlideButton*>(focusedButton);
+					if (slideButton != nullptr && slideButton->active)
+					{
+						// This is a slider - adjust value instead of navigating (Controlify-style)
+						// Use repeat delay for slider adjustment (Controlify: 15 ticks initial, 1 tick repeat)
+						bool sliderJustPressed = (dpadRight && !prevSliderDpadRight) || (stickRight && canStickNavigate);
+						bool canAdjustSlider = (sliderAdjustRepeatDelay >= SLIDER_ADJUST_INITIAL_DELAY) || sliderJustPressed;
+						
+						if (canAdjustSlider)
+						{
+							float step = 1.0f / static_cast<float>(focusedButton->w - 8);
+							slideButton->value += step;
+							if (slideButton->value > 1.0f) slideButton->value = 1.0f;
+							
+							// Update the option if it's linked to one (standard sliders)
+							Options::Option::Element* option = slideButton->getOption();
+							if (option != nullptr)
+							{
+								options.set(*option, slideButton->value);
+								slideButton->msg = options.getMessage(*option);
+								options.save();
+							}
+							// Custom sliders (like ControllerSettingsScreen) will be handled in their tick() method
+							
+							if (sliderJustPressed)
+								sliderAdjustRepeatDelay = 0;
+							else
+								sliderAdjustRepeatDelay = 0; // Reset to 0, will increment next tick
+						}
+						
+						if (dpadRight || stickRight)
+							sliderAdjustRepeatDelay++;
+						else
+							sliderAdjustRepeatDelay = 0;
+						
+						prevSliderDpadRight = dpadRight;
+						// Don't navigate - slider handled the input
+					}
+					else
+					{
+						// Not a slider - navigate to button on the right
+						sliderAdjustRepeatDelay = 0; // Reset slider delay when not on slider
+						auto* currentButton = screen->buttons[currentFocus].get();
+						int_t bestIndex = currentFocus;
+						float bestX = 1e9f;
+						
+						for (int_t idx : buttonIndices)
+						{
+							if (idx == currentFocus) continue;
+							auto* btn = screen->buttons[idx].get();
+							if (btn->x > currentButton->x && btn->x < bestX)
+							{
+								bestX = static_cast<float>(btn->x);
+								bestIndex = idx;
+							}
+						}
+						
+						if (bestIndex != currentFocus)
+						{
+							screen->setFocusedButtonIndex(bestIndex);
+							currentFocus = bestIndex;
+							// Reset delay after successful navigation (Controlify-style)
+							stickNavRepeatDelay = STICK_NAV_REPEAT_DELAY;
+						}
+					}
+				}
+			}
+			else
+			{
+				// D-pad/stick released - reset slider adjustment delay
+				sliderAdjustRepeatDelay = 0;
+				prevSliderDpadLeft = dpadLeft;
+				prevSliderDpadRight = dpadRight;
+			}
+			
+			// Store previous stick state
+			prevStickUp = stickUp;
+			prevStickDown = stickDown;
+			prevStickLeft = stickLeft;
+			prevStickRight = stickRight;
+			
+			// Move cursor to focused button center (for button click detection)
+			if (currentFocus >= 0 && currentFocus < static_cast<int_t>(screen->buttons.size()))
+			{
+				auto* focusedButton = screen->buttons[currentFocus].get();
+				controllerCursorX = static_cast<float>(focusedButton->x + focusedButton->w / 2);
+				controllerCursorY = static_cast<float>(focusedButton->y + focusedButton->h / 2);
+			}
+		}
+	}
+	
+	// Store previous D-pad state
+	prevDpadUp = dpadUp;
+	prevDpadDown = dpadDown;
+	prevDpadLeft = dpadLeft;
+	prevDpadRight = dpadRight;
+	
+	// Handle controller button clicks (Controlify-style mappings)
+	// A button (South) = left click (primary action)
+	if (controllerInput->wasButtonJustPressed(SDL_GAMEPAD_BUTTON_SOUTH))
+	{
+		int_t xm = static_cast<int_t>(controllerCursorX);
+		int_t ym = static_cast<int_t>(controllerCursorY);
+		screen->mouseClicked(xm, ym, 0); // Left click
+	}
+	
+	// B button (East) behavior depends on screen type and whether player is carrying an item
+	if (controllerInput->wasButtonJustPressed(SDL_GAMEPAD_BUTTON_EAST))
+	{
+		if (hasSlots)
+		{
+			// Container screen (inventory, chest, etc.)
+			// Check if player is carrying an item (picked up an item)
+			ItemStack *carried = nullptr;
+			if (player != nullptr)
+				carried = player->inventory.getCarried();
+			
+			if (carried != nullptr && !carried->isEmpty())
+			{
+				// Player is carrying an item - B button acts like right-click (place one item)
+				int_t xm = static_cast<int_t>(controllerCursorX);
+				int_t ym = static_cast<int_t>(controllerCursorY);
+				screen->mouseClicked(xm, ym, 1); // Right click
+			}
+			else
+			{
+				// No item being carried - B button closes screen (console edition style)
+			setScreen(nullptr);
+			grabMouse();
+			}
+		}
+		else
+		{
+			// Menu screen: B button = right click (secondary action)
+			int_t xm = static_cast<int_t>(controllerCursorX);
+			int_t ym = static_cast<int_t>(controllerCursorY);
+			screen->mouseClicked(xm, ym, 1); // Right click
+		}
+	}
+}
+
+void Minecraft::handleControllerGUIClick(ControllerInput* controllerInput)
+{
+	// This is called from updateControllerCursor, so it's already handled there
+	// Kept as a separate function for future extensibility
+}
+
+void Minecraft::renderControllerCursor(int_t xm, int_t ym, float a)
+{
+	if (!controllerCursorVisible || controllerCursorTexture < 0)
+		return;
+
+	// Render cursor texture using blit-style rendering (same pattern as GuiComponent::blit())
+	// Note: GUI matrix is already set up in setupGuiScreen() with glOrtho and glTranslatef(-2000.0f)
+	glDisable(GL_DEPTH_TEST); // Disable depth test so cursor always renders on top
+	glEnable(GL_TEXTURE_2D);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f); // White, full alpha
+	textures.bind(controllerCursorTexture);
+	
+	// Draw cursor sprite (32x32 texture, centered at cursor position, scaled to 16x16)
+	// Use blit-style rendering but with custom UV for 32x32 texture instead of 256x256
+	const float cursorSize = 16.0f; // Half of texture size (Controlify uses 0.5f scale)
+	const float us = 1.0f / 32.0f; // UV scale for 32x32 texture
+	const float vs = 1.0f / 32.0f;
+	Tesselator &t = Tesselator::instance;
+	t.begin();
+	// Follow blit() vertex order: bottom-left, bottom-right, top-right, top-left
+	t.vertexUV(static_cast<float>(xm) - cursorSize, static_cast<float>(ym) + cursorSize, -1999.0f, 0.0f * us, 32.0f * vs);
+	t.vertexUV(static_cast<float>(xm) + cursorSize, static_cast<float>(ym) + cursorSize, -1999.0f, 32.0f * us, 32.0f * vs);
+	t.vertexUV(static_cast<float>(xm) + cursorSize, static_cast<float>(ym) - cursorSize, -1999.0f, 32.0f * us, 0.0f * vs);
+	t.vertexUV(static_cast<float>(xm) - cursorSize, static_cast<float>(ym) - cursorSize, -1999.0f, 0.0f * us, 0.0f * vs);
+	t.end();
+	
+	glDisable(GL_BLEND);
+	glEnable(GL_DEPTH_TEST); // Re-enable depth test
 }
 
 void Minecraft::reloadSound()
@@ -1199,7 +2186,8 @@ void Minecraft::setLevel(std::shared_ptr<Level> level, const jstring &title, std
 			this->player->resetPos();
 			gameMode->initPlayer(this->player);
 		}
-		this->player->input = Util::make_unique<KeyboardInput>(options);
+		// Initialize input (will use controller if available)
+		this->player->updatePlayerInput();
 
 		levelRenderer.setLevel(level);
 
@@ -1326,7 +2314,8 @@ void Minecraft::respawnPlayer()
 	player->resetPos();  // Beta: this.player.resetPos() (Minecraft.java:1421)
 	gameMode->initPlayer(player);  // Beta: this.gameMode.initPlayer(this.player) (Minecraft.java:1422)
 	level->loadPlayer(player);  // Beta: this.level.loadPlayer(this.player) (Minecraft.java:1423)
-	player->input = Util::make_unique<KeyboardInput>(options);  // Beta: this.player.input = new KeyboardInput(this.options) (Minecraft.java:1424)
+	// Initialize input (will use controller if available)
+	player->updatePlayerInput();  // Beta: this.player.input = new KeyboardInput(this.options) (Minecraft.java:1424)
 	player->entityId = entityId;  // Beta: this.player.entityId = var5 (Minecraft.java:1425)
 	gameMode->adjustPlayer(player);  // Beta: this.gameMode.adjustPlayer(this.player) (Minecraft.java:1426)
 	prepareLevel(u"Respawning");  // Beta: this.prepareLevel("Respawning") (Minecraft.java:1427)

@@ -18,6 +18,10 @@ private:
 	bool isHittingBlock = false;
 	NetClientHandler* netHandler;
 	int_t field_1075_l = 0;  // Last synced current item index
+	
+	// Rumble for block breaking (Controlify-style)
+	float blockBreakRumbleStrength = 0.0f;  // Current rumble strength (0.0 = stopped)
+	int_t blockBreakRumbleTicks = 0;  // Ticks since starting to break
 
 public:
 	MultiplayerMode(Minecraft &minecraft, NetClientHandler* netHandler);
@@ -43,11 +47,17 @@ public:
 
 	void initLevel(std::shared_ptr<Level> level) override;
 
-	std::shared_ptr<Player> createPlayer(Level &level) override;
-
 	// Alpha 1.2.6: PlayerControllerMP.func_27174_a - handle window clicks
 	// If itemBefore is provided, uses it; otherwise captures the current state
 	ItemStack handleWindowClick(int windowId, int slot, int mouseClick, bool shiftClick, std::shared_ptr<Player> player, std::unique_ptr<ItemStack> itemBefore = nullptr);
+
+private:
+	// Rumble helpers for block breaking (Controlify-style)
+	void startBlockBreakRumble(int_t x, int_t y, int_t z);
+	void updateBlockBreakRumble();  // Call every tick while breaking
+	void stopBlockBreakRumble();
+
+	std::shared_ptr<Player> createPlayer(Level &level) override;
 
 private:
 	void syncCurrentPlayItem();

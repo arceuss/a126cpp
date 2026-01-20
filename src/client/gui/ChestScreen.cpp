@@ -605,3 +605,42 @@ void ChestScreen::handleSlotClick(ItemStack &slotStack, ItemStack *carried, int_
 		}
 	}
 }
+
+void ChestScreen::collectSlotSnapPoints(std::vector<std::pair<int_t, int_t>> &points)
+{
+	// Collect all slot center positions for snapping (Controlify-style)
+	int_t xo = (width - imageWidth) / 2;
+	int_t yo = (height - imageHeight) / 2;
+	
+	// Chest slots (inventoryRows rows of 9)
+	for (int_t row = 0; row < inventoryRows; ++row)
+	{
+		for (int_t col = 0; col < 9; ++col)
+		{
+			int_t slotX = xo + 8 + col * 18;
+			int_t slotY = yo + 18 + row * 18;
+			points.push_back({slotX + 8, slotY + 8}); // Center of 16x16 slot
+		}
+	}
+	
+	// Player inventory slots (3 rows of 9, starting at yo + imageHeight - 82)
+	int_t playerInvStartY = yo + imageHeight - 82;
+	for (int_t row = 0; row < 3; ++row)
+	{
+		for (int_t col = 0; col < 9; ++col)
+		{
+			int_t slotX = xo + 8 + col * 18;
+			int_t slotY = playerInvStartY + row * 18;
+			points.push_back({slotX + 8, slotY + 8});
+		}
+	}
+	
+	// Hotbar slots (9 slots, starting at yo + imageHeight - 26)
+	int_t hotbarStartY = yo + imageHeight - 26;
+	for (int_t i = 0; i < 9; ++i)
+	{
+		int_t slotX = xo + 8 + i * 18;
+		int_t slotY = hotbarStartY;
+		points.push_back({slotX + 8, slotY + 8});
+	}
+}
