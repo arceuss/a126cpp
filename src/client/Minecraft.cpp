@@ -38,6 +38,8 @@
 #include "world/level/chunk/ChunkCache.h"
 #include "world/level/Level.h"
 #include "world/level/tile/Tile.h"
+#include "world/level/dimension/Dimension.h"
+#include "world/level/dimension/HellDimension.h"
 #include "world/item/Items.h"
 #include "world/item/crafting/FurnaceRecipes.h"
 #include "Facing.h"
@@ -2152,15 +2154,77 @@ void Minecraft::selectLevel(const jstring &name)
 
 void Minecraft::toggleDimension()
 {
-	/*
+	// Alpha 1.2.6: toggleDimension() - only works in single-player
+	// In multiplayer, dimension changes are handled by the server via Packet9 (respawn packet)
+	// Java: Minecraft.func_6237_k() (Minecraft.java:1157-1195)
+	if (isOnline())
+	{
+		// Multiplayer: Don't toggle dimension locally, server will send Packet9
+		// The server handles the dimension change and sends a respawn packet
+		return;
+	}
+	
+	// Single-player: Handle dimension toggle locally (Alpha 1.2.6: Minecraft.java:1157-1195)
+	if (player == nullptr || level == nullptr)
+	{
+		return;
+	}
+	
+	std::cout << "Toggling dimension!!" << std::endl;
+	
+	// Toggle dimension
 	if (player->dimension == -1)
 		player->dimension = 0;
 	else
 		player->dimension = -1;
-
+	
+	// Remove player from old level
 	level->removeEntity(player);
-	player->removed = true;
-	*/
+	player->removed = false;  // Alpha: this.thePlayer.isDead = false (Minecraft.java:1166)
+	
+	// Calculate new position (scale by 8.0 for dimension conversion)
+	double var1 = player->x;
+	double var3 = player->z;
+	double var5 = 8.0;
+	
+	if (player->dimension == -1)
+	{
+		// Entering Nether: divide coordinates by 8
+		var1 /= var5;
+		var3 /= var5;
+		player->moveTo(var1, player->y, var3, player->yRot, player->xRot);
+		if (player->isAlive())
+		{
+			level->tick(*player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1176)
+		}
+		
+		// Create new level with Hell dimension
+		std::shared_ptr<Level> newLevel = std::make_shared<Level>(*level, std::make_shared<HellDimension>());
+		setLevel(newLevel, u"Entering the Nether", player);
+	}
+	else
+	{
+		// Leaving Nether: multiply coordinates by 8
+		var1 *= var5;
+		var3 *= var5;
+		player->moveTo(var1, player->y, var3, player->yRot, player->xRot);
+		if (player->isAlive())
+		{
+			level->tick(*player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1185)
+		}
+		
+		// Create new level with normal dimension
+		std::shared_ptr<Level> newLevel = std::make_shared<Level>(*level, std::make_shared<Dimension>());
+		setLevel(newLevel, u"Leaving the Nether", player);
+	}
+	
+	// Update player level reference and position
+	player->level = level;
+	player->moveTo(var1, player->y, var3, player->yRot, player->xRot);
+	level->tick(*player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1192)
+	
+	// Force portal placement (Alpha: new PortalForcer().force(this.level, this.player) - Minecraft.java:1194)
+	// Note: PortalForcer is not implemented in Alpha 1.2.6, so we skip this step
 }
 
 void Minecraft::setLevel(std::shared_ptr<Level> level)
@@ -2349,8 +2413,9 @@ void Minecraft::respawnPlayer()
 	player->entityId = entityId;  // Beta: this.player.entityId = var5 (Minecraft.java:1425)
 	gameMode->adjustPlayer(player);  // Beta: this.gameMode.adjustPlayer(this.player) (Minecraft.java:1426)
 	prepareLevel(u"Respawning");  // Beta: this.prepareLevel("Respawning") (Minecraft.java:1427)
-	if (dynamic_cast<DeathScreen *>(screen.get()) != nullptr)  // Beta: if (this.screen instanceof DeathScreen) (Minecraft.java:1428)
-		setScreen(nullptr);  // Beta: this.setScreen(null) (Minecraft.java:1429)
+	// Alpha 1.2.6: Clear death screen after respawn (Minecraft.java:1431-1433)
+	if (dynamic_cast<DeathScreen *>(screen.get()) != nullptr)  // Beta: if (this.screen instanceof DeathScreen) (Minecraft.java:1431)
+		setScreen(nullptr);  // Beta: this.displayGuiScreen(null) (Minecraft.java:1432)
 }
 
 // Beta: fileDownloaded(String name, File file) - categorizes and loads sounds (Minecraft.java:1352-1367)

@@ -276,6 +276,17 @@ void EntityClientPlayerMP::func_457_w()
 	field_797_bg->addToSendQueue(new Packet18ArmAnimation(entityId, 1));
 }
 
+// Alpha 1.2.6: respawn() override - sends Packet9 to server in multiplayer
+// In single-player, LocalPlayer::respawn() calls minecraft.respawnPlayer()
+// In multiplayer, we need to send Packet9 to the server instead
+// Java: EntityPlayerSP.func_9367_r() calls mc.respawn(), but EntityClientPlayerMP overrides to send packet
+void EntityClientPlayerMP::respawn()
+{
+	// Alpha: In multiplayer, send Packet9 to server instead of respawning locally
+	// The server will respond with Packet9 containing the respawn dimension and seed
+	func_9367_r();
+}
+
 // Alpha 1.2.6: func_9367_r - respawn, sends Packet9
 // Java: public void func_9367_r() {
 //     this.sendInventoryChanged();
