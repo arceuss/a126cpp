@@ -148,11 +148,12 @@ Vec3 *Vec3::lerp(const Vec3 &to, double t) const
 
 void Vec3::xRot(float angle)
 {
+	// Beta: Vec3.xRot() - exact match (Vec3.java:157-166)
 	double c = Mth::cos(angle);
 	double s = Mth::sin(angle);
 	double nx = x;
-	double ny = y * c - z * s;
-	double nz = y * s + z * c;
+	double ny = y * c + z * s;  // Beta: this.y * var2 + this.z * var3
+	double nz = z * c - y * s;  // Beta: this.z * var2 - this.y * var3
 	x = nx;
 	y = ny;
 	z = nz;
@@ -160,11 +161,12 @@ void Vec3::xRot(float angle)
 
 void Vec3::yRot(float angle)
 {
+	// Beta: Vec3.yRot() - exact match (Vec3.java:168-177)
 	double c = Mth::cos(angle);
 	double s = Mth::sin(angle);
-	double nx = x * c + z * s;
+	double nx = x * c + z * s;  // Beta: this.x * var2 + this.z * var3
 	double ny = y;
-	double nz = -x * s + z * c;
+	double nz = z * c - x * s;  // Beta: this.z * var2 - this.x * var3
 	x = nx;
 	y = ny;
 	z = nz;
@@ -172,10 +174,11 @@ void Vec3::yRot(float angle)
 
 void Vec3::zRot(float angle)
 {
+	// Beta: Vec3.zRot() - exact match (Vec3.java:179-188)
 	double c = Mth::cos(angle);
 	double s = Mth::sin(angle);
-	double nx = x * c + y * s;
-	double ny = x * c - y * s;
+	double nx = x * c + y * s;  // Beta: this.x * var2 + this.y * var3
+	double ny = y * c - x * s;  // Beta: this.y * var2 - this.x * var3
 	double nz = z;
 	x = nx;
 	y = ny;
