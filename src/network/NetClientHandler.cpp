@@ -200,10 +200,10 @@ void NetClientHandler::handleLogin(Packet1Login* var1)
 	
 	// Java: this.worldClient = new WorldClient(this, var1.field_4074_d, var1.field_4073_e);
 	// MultiPlayerLevel constructor sets isOnline = true (equivalent to multiplayerWorld = true)
-	// Mark old worldClient as invalid if it exists
+	// Mark old worldClient as invalid if it exists (but don't disconnect - this is initial login)
 	if (worldClient != nullptr)
 	{
-		worldClient->disconnect();  // This sets isValid = false
+		worldClient->markInvalid();  // Mark invalid without disconnecting
 	}
 	worldClient = new MultiPlayerLevel(this, var1->field_4074_d, dimension);
 	
@@ -1494,12 +1494,13 @@ void NetClientHandler::func_9448_a(Packet9* var1)
 		
 		// Alpha 1.2.6: Mark old MultiPlayerLevel as invalid if it exists
 		// This prevents crashes when tick() is called on a destroyed/moved level
+		// NOTE: Use markInvalid() not disconnect() - we don't want to close the connection when switching dimensions
 		if (oldLevel != nullptr)
 		{
 			MultiPlayerLevel* oldMPLevel = dynamic_cast<MultiPlayerLevel*>(oldLevel.get());
 			if (oldMPLevel != nullptr)
 			{
-				oldMPLevel->disconnect();  // This sets isValid = false
+				oldMPLevel->markInvalid();  // Mark invalid without disconnecting
 			}
 			
 			// Remove player from old level before switching dimensions
@@ -1511,9 +1512,10 @@ void NetClientHandler::func_9448_a(Packet9* var1)
 		
 		// Alpha 1.2.6: Mark old worldClient as invalid before creating new one
 		// This prevents crashes when tick() is called on a destroyed/moved level
+		// NOTE: Use markInvalid() not disconnect() - we don't want to close the connection when switching dimensions
 		if (worldClient != nullptr)
 		{
-			worldClient->disconnect();  // This sets isValid = false
+			worldClient->markInvalid();  // Mark invalid without disconnecting
 		}
 		
 		// Alpha 1.2.6: Create new world client for new dimension
