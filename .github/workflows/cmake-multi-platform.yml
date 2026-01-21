@@ -68,8 +68,7 @@ jobs:
         run: |
           echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
           if [ "$RUNNER_OS" = "Windows" ]; then
-            # MSVC-style output layout ends up in bin/<Config>/ on Windows
-            echo "bin-dir=${{ github.workspace }}/bin/${{ matrix.build_type }}" >> "$GITHUB_OUTPUT"
+            echo "bin-dir=${{ github.workspace }}/bin" >> "$GITHUB_OUTPUT"
             echo "exe-name=Alpha126Cpp.exe" >> "$GITHUB_OUTPUT"
           else
             echo "bin-dir=${{ github.workspace }}/bin" >> "$GITHUB_OUTPUT"
