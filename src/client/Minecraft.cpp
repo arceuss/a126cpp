@@ -38,8 +38,6 @@
 #include "world/level/chunk/ChunkCache.h"
 #include "world/level/Level.h"
 #include "world/level/tile/Tile.h"
-#include "world/level/dimension/Dimension.h"
-#include "world/level/dimension/HellDimension.h"
 #include "world/item/Items.h"
 #include "world/item/crafting/FurnaceRecipes.h"
 #include "Facing.h"
@@ -2198,8 +2196,8 @@ void Minecraft::toggleDimension()
 			level->tick(player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1176)
 		}
 		
-		// Create new level with Hell dimension
-		std::shared_ptr<Level> newLevel = std::make_shared<Level>(*level, std::make_shared<HellDimension>());
+		// Create new level with Hell dimension (dimension ID -1)
+		std::shared_ptr<Level> newLevel = std::make_shared<Level>(*level, -1);
 		setLevel(newLevel, u"Entering the Nether", player);
 	}
 	else
@@ -2213,8 +2211,8 @@ void Minecraft::toggleDimension()
 			level->tick(player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1185)
 		}
 		
-		// Create new level with normal dimension
-		std::shared_ptr<Level> newLevel = std::make_shared<Level>(*level, std::make_shared<Dimension>());
+		// Create new level with normal dimension (dimension ID 0)
+		std::shared_ptr<Level> newLevel = std::make_shared<Level>(*level, 0);
 		setLevel(newLevel, u"Leaving the Nether", player);
 	}
 	
