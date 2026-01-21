@@ -88,24 +88,33 @@ void MultiPlayerLevel::tick()
 	}
 	
 	// Beta 1.2: Process delayed block resets
-	for (auto it = updatesToReset.begin(); it != updatesToReset.end();)
+	// Safety check: ensure connection is valid (indicates this MultiPlayerLevel is still active)
+	// This prevents crashes if the level was replaced or destroyed
+	if (connection != nullptr)
 	{
-		ResetInfo& r = *it;
-		if (--r.ticks == 0)
+		for (auto it = updatesToReset.begin(); it != updatesToReset.end();)
 		{
-			Level::setTileAndDataNoUpdate(r.x, r.y, r.z, r.tile, r.data);
-			sendTileUpdated(r.x, r.y, r.z);
-			it = updatesToReset.erase(it);
-		}
-		else
-		{
-			++it;
+			ResetInfo& r = *it;
+			if (--r.ticks == 0)
+			{
+				Level::setTileAndDataNoUpdate(r.x, r.y, r.z, r.tile, r.data);
+				sendTileUpdated(r.x, r.y, r.z);
+				it = updatesToReset.erase(it);
+			}
+			else
+			{
+				++it;
+			}
 		}
 	}
 }
 
 void MultiPlayerLevel::clearResetRegion(int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1)
 {
+	// Safety check: ensure connection is valid (indicates this MultiPlayerLevel is still active)
+	if (connection == nullptr)
+		return;
+	
 	for (auto it = updatesToReset.begin(); it != updatesToReset.end();)
 	{
 		const ResetInfo& r = *it;
