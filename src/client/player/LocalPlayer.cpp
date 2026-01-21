@@ -32,9 +32,19 @@ LocalPlayer::LocalPlayer(Minecraft &minecraft, Level &level, User *user, int_t d
 void LocalPlayer::updateAi()
 {
 	Player::updateAi();
-	xxa = input->xa;
-	yya = input->ya;
-	jumping = input->jumping;
+	// Beta: Stop movement when screen is open (like inventory, chest, etc.)
+	if (minecraft.screen != nullptr)
+	{
+		xxa = 0.0f;
+		yya = 0.0f;
+		jumping = false;
+	}
+	else
+	{
+		xxa = input->xa;
+		yya = input->ya;
+		jumping = input->jumping;
+	}
 }
 
 void LocalPlayer::aiStep()

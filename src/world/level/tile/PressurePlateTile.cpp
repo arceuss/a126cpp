@@ -174,6 +174,8 @@ void PressurePlateTile::checkPressed(Level &level, int_t x, int_t y, int_t z)
 	{
 		// Beta: var1.setData(var2, var3, var4, 1) (PressurePlateTile.java:110)
 		level.setData(x, y, z, 1);
+		// Beta: Update shape immediately when pressure plate is pressed (for animation)
+		updateShape(level, x, y, z);
 		// Beta: var1.updateNeighborsAt(var2, var3, var4, this.id) (PressurePlateTile.java:111)
 		level.updateNeighborsAt(x, y, z, id);
 		// Beta: var1.updateNeighborsAt(var2, var3 - 1, var4, this.id) (PressurePlateTile.java:112)
@@ -189,6 +191,8 @@ void PressurePlateTile::checkPressed(Level &level, int_t x, int_t y, int_t z)
 	{
 		// Beta: var1.setData(var2, var3, var4, 0) (PressurePlateTile.java:118)
 		level.setData(x, y, z, 0);
+		// Beta: Update shape immediately when pressure plate is released (for animation)
+		updateShape(level, x, y, z);
 		// Beta: var1.updateNeighborsAt(var2, var3, var4, this.id) (PressurePlateTile.java:119)
 		level.updateNeighborsAt(x, y, z, id);
 		// Beta: var1.updateNeighborsAt(var2, var3 - 1, var4, this.id) (PressurePlateTile.java:120)

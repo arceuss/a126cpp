@@ -75,9 +75,13 @@ void Packet103SetSlot::processPacket(NetHandler* handler)
 
 int Packet103SetSlot::getPacketSize()
 {
-	// Java: variable size - 6 bytes + 3 for item if present
-	// byte (1) + short (2) + short (2) [+ optional: byte(1) + short(2)]
-	return (myItemStack != nullptr) ? 9 : 6;
+	// Java: return 8;
+	// Note: Actual packet size is variable (5 bytes if null, 8 bytes if item present)
+	// but Java returns fixed 8, so we match it for compatibility
+	// Actual: byte (1) + short (2) + short (2) = 5 base
+	// If item: + byte (1) + short (2) = 3 more = 8 total
+	// If null: byte (1) + short (2) + short(-1) (2) = 5 total
+	return 8;  // Match Java exactly
 }
 
 int Packet103SetSlot::getPacketId() const
