@@ -12,7 +12,6 @@ class Tesselator
 {
 private:
 	static constexpr bool TRIANGLE_MODE = true;
-	static constexpr bool USE_VBO = false;
 	static constexpr int_t MAX_MEMORY_USE = 0x1000000;
 	static constexpr int_t MAX_FLOATS = 0x200000;
 
