@@ -443,6 +443,17 @@ void MultiPlayerLevel::disconnect()
 	// Java: this.sendQueue.func_28117_a(new Packet255KickDisconnect("Quitting"));
 	// Just queues the packet - doesn't immediately disconnect
 	// The connection will close when level is set to null
+	if (connection != nullptr)
+	{
+		connection->addToSendQueue(new Packet255KickDisconnect(u"Quitting"));
+	}
+}
+
+void MultiPlayerLevel::markInvalid()
+{
+	// Mark as invalid without sending disconnect packet
+	// Used when switching dimensions - the connection should stay open
+	isValid = false;
 	if (connection != nullptr && !connection->isDisconnected())
 	{
 		// Queue Packet255 - matches Alpha 1.2.6 exactly
