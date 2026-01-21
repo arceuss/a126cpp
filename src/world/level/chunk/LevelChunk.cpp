@@ -214,25 +214,28 @@ void LevelChunk::recalcHeight(int_t x, int_t y, int_t z)
 			skyLight.set(x, yi, z, 0);
 	}
 
+	// Beta 1.2: Recalculate sky light from newHeight downward (LevelChunk.java:244-257)
 	int_t light = 15;
 	int_t ly = newHeight;
-	while (newHeight > 0 && light > 0)
+	int_t yPos = newHeight;
+	// Beta: for (var10 = var5; var5 > 0 && var16 > 0; this.skyLight.set(var1, var5, var3, var16))
+	while (yPos > 0 && light > 0)
 	{
-		--newHeight;
-
-		int_t block = Tile::lightBlock[getTile(x, newHeight, z)];
+		int_t block = Tile::lightBlock[getTile(x, yPos - 1, z)];
 		if (block == 0)
 			block = 1;
 		light -= block;
-		if (light <= 0)
+		if (light < 0)
 			light = 0;
-		skyLight.set(x, newHeight, z, light);
+		--yPos;
+		skyLight.set(x, yPos, z, light);
 	}
 
-	while (newHeight > 0 && Tile::lightBlock[getTile(x, newHeight - 1, z)] == 0)
-		newHeight--;
-	if (newHeight != ly)
-		level.updateLight(LightLayer::Sky, wx - 1, newHeight, wz - 1, wx + 1, ly, wz + 1);
+	// Beta 1.2: Find actual heightmap position (LevelChunk.java:259-261)
+	while (yPos > 0 && Tile::lightBlock[getTile(x, yPos - 1, z)] == 0)
+		yPos--;
+	if (yPos != ly)
+		level.updateLight(LightLayer::Sky, wx - 1, yPos, wz - 1, wx + 1, ly, wz + 1);
 
 	unsaved = true;
 }
@@ -264,20 +267,26 @@ bool LevelChunk::setTileAndData(int_t x, int_t y, int_t z, int_t tile, int_t dat
 	if (oldTile != 0)
 		Tile::tiles[oldTile]->onRemove(level, wx, y, wz);
 
-	if (Tile::lightBlock[tile] != 0)
+	// Beta 1.2: Heightmap recalculation (LevelChunk.java:290-297)
+	if (!level.dimension->hasCeiling)
 	{
-		if (y >= oldHeight)
-			recalcHeight(x, y + 1, z);
-	}
-	else if (y == oldHeight - 1)
-	{
-		recalcHeight(x, y, z);
+		if (Tile::lightBlock[tile] != 0)
+		{
+			if (y >= oldHeight)
+				recalcHeight(x, y + 1, z);
+		}
+		else if (y == oldHeight - 1)
+		{
+			recalcHeight(x, y, z);
+		}
 	}
 
-	// Alpha 1.2.6: Update lighting for this block only (Chunk.java:281-284)
-	// Java: this.worldObj.func_616_a(EnumSkyBlock.Sky, var9, var2, var10, var9, var2, var10);
-	//       this.worldObj.func_616_a(EnumSkyBlock.Block, var9, var2, var10, var9, var2, var10);
-	level.updateLight(LightLayer::Sky, wx, y, wz, wx, y, wz);
+	// Beta 1.2: Update lighting for this block only (LevelChunk.java:299-302)
+	// Java: Only updates Sky light if dimension has no ceiling
+	if (!level.dimension->hasCeiling)
+	{
+		level.updateLight(LightLayer::Sky, wx, y, wz, wx, y, wz);
+	}
 	level.updateLight(LightLayer::Block, wx, y, wz, wx, y, wz);
 	lightGaps(x, z);
 	if (tile != 0 && !level.isOnline)
