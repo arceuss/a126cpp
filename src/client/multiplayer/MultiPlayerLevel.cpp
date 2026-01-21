@@ -89,22 +89,30 @@ void MultiPlayerLevel::tick()
 	}
 	
 	// Beta 1.2: Process delayed block resets
-	// Safety check: ensure this MultiPlayerLevel is still valid and connection is valid
-	// This prevents crashes if the level was replaced, moved, or destroyed
+	// Thread-safe check: ensure this MultiPlayerLevel is still valid, connection is valid,
+	// and this is still the active level in Minecraft (prevents use-after-free)
 	if (isValid && connection != nullptr)
 	{
-		for (auto it = updatesToReset.begin(); it != updatesToReset.end();)
+		// Verify this is still the active level to prevent use-after-free
+		// If the level was replaced, connection->getMinecraft()->level will point to a different level
+		Minecraft* mc = connection->getMinecraft();
+		if (mc != nullptr && mc->level.get() == this)
 		{
-			ResetInfo& r = *it;
-			if (--r.ticks == 0)
+			// Only access updatesToReset if this is still the active level
+			// This prevents crashes when the level is replaced while tick() is running
+			for (auto it = updatesToReset.begin(); it != updatesToReset.end();)
 			{
-				Level::setTileAndDataNoUpdate(r.x, r.y, r.z, r.tile, r.data);
-				sendTileUpdated(r.x, r.y, r.z);
-				it = updatesToReset.erase(it);
-			}
-			else
-			{
-				++it;
+				ResetInfo& r = *it;
+				if (--r.ticks == 0)
+				{
+					Level::setTileAndDataNoUpdate(r.x, r.y, r.z, r.tile, r.data);
+					sendTileUpdated(r.x, r.y, r.z);
+					it = updatesToReset.erase(it);
+				}
+				else
+				{
+					++it;
+				}
 			}
 		}
 	}
@@ -112,8 +120,14 @@ void MultiPlayerLevel::tick()
 
 void MultiPlayerLevel::clearResetRegion(int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1)
 {
-	// Safety check: ensure this MultiPlayerLevel is still valid and connection is valid
+	// Thread-safe check: ensure this MultiPlayerLevel is still valid, connection is valid,
+	// and this is still the active level in Minecraft (prevents use-after-free)
 	if (!isValid || connection == nullptr)
+		return;
+	
+	// Verify this is still the active level to prevent use-after-free
+	Minecraft* mc = connection->getMinecraft();
+	if (mc == nullptr || mc->level.get() != this)
 		return;
 	
 	for (auto it = updatesToReset.begin(); it != updatesToReset.end();)
