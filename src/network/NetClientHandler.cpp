@@ -1527,9 +1527,9 @@ void NetClientHandler::func_9448_a(Packet9* var1)
 		mc->player->dimension = dimension;
 		mc->setScreen(std::make_shared<GuiDownloadTerrain>(*mc, this));
 		
-		// Alpha 1.2.6: Explicitly clear old level reference to ensure it's cleaned up immediately
-		// This helps prevent any lingering references from causing crashes
-		oldLevel.reset();
+		// Alpha 1.2.6: Don't explicitly clear oldLevel - let shared_ptr handle cleanup
+		// The old level will be destroyed when the last reference is released
+		// Explicitly resetting it here can cause issues during dimension transitions
 	}
 	
 	// Alpha 1.2.6: Respawn player (in new dimension if switched, or same dimension if not)
