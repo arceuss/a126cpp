@@ -24,6 +24,7 @@ MultiPlayerLevel::MultiPlayerLevel(NetClientHandler* connection, long_t seed, in
 	, connection(connection)
 	, chunkCache(nullptr)
 	, keepAliveCounter(0)
+	, isValid(true)
 {
 	// Alpha 1.2.6: WorldClient constructor - sets spawn position
 	// Java: this.spawnX = 8; this.spawnY = 64; this.spawnZ = 8;
@@ -422,6 +423,8 @@ bool MultiPlayerLevel::doSetTileAndData(int_t x, int_t y, int_t z, int_t tile, i
 
 void MultiPlayerLevel::disconnect()
 {
+	// Mark as invalid to prevent further operations
+	isValid = false;
 	// Alpha 1.2.6: WorldClient.sendQuittingDisconnectingPacket()
 	// Java: this.sendQueue.func_28117_a(new Packet255KickDisconnect("Quitting"));
 	// Just queues the packet - doesn't immediately disconnect
