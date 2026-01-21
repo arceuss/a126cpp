@@ -151,8 +151,8 @@ void Vec3::xRot(float angle)
 	double c = Mth::cos(angle);
 	double s = Mth::sin(angle);
 	double nx = x;
-	double ny = y * c + z * s;
-	double nz = y * c - z * s;
+	double ny = y * c - z * s;
+	double nz = y * s + z * c;
 	x = nx;
 	y = ny;
 	z = nz;
@@ -164,7 +164,7 @@ void Vec3::yRot(float angle)
 	double s = Mth::sin(angle);
 	double nx = x * c + z * s;
 	double ny = y;
-	double nz = x * c + z * s;
+	double nz = -x * s + z * c;
 	x = nx;
 	y = ny;
 	z = nz;

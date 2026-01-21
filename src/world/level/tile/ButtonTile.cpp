@@ -13,6 +13,9 @@
 ButtonTile::ButtonTile(int_t id, int_t tex) : Tile(id, tex, Material::decoration)
 {
 	setTicking(true);  // Beta: this.setTicking(true) (ButtonTile.java:13)
+	// Beta: ButtonTile.blocksLight() returns false (ButtonTile.java:26-28)
+	// Explicitly set lightBlock to 0 to ensure buttons don't block light
+	setLightBlock(0);
 }
 
 AABB *ButtonTile::getAABB(Level &level, int_t x, int_t y, int_t z)
