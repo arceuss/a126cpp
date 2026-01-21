@@ -1504,8 +1504,14 @@ void Minecraft::tick()
 			level->tickEntities();
 		if (!pause || isOnline())
 		{
-			level->setSpawnSettings(options.difficulty > 0, true);
-			level->tick();
+			// Thread-safe check: ensure level is still valid before ticking
+			// This prevents crashes if the level was replaced by network threads
+			std::shared_ptr<Level> currentLevel = level;  // Capture shared_ptr to keep it alive
+			if (currentLevel != nullptr)
+			{
+				currentLevel->setSpawnSettings(options.difficulty > 0, true);
+				currentLevel->tick();
+			}
 		}
 		if (!pause && level != nullptr)
 			level->animateTick(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));

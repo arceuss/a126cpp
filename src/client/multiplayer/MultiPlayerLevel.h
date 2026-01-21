@@ -36,6 +36,7 @@ private:
 	NetClientHandler* connection;
 	class MultiPlayerChunkCache* chunkCache;
 	bool isValid;  // Flag to track if this MultiPlayerLevel is still valid (not moved/destroyed)
+	bool isValid;  // Flag to track if this MultiPlayerLevel is still valid (not moved/destroyed)
 	IntHashMap<std::shared_ptr<Entity>> entitiesById;
 	std::unordered_set<std::shared_ptr<Entity>> forced;
 	std::unordered_set<std::shared_ptr<Entity>> reEntries;
