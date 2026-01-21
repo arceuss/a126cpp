@@ -2,12 +2,13 @@ name: CMake on multiple platforms
 
 on:
   push:
-    branches: [ "qol" ]
+    branches: ["qol"]
   pull_request:
-    branches: [ "qol" ]
+    branches: ["qol"]
 
 jobs:
   build:
+    name: ${{ matrix.name }} (${{ matrix.build_type }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
 
@@ -15,108 +16,167 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          # Linux (x64)
+          - name: ubuntu-22.04
+            os: ubuntu-22.04
             build_type: Release
-            c_compiler: gcc
-            cpp_compiler: g++
-          - os: windows-2022
+          - name: ubuntu-22.04
+            os: ubuntu-22.04
+            build_type: Debug
+
+          # Windows (MSVC)
+          - name: windows-latest
+            os: windows-latest
             build_type: Release
-          - os: macos-15-intel
+          - name: windows-latest
+            os: windows-latest
+            build_type: Debug
+
+          # macOS (Apple Silicon, arm64)
+          - name: macos-latest
+            os: macos-latest
             build_type: Release
-            c_compiler: clang
-            cpp_compiler: clang++
-            arch: x86_64
-          - os: macos-latest
+          - name: macos-latest
+            os: macos-latest
+            build_type: Debug
+
+          # macOS (Intel, x86_64)
+          - name: macos-15-intel
+            os: macos-15-intel
             build_type: Release
-            c_compiler: clang
-            cpp_compiler: clang++
-            arch: arm64
+          - name: macos-15-intel
+            os: macos-15-intel
+            build_type: Debug
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        ref: qol
-        submodules: recursive
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
-        echo "bin-dir=${{ github.workspace }}/bin" >> "$GITHUB_OUTPUT"
-        if [ "$RUNNER_OS" = "Windows" ]; then
-          echo "exe-name=Alpha126Cpp.exe" >> "$GITHUB_OUTPUT"
-        else
-          echo "exe-name=Alpha126Cpp" >> "$GITHUB_OUTPUT"
-        fi
+      - name: Setup Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
 
-    # SDL3 recommends these build deps on Linux when building with "all features enabled"
-    - name: Install Linux dependencies (SDL3)
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y           build-essential git make autoconf automake libtool           pkg-config cmake ninja-build gnome-desktop-testing libasound2-dev libpulse-dev           libaudio-dev libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev           libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev           libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev           libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev libthai-dev           libpipewire-0.3-dev libdecor-0-dev liburing-dev
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
 
-    - name: Install Ninja (macOS)
-      if: runner.os == 'macOS'
-      run: |
-        brew update
-        brew install ninja
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: |
+          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # MSVC-style output layout ends up in bin/<Config>/ on Windows
+            echo "bin-dir=${{ github.workspace }}/bin/${{ matrix.build_type }}" >> "$GITHUB_OUTPUT"
+            echo "exe-name=Alpha126Cpp.exe" >> "$GITHUB_OUTPUT"
+          else
+            echo "bin-dir=${{ github.workspace }}/bin" >> "$GITHUB_OUTPUT"
+            echo "exe-name=Alpha126Cpp" >> "$GITHUB_OUTPUT"
+          fi
 
-    - name: Configure CMake (macOS)
-      if: runner.os == 'macOS'
-      run: >
-        cmake -G Ninja -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        -DCMAKE_VERBOSE_MAKEFILE=ON
-        ${{ matrix.arch && format('-DCMAKE_OSX_ARCHITECTURES={0}', matrix.arch) || '' }}
-        -S ${{ github.workspace }}
-      env:
-        CC: ${{ matrix.c_compiler }}
-        CXX: ${{ matrix.cpp_compiler }}
+      # SDL3 recommends these build deps on Linux when building with "all features enabled"
+      - name: Install Linux dependencies (SDL3)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            git \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libasound2-dev \
+            libpulse-dev \
+            libaudio-dev \
+            libjack-dev \
+            libsndio-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxfixes-dev \
+            libxi-dev \
+            libxss-dev \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libdrm-dev \
+            libgbm-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            libgles2-mesa-dev \
+            libvulkan-dev \
+            libudev-dev \
+            libdbus-1-dev \
+            libibus-1.0-dev \
+            libsamplerate0-dev \
+            libpipewire-0.3-dev \
+            libdecor-0-dev \
+            liburing-dev \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libfribidi-dev \
+            libpng-dev \
+            libjpeg-dev \
+            libwebp-dev \
+            libtiff-dev \
+            libavif-dev \
+            libfluidsynth-dev \
+            libdiscid-dev \
+            libmodplug-dev \
+            libmpg123-dev \
+            libopusfile-dev \
+            libvorbis-dev \
+            libflac-dev \
+            libmikmod-dev \
+            libtheora-dev \
+            libogg-dev \
+            libglvnd-dev \
+            libthai-dev
 
-    - name: Configure CMake (Linux)
-      if: runner.os == 'Linux'
-      run: >
-        cmake -G Ninja -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        -DCMAKE_VERBOSE_MAKEFILE=ON
-        -S ${{ github.workspace }}
-      env:
-        CC: ${{ matrix.c_compiler }}
-        CXX: ${{ matrix.cpp_compiler }}
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cmake -S "${{ github.workspace }}" -B "${{ steps.strings.outputs.build-output-dir }}" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_VERBOSE_MAKEFILE=ON
 
-    - name: Configure CMake (Windows)
-      if: runner.os == 'Windows'
-      run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -G "Visual Studio 17 2022"
-        -A x64
-        -S ${{ github.workspace }}
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cmake -S "${{ github.workspace }}" -B "${{ steps.strings.outputs.build-output-dir }}" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_VERBOSE_MAKEFILE=ON
 
-    # macOS sometimes appears to "stick" after the last object file line; verbose + lower parallelism helps diagnose.
-    - name: Build (macOS)
-      if: runner.os == 'macOS'
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel 2 --verbose
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cmake --build "${{ steps.strings.outputs.build-output-dir }}" --parallel 2 --verbose
 
-    - name: Build (non-macOS)
-      if: runner.os != 'macOS'
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel --verbose
+      - name: Build (Linux/Windows)
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          cmake --build "${{ steps.strings.outputs.build-output-dir }}" --parallel --verbose
 
-    - name: Test
-      working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      continue-on-error: true
-      run: ctest --build-config ${{ matrix.build_type }} --output-on-failure --timeout 300 || true
+      - name: Test
+        shell: bash
+        run: |
+          ctest --test-dir "${{ steps.strings.outputs.build-output-dir }}" --output-on-failure --timeout 300 || true
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: ${{ runner.os }}-${{ matrix.os }}-${{ matrix.arch || 'native' }}-${{ matrix.build_type }}
-        path: |
-          ${{ steps.strings.outputs.bin-dir }}/${{ steps.strings.outputs.exe-name }}
-          ${{ steps.strings.outputs.bin-dir }}/resource/
-          ${{ steps.strings.outputs.bin-dir }}/*.dll
-          ${{ steps.strings.outputs.bin-dir }}/*.so
-          ${{ steps.strings.outputs.bin-dir }}/*.dylib
-        retention-days: 30
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ runner.os }}-${{ matrix.os }}-${{ matrix.build_type }}
+          path: |
+            ${{ steps.strings.outputs.bin-dir }}/${{ steps.strings.outputs.exe-name }}
+            ${{ steps.strings.outputs.bin-dir }}/resource/
+            ${{ steps.strings.outputs.bin-dir }}/*.dll
+            ${{ steps.strings.outputs.bin-dir }}/*.so
+            ${{ steps.strings.outputs.bin-dir }}/*.dylib
+          retention-days: 30

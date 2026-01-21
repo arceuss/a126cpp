@@ -12,8 +12,16 @@
 #include <cstdlib>
 #include <climits>
 
+#ifdef __APPLE__
+// On macOS, we need _DARWIN_C_SOURCE for macOS-specific features like st_mtimespec
+#ifndef _DARWIN_C_SOURCE
+#define _DARWIN_C_SOURCE
+#endif
+#else
+// On Linux and other POSIX systems, use POSIX 2008 for st_mtim
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
 #endif
 #include <sys/stat.h>
 #include <unistd.h>
