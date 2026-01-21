@@ -20,8 +20,8 @@ Tesselator::Tesselator(int_t size)
 	buffer_p = buffer.get();
 	buffer_e = buffer.get() + (size * 4);
 
-	// Setup VBO
-	vboMode = USE_VBO && lwjgl::GLContext::getCapabilities()["GL_ARB_vertex_buffer_object"];
+	// Setup VBO - automatically enable if hardware supports it
+	vboMode = lwjgl::GLContext::getCapabilities()["GL_ARB_vertex_buffer_object"];
 	if (vboMode)
 	{
 		vboIds = Util::make_unique<GLuint[]>(vboCounts);
