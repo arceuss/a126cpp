@@ -1178,7 +1178,7 @@ void Minecraft::toggleDimension()
 		player->moveTo(var1, player->y, var3, player->yRot, player->xRot);
 		if (player->isAlive())
 		{
-			level->tick(*player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1176)
+			level->tick(player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1176)
 		}
 		
 		// Create new level with Hell dimension
@@ -1193,7 +1193,7 @@ void Minecraft::toggleDimension()
 		player->moveTo(var1, player->y, var3, player->yRot, player->xRot);
 		if (player->isAlive())
 		{
-			level->tick(*player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1185)
+			level->tick(player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1185)
 		}
 		
 		// Create new level with normal dimension
@@ -1201,10 +1201,13 @@ void Minecraft::toggleDimension()
 		setLevel(newLevel, u"Leaving the Nether", player);
 	}
 	
-	// Update player level reference and position
-	player->level = level;
+	// Update player position (level reference is updated by setLevel())
+	// Note: player->level is a reference, so it's automatically updated when setLevel() is called
 	player->moveTo(var1, player->y, var3, player->yRot, player->xRot);
-	level->tick(*player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1192)
+	if (level != nullptr && player != nullptr)
+	{
+		level->tick(player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1192)
+	}
 	
 	// Force portal placement (Alpha: new PortalForcer().force(this.level, this.player) - Minecraft.java:1194)
 	// Note: PortalForcer is not implemented in Alpha 1.2.6, so we skip this step
