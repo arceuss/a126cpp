@@ -97,6 +97,14 @@ void LocalPlayer::aiStep()
 	
 	input->tick(*this);  // Beta: this.input.tick(this) (LocalPlayer.java:79)
 	
+	// Beta 1.2: Block movement input when screen is open (prevents player from moving while GUI is open)
+	if (minecraft.screen != nullptr)
+	{
+		input->xa = 0.0f;
+		input->ya = 0.0f;
+		input->jumping = false;
+	}
+	
 	if (input->sneaking && ySlideOffset < 0.2f)  // Beta: if (this.input.sneaking && this.ySlideOffset < 0.2F) (LocalPlayer.java:80)
 		ySlideOffset = 0.2f;  // Beta: this.ySlideOffset = 0.2F (LocalPlayer.java:81)
 	
