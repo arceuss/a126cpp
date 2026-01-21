@@ -82,10 +82,17 @@ void MultiPlayerLevel::tick()
 	// Keep-alive packets are sent by GuiDownloadTerrain (every 20 ticks)
 	// Position updates are sent by EntityClientPlayerMP.func_4056_N() (called from onUpdate())
 	// NOT sent from WorldClient::tick() - this is Beta 1.2 behavior, not Alpha 1.2.6
-	if (connection != nullptr)
+	// Thread-safe check: only process packets if this is still the active level
+	// This prevents processing packets on an invalid level during dimension transitions
+	if (isValid && connection != nullptr)
 	{
-		// Java: this.sendQueue.processReadPackets();
-		connection->processReadPackets();
+		// Verify this is still the active level to prevent processing packets on invalid level
+		Minecraft* mc = connection->getMinecraft();
+		if (mc != nullptr && mc->level.get() == this)
+		{
+			// Java: this.sendQueue.processReadPackets();
+			connection->processReadPackets();
+		}
 	}
 	
 	// Beta 1.2: Process delayed block resets
