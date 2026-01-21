@@ -200,6 +200,11 @@ void NetClientHandler::handleLogin(Packet1Login* var1)
 	
 	// Java: this.worldClient = new WorldClient(this, var1.field_4074_d, var1.field_4073_e);
 	// MultiPlayerLevel constructor sets isOnline = true (equivalent to multiplayerWorld = true)
+	// Mark old worldClient as invalid if it exists
+	if (worldClient != nullptr)
+	{
+		worldClient->disconnect();  // This sets isValid = false
+	}
 	worldClient = new MultiPlayerLevel(this, var1->field_4074_d, dimension);
 	
 	// Java: this.worldClient.multiplayerWorld = true;
@@ -1487,11 +1492,28 @@ void NetClientHandler::func_9448_a(Packet9* var1)
 		// Alpha 1.2.6: Store old level reference before switching
 		std::shared_ptr<Level> oldLevel = mc->level;
 		
-		// Alpha 1.2.6: Remove player from old level before switching dimensions
-		// This ensures the old level can be properly cleaned up
-		if (oldLevel != nullptr && mc->player != nullptr)
+		// Alpha 1.2.6: Mark old MultiPlayerLevel as invalid if it exists
+		// This prevents crashes when tick() is called on a destroyed/moved level
+		if (oldLevel != nullptr)
 		{
-			oldLevel->removeEntity(mc->player);
+			MultiPlayerLevel* oldMPLevel = dynamic_cast<MultiPlayerLevel*>(oldLevel.get());
+			if (oldMPLevel != nullptr)
+			{
+				oldMPLevel->disconnect();  // This sets isValid = false
+			}
+			
+			// Remove player from old level before switching dimensions
+			if (mc->player != nullptr)
+			{
+				oldLevel->removeEntity(mc->player);
+			}
+		}
+		
+		// Alpha 1.2.6: Mark old worldClient as invalid before creating new one
+		// This prevents crashes when tick() is called on a destroyed/moved level
+		if (worldClient != nullptr)
+		{
+			worldClient->disconnect();  // This sets isValid = false
 		}
 		
 		// Alpha 1.2.6: Create new world client for new dimension

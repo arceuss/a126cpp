@@ -24,6 +24,7 @@ MultiPlayerLevel::MultiPlayerLevel(NetClientHandler* connection, long_t seed, in
 	, connection(connection)
 	, chunkCache(nullptr)
 	, keepAliveCounter(0)
+	, isValid(true)
 {
 	// Alpha 1.2.6: WorldClient constructor - sets spawn position
 	// Java: this.spawnX = 8; this.spawnY = 64; this.spawnZ = 8;
@@ -88,9 +89,9 @@ void MultiPlayerLevel::tick()
 	}
 	
 	// Beta 1.2: Process delayed block resets
-	// Safety check: ensure connection is valid (indicates this MultiPlayerLevel is still active)
-	// This prevents crashes if the level was replaced or destroyed
-	if (connection != nullptr)
+	// Safety check: ensure this MultiPlayerLevel is still valid and connection is valid
+	// This prevents crashes if the level was replaced, moved, or destroyed
+	if (isValid && connection != nullptr)
 	{
 		for (auto it = updatesToReset.begin(); it != updatesToReset.end();)
 		{
@@ -111,8 +112,8 @@ void MultiPlayerLevel::tick()
 
 void MultiPlayerLevel::clearResetRegion(int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1)
 {
-	// Safety check: ensure connection is valid (indicates this MultiPlayerLevel is still active)
-	if (connection == nullptr)
+	// Safety check: ensure this MultiPlayerLevel is still valid and connection is valid
+	if (!isValid || connection == nullptr)
 		return;
 	
 	for (auto it = updatesToReset.begin(); it != updatesToReset.end();)
@@ -422,6 +423,8 @@ bool MultiPlayerLevel::doSetTileAndData(int_t x, int_t y, int_t z, int_t tile, i
 
 void MultiPlayerLevel::disconnect()
 {
+	// Mark as invalid to prevent further operations
+	isValid = false;
 	// Alpha 1.2.6: WorldClient.sendQuittingDisconnectingPacket()
 	// Java: this.sendQueue.func_28117_a(new Packet255KickDisconnect("Quitting"));
 	// Just queues the packet - doesn't immediately disconnect
