@@ -86,7 +86,7 @@ private:
 	void renderLabels();
 	
 	// Beta: renderSlot() - renders a single inventory slot
-	void renderSlot(int_t slot, int_t x, int_t y, ItemStack &itemStack);
+	void renderSlot(int_t slot, int_t x, int_t y, ItemStack &itemStack, float a = 0.0f);
 	
 	// Controller slot snapping support (Controlify-style)
 	void collectSlotSnapPoints(std::vector<std::pair<int_t, int_t>> &points) override;

@@ -20,6 +20,7 @@ public:
 	int_t stackSize = 0;
 	int_t itemID = 0;  // shiftedIndex (256 + base item ID)
 	int_t itemDamage = 0;  // Durability damage
+	int_t popTime = 0;  // Beta: popTime - animation timer for item pickup (ItemInstance.java)
 	
 	ItemStack();
 	ItemStack(int_t shiftedIndex);

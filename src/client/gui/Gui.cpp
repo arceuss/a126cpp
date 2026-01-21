@@ -284,9 +284,17 @@ void Gui::renderSlot(int_t slot, int_t x, int_t y, float a)
 	ItemStack &stack = minecraft.player->inventory.mainInventory[slot];
 	if (!stack.isEmpty())
 	{
-		// Beta: popTime animation (Gui.java:325-337) - skip for now since ItemStack doesn't have popTime yet
-		// float popTime = stack.popTime - a;
-		// if (popTime > 0.0f) { ... }
+		// Beta: popTime animation (Gui.java:325-337)
+		float popTime = static_cast<float>(stack.popTime) - a;  // Beta: float var6 = var5.popTime - var1 (Gui.java:325)
+		if (popTime > 0.0f)  // Beta: if (var6 > 0.0F) (Gui.java:326)
+		{
+			// Beta: Animation scale calculation (Gui.java:327-330)
+			float scale = 1.0f + popTime * 0.15f;  // Beta: float var7 = 1.0F + var6 * 0.15F (Gui.java:327)
+			glPushMatrix();  // Beta: GL11.glPushMatrix() (Gui.java:328)
+			glTranslatef(static_cast<float>(x + 8), static_cast<float>(y + 12), 0.0f);  // Beta: GL11.glTranslatef((float)(var2 + 8), (float)(var3 + 12), 0.0F) (Gui.java:329)
+			glScalef(scale, scale, 1.0f);  // Beta: GL11.glScalef(var7, var7, 1.0F) (Gui.java:330)
+			glTranslatef(static_cast<float>(-(x + 8)), static_cast<float>(-(y + 12)), 0.0f);  // Beta: GL11.glTranslatef((float)(-(var2 + 8)), (float)(-(var3 + 12)), 0.0F) (Gui.java:331)
+		}
 		
 		Font &font = *minecraft.font;  // Beta: Use minecraft.font (Gui.java:334)
 		
@@ -295,5 +303,11 @@ void Gui::renderSlot(int_t slot, int_t x, int_t y, float a)
 		
 		// Beta: Render item decorations (count text, durability bar) (Gui.java:339)
 		EntityRenderDispatcher::itemRenderer.renderGuiItemDecorations(font, minecraft.textures, stack, x, y);
+		
+		// Beta: End popTime animation (Gui.java:337)
+		if (popTime > 0.0f)
+		{
+			glPopMatrix();  // Beta: GL11.glPopMatrix() (Gui.java:337)
+		}
 	}
 }

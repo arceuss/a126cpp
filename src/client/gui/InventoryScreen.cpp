@@ -75,7 +75,7 @@ void InventoryScreen::render(int_t xm, int_t ym, float a)
 			int_t slotIndex = col + row * 2;
 			int_t slotX = 88 + col * 18;
 			int_t slotY = 26 + row * 18;
-			renderSlot(-1, slotX, slotY, craftSlots[slotIndex]);  // Use -1 as slot index for crafting slots
+			renderSlot(-1, slotX, slotY, craftSlots[slotIndex], a);  // Use -1 as slot index for crafting slots
 			
 			// Beta: Check if hovering crafting slot (AbstractContainerScreen.java:124-130)
 			if (relX >= slotX - 1 && relX < slotX + 17 && relY >= slotY - 1 && relY < slotY + 17)
@@ -90,7 +90,7 @@ void InventoryScreen::render(int_t xm, int_t ym, float a)
 	// Beta: Render result slot (InventoryMenu.java:22)
 	int_t resultSlotX = 144;
 	int_t resultSlotY = 36;
-	renderSlot(-2, resultSlotX, resultSlotY, resultSlot);  // Use -2 as slot index for result slot
+	renderSlot(-2, resultSlotX, resultSlotY, resultSlot, a);  // Use -2 as slot index for result slot
 	
 	// Beta: Check if hovering result slot
 	if (relX >= resultSlotX - 1 && relX < resultSlotX + 17 && relY >= resultSlotY - 1 && relY < resultSlotY + 17)
@@ -112,7 +112,7 @@ void InventoryScreen::render(int_t xm, int_t ym, float a)
 		int_t containerSlot = 5 + i;  // Container slots 5-8
 		
 		ItemStack &armorStack = minecraft.player->inventory.armorInventory[armorIndex];
-		renderSlot(containerSlot, slotX, slotY, armorStack);
+		renderSlot(containerSlot, slotX, slotY, armorStack, a);
 		
 		// Beta: Check if hovering armor slot (AbstractContainerScreen.java:124-130)
 		if (relX >= slotX - 1 && relX < slotX + 17 && relY >= slotY - 1 && relY < slotY + 17)
@@ -134,7 +134,7 @@ void InventoryScreen::render(int_t xm, int_t ym, float a)
 			int_t slotY = 84 + row * 18;  // Beta: 84 + var6 * 18 (relative to yo)
 			
 			ItemStack &stack = minecraft.player->inventory.mainInventory[slotIndex];
-			renderSlot(slotIndex, slotX, slotY, stack);
+			renderSlot(slotIndex, slotX, slotY, stack, a);
 			
 			// Beta: Check if hovering (AbstractContainerScreen.java:124-130) - slotX/slotY already relative to xo/yo
 			if (relX >= slotX - 1 && relX < slotX + 17 && relY >= slotY - 1 && relY < slotY + 17)  // Beta: var2 >= var1.x - 1 && var2 < var1.x + 16 + 1 && var3 >= var1.y - 1 && var3 < var1.y + 16 + 1
@@ -153,7 +153,7 @@ void InventoryScreen::render(int_t xm, int_t ym, float a)
 		int_t slotY = 142;  // Beta: 142 (relative to yo)
 		
 		ItemStack &stack = minecraft.player->inventory.mainInventory[i];
-		renderSlot(i, slotX, slotY, stack);
+		renderSlot(i, slotX, slotY, stack, a);
 		
 		// Beta: Check if hovering (AbstractContainerScreen.java:124-130)
 		if (relX >= slotX - 1 && relX < slotX + 17 && relY >= slotY - 1 && relY < slotY + 17)
@@ -259,13 +259,31 @@ void InventoryScreen::renderLabels()
 }
 
 // Beta: InventoryScreen.renderSlot() - renders a single inventory slot
-void InventoryScreen::renderSlot(int_t slot, int_t x, int_t y, ItemStack &itemStack)
+void InventoryScreen::renderSlot(int_t slot, int_t x, int_t y, ItemStack &itemStack, float a)
 {
 	if (!itemStack.isEmpty())
 	{
+		// Beta: popTime animation (Gui.java:325-337)
+		float popTime = static_cast<float>(itemStack.popTime) - a;  // Beta: float var6 = var5.popTime - var1 (Gui.java:325)
+		if (popTime > 0.0f)  // Beta: if (var6 > 0.0F) (Gui.java:326)
+		{
+			// Beta: Animation scale calculation (Gui.java:327-330)
+			float scale = 1.0f + popTime * 0.15f;  // Beta: float var7 = 1.0F + var6 * 0.15F (Gui.java:327)
+			glPushMatrix();  // Beta: GL11.glPushMatrix() (Gui.java:328)
+			glTranslatef(static_cast<float>(x + 8), static_cast<float>(y + 12), 0.0f);  // Beta: GL11.glTranslatef((float)(var2 + 8), (float)(var3 + 12), 0.0F) (Gui.java:329)
+			glScalef(scale, scale, 1.0f);  // Beta: GL11.glScalef(var7, var7, 1.0F) (Gui.java:330)
+			glTranslatef(static_cast<float>(-(x + 8)), static_cast<float>(-(y + 12)), 0.0f);  // Beta: GL11.glTranslatef((float)(-(var2 + 8)), (float)(-(var3 + 12)), 0.0F) (Gui.java:331)
+		}
+		
 		// Beta: Render item icon (AbstractContainerScreen.java:109-110)
 		EntityRenderDispatcher::itemRenderer.renderGuiItem(font, minecraft.textures, itemStack, x, y);
 		EntityRenderDispatcher::itemRenderer.renderGuiItemDecorations(font, minecraft.textures, itemStack, x, y);
+		
+		// Beta: End popTime animation (Gui.java:337)
+		if (popTime > 0.0f)
+		{
+			glPopMatrix();  // Beta: GL11.glPopMatrix() (Gui.java:337)
+		}
 	}
 	else
 	{
