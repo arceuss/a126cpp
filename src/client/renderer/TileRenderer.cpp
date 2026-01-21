@@ -7,6 +7,7 @@
 #include "world/level/tile/FireTile.h"
 #include "world/level/material/Material.h"
 #include "world/level/Level.h"
+#include "world/phys/Vec3.h"
 #include "util/Mth.h"
 #include "Facing.h"
 
@@ -2102,7 +2103,218 @@ bool TileRenderer::tesselateFenceInWorld(Tile &tt, int_t x, int_t y, int_t z)
 
 bool TileRenderer::tesselateLeverInWorld(Tile &tt, int_t x, int_t y, int_t z)
 {
-	// Beta: Lever rendering - complex implementation needed
-	// For now, render as block to make levers visible
-	return tesselateBlockInWorld(tt, x, y, z);
+	// Beta 1.2: TileRenderer.tesselateLeverInWorld() - full lever rendering implementation
+	// Reference: beta1.2/net/minecraft/client/renderer/TileRenderer.java:100-261
+	int_t data = level->getData(x, y, z);
+	int_t dir = data & 7;
+	bool flipped = (data & 8) > 0;
+	Tesselator &t = Tesselator::instance;
+	bool hadFixed = fixedTexture >= 0;
+	if (!hadFixed)
+	{
+		// Beta: this.fixedTexture = Tile.stoneBrick.tex (TileRenderer.java:107)
+		fixedTexture = Tile::cobblestone.tex;  // Use cobblestone texture for lever base
+	}
+
+	// Beta: Set base shape based on direction (TileRenderer.java:110-125)
+	float w1 = 0.25F;
+	float w2 = 0.1875F;
+	float h = 0.1875F;
+	if (dir == 5)
+	{
+		tt.setShape(0.5F - w2, 0.0F, 0.5F - w1, 0.5F + w2, h, 0.5F + w1);
+	}
+	else if (dir == 6)
+	{
+		tt.setShape(0.5F - w1, 0.0F, 0.5F - w2, 0.5F + w1, h, 0.5F + w2);
+	}
+	else if (dir == 4)
+	{
+		tt.setShape(0.5F - w2, 0.5F - w1, 1.0F - h, 0.5F + w2, 0.5F + w1, 1.0F);
+	}
+	else if (dir == 3)
+	{
+		tt.setShape(0.5F - w2, 0.5F - w1, 0.0F, 0.5F + w2, 0.5F + w1, h);
+	}
+	else if (dir == 2)
+	{
+		tt.setShape(1.0F - h, 0.5F - w1, 0.5F - w2, 1.0F, 0.5F + w1, 0.5F + w2);
+	}
+	else if (dir == 1)
+	{
+		tt.setShape(0.0F, 0.5F - w1, 0.5F - w2, h, 0.5F + w1, 0.5F + w2);
+	}
+
+	// Beta: Render base block (TileRenderer.java:127)
+	tesselateBlockInWorld(tt, x, y, z);
+	if (!hadFixed)
+	{
+		fixedTexture = -1;
+	}
+
+	// Beta: Get brightness and set color (TileRenderer.java:132-137)
+	float br = tt.getBrightness(*level, x, y, z);
+	if (Tile::lightEmission[tt.id] > 0)
+	{
+		br = 1.0F;
+	}
+	t.color(br, br, br);
+
+	// Beta: Get texture (TileRenderer.java:138-141)
+	int_t tex = tt.getTexture(Facing::DOWN);
+	if (fixedTexture >= 0)
+	{
+		tex = fixedTexture;
+	}
+
+	// Beta: Calculate texture coordinates (TileRenderer.java:143-148)
+	int_t xt = (tex & 15) << 4;
+	int_t yt = tex & 240;
+	float u0 = static_cast<float>(xt) / 256.0F;
+	float u1 = static_cast<float>(xt + 15.99F) / 256.0F;
+	float v0 = static_cast<float>(yt) / 256.0F;
+	float v1 = static_cast<float>(yt + 15.99F) / 256.0F;
+
+	// Beta: Create 8 corner vertices (TileRenderer.java:149-160)
+	Vec3 *corners[8];
+	float xv = 0.0625F;
+	float zv = 0.0625F;
+	float yv = 0.625F;
+	corners[0] = Vec3::newTemp(-xv, 0.0, -zv);
+	corners[1] = Vec3::newTemp(xv, 0.0, -zv);
+	corners[2] = Vec3::newTemp(xv, 0.0, zv);
+	corners[3] = Vec3::newTemp(-xv, 0.0, zv);
+	corners[4] = Vec3::newTemp(-xv, yv, -zv);
+	corners[5] = Vec3::newTemp(xv, yv, -zv);
+	corners[6] = Vec3::newTemp(xv, yv, zv);
+	corners[7] = Vec3::newTemp(-xv, yv, zv);
+
+	// Beta: Transform corners based on flipped state and direction (TileRenderer.java:162-201)
+	for (int i = 0; i < 8; i++)
+	{
+		if (flipped)
+		{
+			corners[i]->z -= 0.0625;
+			corners[i]->xRot(static_cast<float>(Mth::PI * 2.0F / 9.0F));
+		}
+		else
+		{
+			corners[i]->z += 0.0625;
+			corners[i]->xRot(static_cast<float>(-Mth::PI * 2.0F / 9.0F));
+		}
+
+		if (dir == 6)
+		{
+			corners[i]->yRot(static_cast<float>(Mth::PI / 2));
+		}
+
+		if (dir < 5)
+		{
+			corners[i]->y -= 0.375;
+			corners[i]->xRot(static_cast<float>(Mth::PI / 2));
+			if (dir == 4)
+			{
+				corners[i]->yRot(0.0F);
+			}
+			if (dir == 3)
+			{
+				corners[i]->yRot(static_cast<float>(Mth::PI));
+			}
+			if (dir == 2)
+			{
+				corners[i]->yRot(static_cast<float>(Mth::PI / 2));
+			}
+			if (dir == 1)
+			{
+				corners[i]->yRot(static_cast<float>(-Mth::PI / 2));
+			}
+
+			corners[i]->x += x + 0.5;
+			corners[i]->y += y + 0.5F;
+			corners[i]->z += z + 0.5;
+		}
+		else
+		{
+			corners[i]->x += x + 0.5;
+			corners[i]->y += y + 0.125F;
+			corners[i]->z += z + 0.5;
+		}
+	}
+
+	// Beta: Render 6 faces using corner vertices (TileRenderer.java:204-258)
+	Vec3 *c0 = nullptr;
+	Vec3 *c1 = nullptr;
+	Vec3 *c2 = nullptr;
+	Vec3 *c3 = nullptr;
+
+	for (int i = 0; i < 6; i++)
+	{
+		// Beta: Adjust texture coordinates for specific faces (TileRenderer.java:210-220)
+		if (i == 0)
+		{
+			u0 = static_cast<float>(xt + 7) / 256.0F;
+			u1 = static_cast<float>(xt + 9 - 0.01F) / 256.0F;
+			v0 = static_cast<float>(yt + 6) / 256.0F;
+			v1 = static_cast<float>(yt + 8 - 0.01F) / 256.0F;
+		}
+		else if (i == 2)
+		{
+			u0 = static_cast<float>(xt + 7) / 256.0F;
+			u1 = static_cast<float>(xt + 9 - 0.01F) / 256.0F;
+			v0 = static_cast<float>(yt + 6) / 256.0F;
+			v1 = static_cast<float>(yt + 16 - 0.01F) / 256.0F;
+		}
+
+		// Beta: Select corners for each face (TileRenderer.java:222-252)
+		if (i == 0)
+		{
+			c0 = corners[0];
+			c1 = corners[1];
+			c2 = corners[2];
+			c3 = corners[3];
+		}
+		else if (i == 1)
+		{
+			c0 = corners[7];
+			c1 = corners[6];
+			c2 = corners[5];
+			c3 = corners[4];
+		}
+		else if (i == 2)
+		{
+			c0 = corners[1];
+			c1 = corners[0];
+			c2 = corners[4];
+			c3 = corners[5];
+		}
+		else if (i == 3)
+		{
+			c0 = corners[2];
+			c1 = corners[1];
+			c2 = corners[5];
+			c3 = corners[6];
+		}
+		else if (i == 4)
+		{
+			c0 = corners[3];
+			c1 = corners[2];
+			c2 = corners[6];
+			c3 = corners[7];
+		}
+		else if (i == 5)
+		{
+			c0 = corners[0];
+			c1 = corners[3];
+			c2 = corners[7];
+			c3 = corners[4];
+		}
+
+		// Beta: Render face (TileRenderer.java:254-257)
+		t.vertexUV(c0->x, c0->y, c0->z, u0, v1);
+		t.vertexUV(c1->x, c1->y, c1->z, u1, v1);
+		t.vertexUV(c2->x, c2->y, c2->z, u1, v0);
+		t.vertexUV(c3->x, c3->y, c3->z, u0, v0);
+	}
+
+	return true;
 }
