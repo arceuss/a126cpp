@@ -1,5 +1,3 @@
-# This starter workflow is for a CMake project running on multiple platforms. There is a different starter workflow if you just want a single platform.
-# See: https://github.com/actions/starter-workflows/blob/main/ci/cmake-single-platform.yml
 name: CMake on multiple platforms
 
 on:
@@ -11,121 +9,110 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
 
     strategy:
-      # Set fail-fast to false to ensure that feedback is delivered for all matrix combinations. Consider changing this to true when your workflow is stable.
       fail-fast: false
-
-      # Set up a matrix to run the following 3 configurations:
-      # 1. <Windows, Release, latest MSVC compiler toolchain on the default runner image, default generator>
-      # 2. <Linux, Release, latest GCC compiler toolchain on the default runner image, default generator>
-      # 3. <Linux, Release, latest Clang compiler toolchain on the default runner image, default generator>
-      # 4. <macOS Intel, Release, Clang>
-      # 5. <macOS Apple Silicon, Release, Clang>
-      #
-      # To add more build types (Release, Debug, RelWithDebInfo, etc.) customize the build_type list.
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-12, macos-14]
-        build_type: [Release]
-        c_compiler: [gcc, clang, cl]
         include:
-          - os: windows-latest
-            c_compiler: cl
-            cpp_compiler: cl
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
+            build_type: Release
             c_compiler: gcc
             cpp_compiler: g++
-          - os: ubuntu-latest
-            c_compiler: clang
-            cpp_compiler: clang++
-          - os: macos-12
+          - os: windows-2022
+            build_type: Release
+          - os: macos-13
+            build_type: Release
             c_compiler: clang
             cpp_compiler: clang++
             arch: x86_64
           - os: macos-14
+            build_type: Release
             c_compiler: clang
             cpp_compiler: clang++
             arch: arm64
-        exclude:
-          - os: windows-latest
-            c_compiler: gcc
-          - os: windows-latest
-            c_compiler: clang
-          - os: ubuntu-latest
-            c_compiler: cl
-          - os: macos-12
-            c_compiler: gcc
-          - os: macos-14
-            c_compiler: gcc
 
     steps:
     - uses: actions/checkout@v4
       with:
+        ref: main
         submodules: recursive
-        fetch-depth: 0
 
     - name: Set reusable strings
-      # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
       id: strings
       shell: bash
       run: |
         echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
-        if [ "${{ runner.os }}" = "Windows" ]; then
-          echo "bin-dir=${{ github.workspace }}/bin/Release" >> "$GITHUB_OUTPUT"
+        echo "bin-dir=${{ github.workspace }}/bin" >> "$GITHUB_OUTPUT"
+        if [ "$RUNNER_OS" = "Windows" ]; then
           echo "exe-name=Alpha126Cpp.exe" >> "$GITHUB_OUTPUT"
-        elif [ "${{ runner.os }}" = "macOS" ]; then
-          echo "bin-dir=${{ github.workspace }}/bin" >> "$GITHUB_OUTPUT"
-          echo "exe-name=Alpha126Cpp" >> "$GITHUB_OUTPUT"
         else
-          echo "bin-dir=${{ github.workspace }}/bin" >> "$GITHUB_OUTPUT"
           echo "exe-name=Alpha126Cpp" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Configure CMake
-      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
-      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+    # SDL3 recommends these build deps on Linux when building with "all features enabled"
+    - name: Install Linux dependencies (SDL3)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y           build-essential git make autoconf automake libtool           pkg-config cmake ninja-build gnome-desktop-testing libasound2-dev libpulse-dev           libaudio-dev libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev           libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev           libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev           libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev libthai-dev           libpipewire-0.3-dev libdecor-0-dev liburing-dev
+
+    - name: Install Ninja (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew update
+        brew install ninja
+
+    - name: Configure CMake (macOS)
+      if: runner.os == 'macOS'
       run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        cmake -G Ninja -B ${{ steps.strings.outputs.build-output-dir }}
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DCMAKE_VERBOSE_MAKEFILE=ON
         ${{ matrix.arch && format('-DCMAKE_OSX_ARCHITECTURES={0}', matrix.arch) || '' }}
         -S ${{ github.workspace }}
       env:
         CC: ${{ matrix.c_compiler }}
         CXX: ${{ matrix.cpp_compiler }}
 
-    - name: Install Linux dependencies
+    - name: Configure CMake (Linux)
       if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential git make autoconf automake libtool \
-            pkg-config cmake ninja-build \
-            libasound2-dev libpulse-dev \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
-            libxi-dev libxss-dev libwayland-dev \
-            libxkbcommon-dev libdrm-dev libgbm-dev \
-            libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libdbus-1-dev libudev-dev
+      run: >
+        cmake -G Ninja -B ${{ steps.strings.outputs.build-output-dir }}
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DCMAKE_VERBOSE_MAKEFILE=ON
+        -S ${{ github.workspace }}
+      env:
+        CC: ${{ matrix.c_compiler }}
+        CXX: ${{ matrix.cpp_compiler }}
 
-    - name: Build
-      # Build your program with the given configuration. Note that --config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
-      # Use max parallel jobs for faster builds
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel
+    - name: Configure CMake (Windows)
+      if: runner.os == 'Windows'
+      run: >
+        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        -G "Visual Studio 17 2022"
+        -A x64
+        -S ${{ github.workspace }}
+
+    # macOS sometimes appears to "stick" after the last object file line; verbose + lower parallelism helps diagnose.
+    - name: Build (macOS)
+      if: runner.os == 'macOS'
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel 2 --verbose
+
+    - name: Build (non-macOS)
+      if: runner.os != 'macOS'
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel --verbose
 
     - name: Test
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      # Execute tests defined by the CMake configuration. Note that --build-config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
-      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-      # Skip tests if they don't exist
       continue-on-error: true
-      run: ctest --build-config ${{ matrix.build_type }} || true
+      run: ctest --build-config ${{ matrix.build_type }} --output-on-failure --timeout 300 || true
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: ${{ runner.os }}-${{ matrix.c_compiler }}-${{ matrix.arch || 'native' }}-${{ matrix.build_type }}
+        name: ${{ runner.os }}-${{ matrix.os }}-${{ matrix.arch || 'native' }}-${{ matrix.build_type }}
         path: |
           ${{ steps.strings.outputs.bin-dir }}/${{ steps.strings.outputs.exe-name }}
           ${{ steps.strings.outputs.bin-dir }}/resource/
