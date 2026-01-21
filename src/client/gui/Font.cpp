@@ -7,6 +7,7 @@
 
 #include "java/Resource.h"
 #include "java/BufferedImage.h"
+#include "OpenGL.h"
 
 Font::Font(Options &options, const jstring &name, Textures &textures)
 {
@@ -106,6 +107,14 @@ Font::Font(Options &options, const jstring &name, Textures &textures)
 		glNewList(listPos + 256 + j, GL_COMPILE);
 		glColor3f(r / 255.0f, g / 255.0f, b / 255.0f);  // RGB only, alpha preserved from glColor4f call
 		glEndList();
+		
+		// Store color code values for optimized sign rendering (only for non-darkened codes, j < 16)
+		if (j < 16)
+		{
+			colorCodeR[j] = r / 255.0f;
+			colorCodeG[j] = g / 255.0f;
+			colorCodeB[j] = b / 255.0f;
+		}
 	}
 }
 
@@ -349,4 +358,110 @@ jstring Font::sanitize(const jstring &str)
 	}
 
 	return result;
+}
+
+// Optimized batch rendering for signs - renders all text in a single draw call
+// This significantly improves performance by batching all characters together
+void Font::drawSignTextBatched(const jstring lines[4], int_t xOffsets[4], int_t yOffsets[4], int_t baseColor)
+{
+	// Parse base color (same logic as draw())
+	int_t color = baseColor;
+	if ((color & 0xFF000000) == 0 && color != 0)
+	{
+		color |= 0xFF000000;
+	}
+	float alpha = ((color >> 24) & 0xFF) / 255.0f;
+	if (alpha == 0.0f)
+	{
+		alpha = 1.0f;
+	}
+	
+	float baseR = ((color >> 16) & 0xFF) / 255.0f;
+	float baseG = ((color >> 8) & 0xFF) / 255.0f;
+	float baseB = (color & 0xFF) / 255.0f;
+	
+	// Use pre-calculated color code RGB values (includes anaglyph3d transformation if enabled)
+	static const jstring colorCodes = u"0123456789abcdef";
+	
+	// Bind font texture
+	glBindTexture(GL_TEXTURE_2D, fontTexture);
+	
+	// Use Tesselator to batch all quads
+	Tesselator &t = Tesselator::instance;
+	t.begin();
+	
+	// Process each line
+	for (int_t lineIdx = 0; lineIdx < 4; lineIdx++)
+	{
+		const jstring &str = lines[lineIdx];
+		if (str.empty())
+			continue;
+		
+		float currentR = baseR;
+		float currentG = baseG;
+		float currentB = baseB;
+		float x = static_cast<float>(xOffsets[lineIdx]);
+		float y = static_cast<float>(yOffsets[lineIdx]);
+		
+		// Parse string and render characters
+		for (int_t i = 0; i < str.length(); i++)
+		{
+			char_t ch = str[i];
+			if (ch == 167 && i + 1 < str.length())  // Color code (167 = 0xA7 = §)
+			{
+				char_t codeChar = str[i + 1];
+				char_t lowerCode = codeChar;
+				if (codeChar >= u'A' && codeChar <= u'F')
+					lowerCode = codeChar + (u'a' - u'A');
+				else if (codeChar >= u'a' && codeChar <= u'f')
+					lowerCode = codeChar;
+				else if (codeChar >= u'0' && codeChar <= u'9')
+					lowerCode = codeChar;
+				
+				int_t codeIndex = colorCodes.find(lowerCode);
+				if (codeIndex == jstring::npos || codeIndex > 15)
+					codeIndex = 15;
+				
+				// Update current color using pre-calculated values
+				currentR = colorCodeR[codeIndex];
+				currentG = colorCodeG[codeIndex];
+				currentB = colorCodeB[codeIndex];
+				
+				i++;  // Skip the color code character
+			}
+			else
+			{
+				// Find character index
+				int_t chIndex = SharedConstants::acceptableLetters.find(ch);
+				if (chIndex != jstring::npos)
+				{
+					// Calculate texture coordinates
+					int_t charCode = chIndex + 32;
+					int_t ix = charCode % 16 * 8;
+					int_t iy = charCode / 16 * 8;
+					
+					float s = 7.99f;
+					float u0 = ix / 128.0f;
+					float u1 = (ix + s) / 128.0f;
+					float v0 = iy / 128.0f;
+					float v1 = (iy + s) / 128.0f;
+					
+					// Set color for this character
+					t.color(currentR, currentG, currentB, alpha);
+					
+					// Render character quad
+					t.vertexUV(x, y + s, 0.0, u0, v1);
+					t.vertexUV(x + s, y + s, 0.0, u1, v1);
+					t.vertexUV(x + s, y, 0.0, u1, v0);
+					t.vertexUV(x, y, 0.0, u0, v0);
+					
+					// Advance x position
+					x += static_cast<float>(charWidths[charCode]);
+				}
+			}
+		}
+	}
+	
+	// Render all batched quads in one draw call
+	t.end();
 }

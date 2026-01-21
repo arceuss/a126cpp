@@ -107,24 +107,32 @@ void SignRenderer::render(SignTileEntity &sign, double x, double y, double z, fl
 	glDepthMask(false);  // newb12: GL11.glDepthMask(false) (SignRenderer.java:52)
 	int_t col = 0;  // newb12: int col = 0 (SignRenderer.java:53)
 	
-	// newb12: Render sign text (SignRenderer.java:55-63)
+	// Optimized batch rendering: Prepare all lines and render in one call
+	jstring processedLines[4];
+	int_t xOffsets[4];
+	int_t yOffsets[4];
+	
 	for (int_t i = 0; i < 4; i++)  // newb12: for (int i = 0; i < sign.messages.length; i++) (SignRenderer.java:55)
 	{
 		jstring msg = sign.messages[i];  // newb12: String msg = sign.messages[i] (SignRenderer.java:56)
-		
-		// Performance optimization: Skip empty lines
-		if (msg.empty())
-			continue;
 		
 		if (i == sign.selectedLine)  // newb12: if (i == sign.selectedLine) (SignRenderer.java:57)
 		{
 			msg = u"> " + msg + u" <";  // newb12: msg = "> " + msg + " <" (SignRenderer.java:58)
 		}
 		
-		// Performance optimization: Calculate width once and reuse
-			int_t msgWidth = font->width(msg);
-			font->draw(msg, -msgWidth / 2, i * 10 - 4 * 5, col);
+		processedLines[i] = msg;
+		
+		// Calculate x offset (centered)
+		int_t msgWidth = font->width(msg);
+		xOffsets[i] = -msgWidth / 2;
+		
+		// Calculate y offset (line spacing)
+		yOffsets[i] = i * 10 - 4 * 5;
 	}
+	
+	// Render all lines in a single batched draw call
+	font->drawSignTextBatched(processedLines, xOffsets, yOffsets, col);
 	
 	glDepthMask(true);  // newb12: GL11.glDepthMask(true) (SignRenderer.java:65)
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);  // newb12: GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F) (SignRenderer.java:66)
