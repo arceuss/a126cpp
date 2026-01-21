@@ -5,6 +5,7 @@
 #include "world/level/tile/DoorTile.h"
 #include "world/level/tile/RedStoneDustTile.h"
 #include "world/level/tile/FireTile.h"
+#include "world/level/tile/CobblestoneTile.h"
 #include "world/level/material/Material.h"
 #include "world/level/Level.h"
 #include "world/phys/Vec3.h"
