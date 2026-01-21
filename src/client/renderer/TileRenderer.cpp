@@ -2162,7 +2162,7 @@ bool TileRenderer::tesselateLeverInWorld(Tile &tt, int_t x, int_t y, int_t z)
 	t.color(br, br, br);
 
 	// Beta: Get texture (TileRenderer.java:138-141)
-	int_t tex = tt.getTexture(Facing::DOWN);
+	int_t tex = tt.getTexture(Facing::DOWN);  // Beta: tt.getTexture(0) - face 0 is DOWN
 	if (fixedTexture >= 0)
 	{
 		tex = fixedTexture;
