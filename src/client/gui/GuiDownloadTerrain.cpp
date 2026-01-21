@@ -12,13 +12,18 @@ void GuiDownloadTerrain::tick()
 	++updateCounter;
 	if (updateCounter % 20 == 0)
 	{
-		if (netHandler != nullptr)
+		// Alpha 1.2.6: Send keep-alive packet every 20 ticks
+		// Only send if handler is valid and not disconnected
+		if (netHandler != nullptr && !netHandler->isDisconnected())
 		{
 			netHandler->addToSendQueue(new Packet0KeepAlive());
 		}
 	}
 
-	if (netHandler != nullptr)
+	// Alpha 1.2.6: Process read packets every tick
+	// Only process if handler is valid and not disconnected
+	// This prevents processing packets on a closed/invalid connection during dimension transitions
+	if (netHandler != nullptr && !netHandler->isDisconnected())
 	{
 		netHandler->processReadPackets();
 	}
