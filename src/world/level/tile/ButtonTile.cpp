@@ -220,6 +220,8 @@ bool ButtonTile::use(Level &level, int_t x, int_t y, int_t z, Player &player)
 		else
 		{
 			level.setData(x, y, z, var7 + var8);
+			// Beta: Update shape immediately when button state changes (for animation)
+			updateShape(level, x, y, z);
 			level.setTilesDirty(x, y, z, x, y, z);
 			level.playSound(x + 0.5, y + 0.5, z + 0.5, u"random.click", 0.3F, 0.6F);
 			level.updateNeighborsAt(x, y, z, id);
@@ -334,6 +336,8 @@ void ButtonTile::tick(Level &level, int_t x, int_t y, int_t z, Random &random)
 		if ((var6 & 8) != 0)
 		{
 			level.setData(x, y, z, var6 & 7);
+			// Beta: Update shape immediately when button releases (for animation)
+			updateShape(level, x, y, z);
 			level.updateNeighborsAt(x, y, z, id);
 			int_t var7 = var6 & 7;
 			if (var7 == 1)

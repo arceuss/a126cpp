@@ -360,6 +360,9 @@ void Tile::initTiles()
 	
 	// Button block - properties (Beta: Tile.java:708)
 	button.setDestroyTime(0.5f).setSoundType(SOUND_STONE);  // Beta: Tile.java:708 (setDestroyTime(0.5F).setSoundType(SOUND_STONE))
+	// Beta: Button doesn't block light (ButtonTile.blocksLight() returns false)
+	lightBlock[77] = 0;  // Button ID 77 - doesn't block light
+	translucent[77] = true;  // Button is translucent for proper lighting
 	
 	// Lever block - properties (Beta: Tile.java:202)
 	lever.setDestroyTime(0.5f).setSoundType(SOUND_WOOD);  // Beta: Tile.java:202 (setDestroyTime(0.5F).setSoundType(SOUND_WOOD))
@@ -396,9 +399,15 @@ void Tile::initTiles()
 	
 	// PressurePlate_stone - properties (Beta: Tile.java:700-703)
 	pressurePlate_stone.setDestroyTime(0.5f).setSoundType(SOUND_STONE);  // Beta: Tile.java:700-703 (setDestroyTime(0.5F).setSoundType(SOUND_STONE))
+	// Beta: Pressure plate doesn't block light (PressurePlateTile.blocksLight() returns false)
+	lightBlock[70] = 0;  // Pressure plate stone ID 70 - doesn't block light
+	translucent[70] = true;  // Pressure plate is translucent for proper lighting
 	
 	// PressurePlate_wood - properties (Beta: Tile.java:704-707)
 	pressurePlate_wood.setDestroyTime(0.5f).setSoundType(SOUND_WOOD);  // Beta: Tile.java:704-707 (setDestroyTime(0.5F).setSoundType(SOUND_WOOD))
+	// Beta: Pressure plate doesn't block light (PressurePlateTile.blocksLight() returns false)
+	lightBlock[72] = 0;  // Pressure plate wood ID 72 - doesn't block light
+	translucent[72] = true;  // Pressure plate is translucent for proper lighting
 	
 	// Phase 5: Advanced blocks - properties
 	// RecordPlayer - properties (Beta: Tile.java:230)

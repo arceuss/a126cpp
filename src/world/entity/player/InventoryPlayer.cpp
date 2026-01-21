@@ -199,7 +199,7 @@ int_t InventoryPlayer::addResource(ItemStack &stack)
 	
 	count -= toAdd;  // Beta: var3 -= var5 (Inventory.java:135)
 	mainInventory[slot].stackSize += toAdd;  // Beta: this.items[var4].count += var5 (Inventory.java:136)
-	// TODO: mainInventory[slot].popTime = 5;  // Beta: this.items[var4].popTime = 5 (Inventory.java:137)
+	mainInventory[slot].popTime = 5;  // Beta: this.items[var4].popTime = 5 (Inventory.java:137)
 	return count;  // Beta: return var3 (Inventory.java:138)
 }
 
@@ -224,7 +224,7 @@ bool InventoryPlayer::add(ItemStack &stack)
 	{
 		// Beta: this.items[var2] = var1 (Inventory.java:180)
 		mainInventory[slot] = stack;
-		// TODO: mainInventory[slot].popTime = 5;  // Beta: this.items[var2].popTime = 5 (Inventory.java:181)
+		mainInventory[slot].popTime = 5;  // Beta: this.items[var2].popTime = 5 (Inventory.java:181)
 		return true;  // Beta: return true (Inventory.java:182)
 	}
 	else
@@ -294,9 +294,11 @@ void InventoryPlayer::tick()
 {
 	for (int_t i = 0; i < 36; ++i)
 	{
-		// Beta: if (this.items[var1] != null && this.items[var1].popTime > 0) - skip popTime for now since ItemStack doesn't have it yet
-		// if (!mainInventory[i].isEmpty() && mainInventory[i].popTime > 0)
-		//     mainInventory[i].popTime--;
+		// Beta: if (this.items[var1] != null && this.items[var1].popTime > 0) (Inventory.java:144-146)
+		if (!mainInventory[i].isEmpty() && mainInventory[i].popTime > 0)
+		{
+			mainInventory[i].popTime--;  // Beta: this.items[var1].popTime-- (Inventory.java:145)
+		}
 	}
 }
 

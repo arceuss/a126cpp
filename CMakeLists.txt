@@ -1001,20 +1001,24 @@ set_target_properties(Alpha126Cpp PROPERTIES
 # Performance optimizations for Release builds
 if(MSVC)
 	# MSVC: /O2 = maximize speed, /Ob2 = aggressive inlining, /Oi = generate intrinsic functions
+	# /GL = whole program optimization (works with LTCG)
 	target_compile_options(Alpha126Cpp PRIVATE
-		$<$<CONFIG:Release>:/O2 /Ob2 /Oi>
-		$<$<CONFIG:RelWithDebInfo>:/O2 /Ob2 /Oi>
+		$<$<CONFIG:Release>:/O2 /Ob2 /Oi /GL>
+		$<$<CONFIG:RelWithDebInfo>:/O2 /Ob2 /Oi /GL>
 	)
-	# Link-time optimizations
-	set_target_properties(Alpha126Cpp PROPERTIES
-		$<$<CONFIG:Release>:LINK_FLAGS> "/LTCG"
-		$<$<CONFIG:RelWithDebInfo>:LINK_FLAGS> "/LTCG"
+	# Link-time optimizations (required when using /GL to avoid warning)
+	target_link_options(Alpha126Cpp PRIVATE
+		$<$<CONFIG:Release>:/LTCG>
+		$<$<CONFIG:RelWithDebInfo>:/LTCG>
 	)
 else()
 	# GCC/Clang: -O3 = maximum optimization, -march=native = use CPU-specific optimizations
+	# -funroll-loops = unroll loops for better performance
+	# -finline-functions = aggressive function inlining
+	# -fomit-frame-pointer = omit frame pointer (frees a register, only for Release)
 	target_compile_options(Alpha126Cpp PRIVATE
-		$<$<CONFIG:Release>:-O3 -march=native>
-		$<$<CONFIG:RelWithDebInfo>:-O3 -march=native>
+		$<$<CONFIG:Release>:-O3 -march=native -funroll-loops -finline-functions -fomit-frame-pointer>
+		$<$<CONFIG:RelWithDebInfo>:-O3 -march=native -funroll-loops -finline-functions>
 	)
 	# Link-time optimizations
 	set_target_properties(Alpha126Cpp PROPERTIES

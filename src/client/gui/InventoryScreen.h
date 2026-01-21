@@ -86,5 +86,5 @@ private:
 	void renderLabels();
 	
 	// Beta: renderSlot() - renders a single inventory slot
-	void renderSlot(int_t slot, int_t x, int_t y, ItemStack &itemStack);
+	void renderSlot(int_t slot, int_t x, int_t y, ItemStack &itemStack, float a = 0.0f);
 };

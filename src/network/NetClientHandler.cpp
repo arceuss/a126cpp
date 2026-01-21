@@ -1674,7 +1674,11 @@ void NetClientHandler::func_20088_a(Packet103SetSlot* var1)
 		// Java: if(var1.myItemStack != null && (var2 == null || var2.stackSize < var1.myItemStack.stackSize)) {
 		//     var1.myItemStack.animationsToGo = 5;
 		// }
-		// Note: animationsToGo is not implemented in C++ ItemStack, so we skip this visual effect
+		// Beta: animationsToGo is popTime in our implementation
+		if (var1->myItemStack != nullptr && (var2 == nullptr || var2->stackSize < var1->myItemStack->stackSize))
+		{
+			var1->myItemStack->popTime = 5;  // Beta: animationsToGo = 5 (Java uses animationsToGo, we use popTime)
+		}
 		
 		// Java: this.mc.thePlayer.inventorySlots.putStackInSlot(var1.itemSlot, var1.myItemStack);
 		// Container slot 36 = mainInventory[0], 37 = mainInventory[1], ..., 44 = mainInventory[8]
@@ -1774,20 +1778,72 @@ void NetClientHandler::func_20089_a(Packet106Transaction* var1)
 	//         }
 	//     }
 	// }
-	// Note: Transaction handling is mainly for server-side validation
-	// On client, we mostly just acknowledge transactions
-	// If transaction is rejected, we resend with accepted=true
-	if (!var1->field_20030_c)
+	if (mc == nullptr || mc->player == nullptr)
+		return;
+	
+	// Java: Find container based on windowId
+	// windowId == 0: Player inventory (InventoryScreen)
+	// windowId == craftingInventory.windowId: Workbench/Chest/Furnace
+	bool foundContainer = false;
+	
+	if (var1->windowId == 0)
 	{
-		// Transaction rejected - resend with accepted=true
-		// Java: this.addToSendQueue(new Packet106Transaction(var1.windowId, var1.field_20028_b, true));
-		auto response = new Packet106Transaction();
-		response->windowId = var1->windowId;
-		response->field_20028_b = var1->field_20028_b;
-		response->field_20030_c = true;
-		addToSendQueue(response);
+		// Java: var2 = this.mc.thePlayer.inventorySlots;
+		// Player inventory - InventoryScreen handles this
+		foundContainer = true;
+		// Note: func_20113_a/func_20110_b are empty in Container.java, so no-op
+		// But we still need to handle the accepted/rejected logic
+		if (var1->field_20030_c)
+		{
+			// Java: var2.func_20113_a(var1.field_20028_b); - accept transaction (no-op in base Container)
+			// Transaction accepted - no action needed
+		}
+		else
+		{
+			// Java: var2.func_20110_b(var1.field_20028_b); - reject transaction (no-op in base Container)
+			// Java: this.addToSendQueue(new Packet106Transaction(var1.windowId, var1.field_20028_b, true));
+			// Transaction rejected - resend with accepted=true
+			auto response = new Packet106Transaction();
+			response->windowId = var1->windowId;
+			response->field_20028_b = var1->field_20028_b;
+			response->field_20030_c = true;
+			addToSendQueue(response);
+		}
 	}
-	// If accepted, no action needed - transaction is complete
+	else if (mc->screen != nullptr)
+	{
+		// Java: else if(var1.windowId == this.mc.thePlayer.craftingInventory.windowId) {
+		//     var2 = this.mc.thePlayer.craftingInventory;
+		// }
+		// Check if current screen matches windowId (workbench, chest, furnace)
+		WorkbenchScreen* workbenchScreen = dynamic_cast<WorkbenchScreen*>(mc->screen.get());
+		ChestScreen* chestScreen = dynamic_cast<ChestScreen*>(mc->screen.get());
+		FurnaceScreen* furnaceScreen = dynamic_cast<FurnaceScreen*>(mc->screen.get());
+		
+		if ((workbenchScreen != nullptr && workbenchScreen->windowId == var1->windowId) ||
+		    (chestScreen != nullptr && chestScreen->windowId == var1->windowId) ||
+		    (furnaceScreen != nullptr && furnaceScreen->windowId == var1->windowId))
+		{
+			foundContainer = true;
+			// Java: var2.func_20113_a(var1.field_20028_b) or var2.func_20110_b(var1.field_20028_b)
+			// Note: func_20113_a/func_20110_b are empty in Container.java, so no-op
+			if (var1->field_20030_c)
+			{
+				// Transaction accepted - no action needed
+			}
+			else
+			{
+				// Transaction rejected - resend with accepted=true
+				auto response = new Packet106Transaction();
+				response->windowId = var1->windowId;
+				response->field_20028_b = var1->field_20028_b;
+				response->field_20030_c = true;
+				addToSendQueue(response);
+			}
+		}
+	}
+	
+	// If container not found, ignore transaction (matches Java behavior when var2 == null)
 }
 
 void NetClientHandler::func_20094_a(Packet104WindowItems* var1)
