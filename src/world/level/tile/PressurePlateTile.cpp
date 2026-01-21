@@ -20,6 +20,9 @@ PressurePlateTile::PressurePlateTile(int_t id, int_t tex, Sensitivity sensitivit
 	float offset = 0.0625F;
 	// Beta: this.setShape(var4, 0.0F, var4, 1.0F - var4, 0.03125F, 1.0F - var4) (PressurePlateTile.java:21)
 	Tile::setShape(offset, 0.0F, offset, 1.0F - offset, 0.03125F, 1.0F - offset);
+	// Beta: PressurePlateTile.blocksLight() returns false (PressurePlateTile.java:39-41)
+	// Explicitly set lightBlock to 0 to ensure pressure plates don't block light
+	setLightBlock(0);
 }
 
 // Beta: PressurePlateTile.getTickDelay() - returns 20 (PressurePlateTile.java:24-27)
