@@ -1517,6 +1517,13 @@ void NetClientHandler::func_9448_a(Packet9* var1)
 			worldClient->disconnect();  // This sets isValid = false
 		}
 		
+		// Alpha 1.2.6: Mark old worldClient as invalid before creating new one
+		// This prevents crashes when tick() is called on a destroyed/moved level
+		if (worldClient != nullptr)
+		{
+			worldClient->disconnect();  // This sets isValid = false
+		}
+		
 		// Alpha 1.2.6: Create new world client for new dimension
 		// Note: The old worldClient will be cleaned up when mc->setLevel() replaces the old level
 		// The shared_ptr in mc->level will handle cleanup of the old level
