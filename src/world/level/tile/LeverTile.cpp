@@ -12,6 +12,9 @@
 // Beta: LeverTile(int var1, int var2) (LeverTile.java:10-12)
 LeverTile::LeverTile(int_t id, int_t tex) : Tile(id, tex, Material::decoration)
 {
+	// Beta: LeverTile.blocksLight() returns false (LeverTile.java:19-21)
+	// Explicitly set lightBlock to 0 to ensure levers don't block light
+	setLightBlock(0);
 }
 
 AABB *LeverTile::getAABB(Level &level, int_t x, int_t y, int_t z)
