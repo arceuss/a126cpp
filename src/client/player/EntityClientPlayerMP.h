@@ -55,7 +55,8 @@ public:
 	void swing() override;  // Override to call func_457_w() which sends Packet18ArmAnimation
 	
 	void func_457_w();  // Swing arm - sends Packet18ArmAnimation (Java: not an override, but we call it from swing())
-	void func_9367_r();  // Respawn - sends Packet9 (not an override in Java, but may override respawn())
+	void respawn() override;  // Override to send Packet9 in multiplayer (Alpha: func_9367_r() calls mc.respawn(), but we need to send packet)
+	void func_9367_r();  // Respawn - sends Packet9 (Alpha: EntityPlayerSP.func_9367_r() calls mc.respawn())
 	void setHealth(int_t var1);  // Override behavior (Java has special first-call handling)
 	
 	void dropCurrentItem();  // Sends Packet14BlockDig with state 4 - public so Minecraft can call it
