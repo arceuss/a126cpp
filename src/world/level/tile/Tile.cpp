@@ -237,14 +237,13 @@ void Tile::initTiles()
 	// mushroomRed: hardness 0.0F (Block.java:62), Beta: Tile.java:133
 	// reed: hardness 0.0F (Block.java:105), Beta: Tile.java:229
 	// cactus: hardness 0.4F (Block.java:103), Beta: Tile.java:227
-	// Alpha: mushroomBrown has lightValue 2.0F / 16.0F = 0.125F, which rounds to 2/15 light level
-	// setLightEmission takes value 0-15, so 2.0F/16.0F * 15 = 1.875 ≈ 2
+	// Beta: mushroomBrown.setLightEmission(0.125F) = (int)(15.0F * 0.125F) = (int)(1.875F) = 1
 	// Sapling properties (Beta: Tile.java:75)
 	sapling.setDestroyTime(0.0f).setSoundType(SOUND_GRASS);  // Beta: Tile.java:75 (setDestroyTime(0.0F).setSoundType(SOUND_GRASS))
 	
 	plantYellow.setSoundType(SOUND_GRASS);  // Beta: Tile.java:126
 	plantRed.setSoundType(SOUND_GRASS);  // Beta: Tile.java:127
-	mushroomBrown.setLightEmission(2).setSoundType(SOUND_GRASS);  // Beta: Tile.java:130
+	mushroomBrown.setLightEmission(1).setSoundType(SOUND_GRASS);  // Beta: Tile.java:130-131 (setLightEmission(0.125F) = 1)
 	mushroomRed.setSoundType(SOUND_GRASS);  // Beta: Tile.java:133
 	reed.setSoundType(SOUND_GRASS);  // Beta: Tile.java:229
 	cactus.setSoundType(SOUND_CLOTH);  // Beta: Tile.java:227
@@ -382,7 +381,7 @@ void Tile::initTiles()
 	redStoneOre.setDestroyTime(3.0f).setExplodeable(5.0f).setSoundType(SOUND_STONE);  // Beta: Tile.java:206-210 (setDestroyTime(3.0F), setExplodeable(5.0F), setSoundType(SOUND_STONE))
 	
 	// RedStoneOre_lit - properties (Beta: Tile.java:211-216)
-	redStoneOre_lit.setLightEmission(10).setDestroyTime(3.0f).setExplodeable(5.0f).setSoundType(SOUND_STONE);  // Beta: Tile.java:211-216 (setLightEmission(0.625F*16=10), setDestroyTime(3.0F), setExplodeable(5.0F), setSoundType(SOUND_STONE))
+	redStoneOre_lit.setLightEmission(9).setDestroyTime(3.0f).setExplodeable(5.0f).setSoundType(SOUND_STONE);  // Beta: Tile.java:211-216 (setLightEmission(0.625F) = (int)(15.0F * 0.625F) = 9)
 	
 	// NotGate_off - properties (Beta: Tile.java:217)
 	notGate_off.setDestroyTime(0.0f).setSoundType(SOUND_WOOD);  // Beta: Tile.java:217 (setDestroyTime(0.0F).setSoundType(SOUND_WOOD))
@@ -392,7 +391,7 @@ void Tile::initTiles()
 	translucent[75] = true;  // Redstone torch is translucent
 	
 	// NotGate_on - properties (Beta: Tile.java:218-222)
-	notGate_on.setDestroyTime(0.0f).setLightEmission(8).setSoundType(SOUND_WOOD);  // Beta: Tile.java:218-222 (setDestroyTime(0.0F), setLightEmission(0.5F*16=8), setSoundType(SOUND_WOOD))
+	notGate_on.setDestroyTime(0.0f).setLightEmission(7).setSoundType(SOUND_WOOD);  // Beta: Tile.java:218-222 (setDestroyTime(0.0F), setLightEmission(0.5F) = (int)(15.0F * 0.5F) = 7)
 	// Alpha 1.2.6: Redstone torches should not block light
 	lightBlock[76] = 0;  // Redstone torch on (ID 76) - doesn't block light
 	translucent[76] = true;  // Redstone torch is translucent
