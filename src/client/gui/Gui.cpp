@@ -284,30 +284,26 @@ void Gui::renderSlot(int_t slot, int_t x, int_t y, float a)
 	ItemStack &stack = minecraft.player->inventory.mainInventory[slot];
 	if (!stack.isEmpty())
 	{
-		// Beta: popTime animation (Gui.java:325-337)
-		float popTime = static_cast<float>(stack.popTime) - a;  // Beta: float var6 = var5.popTime - var1 (Gui.java:325)
-		if (popTime > 0.0f)  // Beta: if (var6 > 0.0F) (Gui.java:326)
+		// Beta: popTime animation (Gui.java:325-337) - EXACT ORDER
+		float var6 = static_cast<float>(stack.popTime) - a;  // Beta: float var6 = var5.popTime - var4 (Gui.java:325)
+		if (var6 > 0.0f)  // Beta: if (var6 > 0.0F) (Gui.java:326)
 		{
-			// Beta: Animation scale calculation (Gui.java:327-330)
-			float scale = 1.0f + popTime * 0.15f;  // Beta: float var7 = 1.0F + var6 * 0.15F (Gui.java:327)
-			glPushMatrix();  // Beta: GL11.glPushMatrix() (Gui.java:328)
-			glTranslatef(static_cast<float>(x + 8), static_cast<float>(y + 12), 0.0f);  // Beta: GL11.glTranslatef((float)(var2 + 8), (float)(var3 + 12), 0.0F) (Gui.java:329)
-			glScalef(scale, scale, 1.0f);  // Beta: GL11.glScalef(var7, var7, 1.0F) (Gui.java:330)
-			glTranslatef(static_cast<float>(-(x + 8)), static_cast<float>(-(y + 12)), 0.0f);  // Beta: GL11.glTranslatef((float)(-(var2 + 8)), (float)(-(var3 + 12)), 0.0F) (Gui.java:331)
+			glPushMatrix();  // Beta: GL11.glPushMatrix() (Gui.java:327)
+			float var7 = 1.0f + var6 / 5.0f;  // Beta: float var7 = 1.0F + var6 / 5.0F (Gui.java:328)
+			glTranslatef(static_cast<float>(x + 8), static_cast<float>(y + 12), 0.0f);  // Beta: GL11.glTranslatef(var2 + 8, var3 + 12, 0.0F) (Gui.java:329)
+			glScalef(1.0f / var7, (var7 + 1.0f) / 2.0f, 1.0f);  // Beta: GL11.glScalef(1.0F / var7, (var7 + 1.0F) / 2.0F, 1.0F) (Gui.java:330)
+			glTranslatef(static_cast<float>(-(x + 8)), static_cast<float>(-(y + 12)), 0.0f);  // Beta: GL11.glTranslatef(-(var2 + 8), -(var3 + 12), 0.0F) (Gui.java:331)
 		}
-		
-		Font &font = *minecraft.font;  // Beta: Use minecraft.font (Gui.java:334)
 		
 		// Beta: Render item icon (Gui.java:334)
-		EntityRenderDispatcher::itemRenderer.renderGuiItem(font, minecraft.textures, stack, x, y);
+		EntityRenderDispatcher::itemRenderer.renderGuiItem(*minecraft.font, minecraft.textures, stack, x, y);  // Beta: itemRenderer.renderGuiItem(this.minecraft.font, this.minecraft.textures, var5, var2, var3) (Gui.java:334)
 		
-		// Beta: Render item decorations (count text, durability bar) (Gui.java:339)
-		EntityRenderDispatcher::itemRenderer.renderGuiItemDecorations(font, minecraft.textures, stack, x, y);
-		
-		// Beta: End popTime animation (Gui.java:337)
-		if (popTime > 0.0f)
+		if (var6 > 0.0f)  // Beta: if (var6 > 0.0F) (Gui.java:335)
 		{
-			glPopMatrix();  // Beta: GL11.glPopMatrix() (Gui.java:337)
+			glPopMatrix();  // Beta: GL11.glPopMatrix() (Gui.java:336)
 		}
+		
+		// Beta: Render item decorations (Gui.java:339)
+		EntityRenderDispatcher::itemRenderer.renderGuiItemDecorations(*minecraft.font, minecraft.textures, stack, x, y);  // Beta: itemRenderer.renderGuiItemDecorations(this.minecraft.font, this.minecraft.textures, var5, var2, var3) (Gui.java:339)
 	}
 }
