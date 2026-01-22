@@ -1,0 +1,176 @@
+# Build directories
+build/
+bin/
+out/
+cmake-build-*/
+ref/
+external_old/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake
+!CMakeLists.txt
+!cmake/*.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+CMakeSettings.json
+
+# Visual Studio / MSVC
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+x64/
+x86/
+Win32/
+Release/
+Debug/
+*.aps
+*.ncb
+*.opensdf
+*.sdf
+ipch/
+*.tlb
+*.tlh
+*.tmp
+*.temp
+
+# Code::Blocks
+*.depend
+*.layout
+*.cbp
+
+# Qt Creator
+CMakeLists.txt.user*
+
+# Eclipse
+.project
+.cproject
+.settings/
+
+# CodeLite
+*.workspace
+*.project
+
+# Compiler generated files
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE - Visual Studio Code
+.vscode/
+*.code-workspace
+!*.code-workspace
+
+# IDE - CLion
+.idea/
+cmake-build-*/
+
+# IDE - Xcode
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+
+# Logs and error files
+*.log
+errors.txt
+errs.txt
+newerrors.txt
+*.err
+
+# Temporary text files (user's personal notes)
+hello.txt
+shit.txt
+woops.txt
+damnit.txt
+callstackmonitor.txt
+callstackmonster.txt
+pckters.txt
+wiki.txt
+zzz.txt
+1218.txt
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Java (for reference projects, but not the main codebase)
+*.class
+*.jar
+!RetroMCP-Java-GUI.jar
+
+# Game data directories (user-specific)
+.mcbetacpp/
+saves/
+screenshots/
+logs/
+
+# Archive files
+*.zip
+*.tar
+*.tar.gz
+*.rar
+!src/network.zip
+
+# Documentation that might be generated
+*.html
+!docs/**/*.html
+
+# Backup files
+*.orig
+*.rej
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Empty folders
+New folder/
+New folder (2)/
