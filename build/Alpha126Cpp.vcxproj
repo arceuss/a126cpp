@@ -1,0 +1,1428 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|Win32">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|Win32">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{95FDE378-537F-364F-AC46-261568551148}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <Platform>Win32</Platform>
+    <ProjectName>Alpha126Cpp</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v141_xp</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v141_xp</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v141_xp</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v141_xp</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">F:\aaaa\a126cpp-sdl1\bin\Debug\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Alpha126Cpp.dir\Debug\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Alpha126Cpp</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">F:\aaaa\a126cpp-sdl1\bin\Release\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Alpha126Cpp.dir\Release\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Alpha126Cpp</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">F:\aaaa\a126cpp-sdl1\bin\MinSizeRel\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">Alpha126Cpp.dir\MinSizeRel\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">Alpha126Cpp</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">F:\aaaa\a126cpp-sdl1\bin\RelWithDebInfo\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">Alpha126Cpp.dir\RelWithDebInfo\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">Alpha126Cpp</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">true</GenerateManifest>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;MC_WIN32;_CRT_SECURE_NO_WARNINGS;CMAKE_INTDIR="Debug"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;MC_WIN32;_CRT_SECURE_NO_WARNINGS;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>Copying SDL.dll to output directory	Copying OpenAL32.dll to output directory	Copying resource folder to output directory</Message>
+      <Command>setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_if_different F:/aaaa/a126cpp-sdl1/external/SDL-1.2/VisualC/SDL/Win32/Release/SDL.dll F:/aaaa/a126cpp-sdl1/bin/Debug/SDL.dll
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_if_different F:/aaaa/a126cpp-sdl1/build/external/openal-soft/Debug/OpenAL32.dll F:/aaaa/a126cpp-sdl1/bin/Debug/OpenAL32.dll
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory F:/aaaa/a126cpp-sdl1/bin/Debug
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_directory F:/aaaa/a126cpp-sdl1/resource F:/aaaa/a126cpp-sdl1/bin/Debug/resource
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>external\glad\Debug\glad.lib;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\VisualC\SDL\Win32\Release\SDL.lib;Psapi.lib;winhttp.lib;external\zlib\Debug\zlibstaticd.lib;external\openal-soft\Debug\OpenAL32.lib;winmm.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:X86</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>F:/aaaa/a126cpp-sdl1/build/Debug/Alpha126Cpp.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>F:/aaaa/a126cpp-sdl1/bin/Debug/Alpha126Cpp.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;MC_WIN32;_CRT_SECURE_NO_WARNINGS;CMAKE_INTDIR="Release"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;MC_WIN32;_CRT_SECURE_NO_WARNINGS;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>Copying SDL.dll to output directory	Copying OpenAL32.dll to output directory	Copying resource folder to output directory</Message>
+      <Command>setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_if_different F:/aaaa/a126cpp-sdl1/external/SDL-1.2/VisualC/SDL/Win32/Release/SDL.dll F:/aaaa/a126cpp-sdl1/bin/Release/SDL.dll
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_if_different F:/aaaa/a126cpp-sdl1/build/external/openal-soft/Release/OpenAL32.dll F:/aaaa/a126cpp-sdl1/bin/Release/OpenAL32.dll
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory F:/aaaa/a126cpp-sdl1/bin/Release
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_directory F:/aaaa/a126cpp-sdl1/resource F:/aaaa/a126cpp-sdl1/bin/Release/resource
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>external\glad\Release\glad.lib;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\VisualC\SDL\Win32\Release\SDL.lib;Psapi.lib;winhttp.lib;external\zlib\Release\zlibstatic.lib;external\openal-soft\Release\OpenAL32.lib;winmm.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:X86</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>F:/aaaa/a126cpp-sdl1/build/Release/Alpha126Cpp.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <ProgramDataBaseFile>F:/aaaa/a126cpp-sdl1/bin/Release/Alpha126Cpp.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MinSpace</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;MC_WIN32;_CRT_SECURE_NO_WARNINGS;CMAKE_INTDIR="MinSizeRel"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;MC_WIN32;_CRT_SECURE_NO_WARNINGS;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>Copying SDL.dll to output directory	Copying OpenAL32.dll to output directory	Copying resource folder to output directory</Message>
+      <Command>setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_if_different F:/aaaa/a126cpp-sdl1/external/SDL-1.2/VisualC/SDL/Win32/Release/SDL.dll F:/aaaa/a126cpp-sdl1/bin/MinSizeRel/SDL.dll
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_if_different F:/aaaa/a126cpp-sdl1/build/external/openal-soft/MinSizeRel/OpenAL32.dll F:/aaaa/a126cpp-sdl1/bin/MinSizeRel/OpenAL32.dll
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory F:/aaaa/a126cpp-sdl1/bin/MinSizeRel
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_directory F:/aaaa/a126cpp-sdl1/resource F:/aaaa/a126cpp-sdl1/bin/MinSizeRel/resource
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>external\glad\MinSizeRel\glad.lib;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\VisualC\SDL\Win32\Release\SDL.lib;Psapi.lib;winhttp.lib;external\zlib\MinSizeRel\zlibstatic.lib;external\openal-soft\MinSizeRel\OpenAL32.lib;winmm.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:X86</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>F:/aaaa/a126cpp-sdl1/build/MinSizeRel/Alpha126Cpp.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>F:/aaaa/a126cpp-sdl1/bin/MinSizeRel/Alpha126Cpp.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;MC_WIN32;_CRT_SECURE_NO_WARNINGS;CMAKE_INTDIR="RelWithDebInfo"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;MC_WIN32;_CRT_SECURE_NO_WARNINGS;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>F:\aaaa\a126cpp-sdl1\src\pc;F:\aaaa\a126cpp-sdl1\src;F:\aaaa\a126cpp-sdl1\external\openal-soft\include;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\include;F:\aaaa\a126cpp-sdl1\external\zlib;F:\aaaa\a126cpp-sdl1\build\external\zlib;F:\aaaa\a126cpp-sdl1\external\stb;F:\aaaa\a126cpp-sdl1\external\gzip-hpp\include;F:\aaaa\a126cpp-sdl1\external\cpp-httplib;F:\aaaa\a126cpp-sdl1\external\miniaudio;F:\aaaa\a126cpp-sdl1\external\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>Copying SDL.dll to output directory	Copying OpenAL32.dll to output directory	Copying resource folder to output directory</Message>
+      <Command>setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_if_different F:/aaaa/a126cpp-sdl1/external/SDL-1.2/VisualC/SDL/Win32/Release/SDL.dll F:/aaaa/a126cpp-sdl1/bin/RelWithDebInfo/SDL.dll
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_if_different F:/aaaa/a126cpp-sdl1/build/external/openal-soft/RelWithDebInfo/OpenAL32.dll F:/aaaa/a126cpp-sdl1/bin/RelWithDebInfo/OpenAL32.dll
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory F:/aaaa/a126cpp-sdl1/bin/RelWithDebInfo
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E copy_directory F:/aaaa/a126cpp-sdl1/resource F:/aaaa/a126cpp-sdl1/bin/RelWithDebInfo/resource
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>external\glad\RelWithDebInfo\glad.lib;F:\aaaa\a126cpp-sdl1\external\SDL-1.2\VisualC\SDL\Win32\Release\SDL.lib;Psapi.lib;winhttp.lib;external\zlib\RelWithDebInfo\zlibstatic.lib;external\openal-soft\RelWithDebInfo\OpenAL32.lib;winmm.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:X86</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>F:/aaaa/a126cpp-sdl1/build/RelWithDebInfo/Alpha126Cpp.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <ProgramDataBaseFile>F:/aaaa/a126cpp-sdl1/bin/RelWithDebInfo/Alpha126Cpp.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="F:\aaaa\a126cpp-sdl1\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Building Custom Rule F:/aaaa/a126cpp-sdl1/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SF:/aaaa/a126cpp-sdl1 -BF:/aaaa/a126cpp-sdl1/build --check-stamp-file F:/aaaa/a126cpp-sdl1/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeCCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeCXXCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeRCCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">F:\aaaa\a126cpp-sdl1\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Building Custom Rule F:/aaaa/a126cpp-sdl1/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SF:/aaaa/a126cpp-sdl1 -BF:/aaaa/a126cpp-sdl1/build --check-stamp-file F:/aaaa/a126cpp-sdl1/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeCCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeCXXCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeRCCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">F:\aaaa\a126cpp-sdl1\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">Building Custom Rule F:/aaaa/a126cpp-sdl1/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SF:/aaaa/a126cpp-sdl1 -BF:/aaaa/a126cpp-sdl1/build --check-stamp-file F:/aaaa/a126cpp-sdl1/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeCCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeCXXCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeRCCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">F:\aaaa\a126cpp-sdl1\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">Building Custom Rule F:/aaaa/a126cpp-sdl1/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SF:/aaaa/a126cpp-sdl1 -BF:/aaaa/a126cpp-sdl1/build --check-stamp-file F:/aaaa/a126cpp-sdl1/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-C.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeCCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeCXXCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeRCCompiler.cmake;F:\aaaa\a126cpp-sdl1\build\CMakeFiles\4.2.1\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">F:\aaaa\a126cpp-sdl1\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\Minecraft.cpp" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\util\WinHttpClient.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\Minecraft.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\Facing.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\SharedConstants.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\SharedConstants.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\Lighting.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\Lighting.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\MemoryTracker.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\MemoryTracker.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\MouseHandler.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\MouseHandler.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\OpenGLCapabilities.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\OpenGLCapabilities.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\Options.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\Options.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\ProgressRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\ProgressRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\Timer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\Timer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\User.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\User.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gamemode\GameMode.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gamemode\GameMode.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gamemode\SurvivalMode.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gamemode\SurvivalMode.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gamemode\MultiplayerMode.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gamemode\MultiplayerMode.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\Button.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\Button.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ConfirmScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ConfirmScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ControlsScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ControlsScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ClientOptionsScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ClientOptionsScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\DeathScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\DeathScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\DeleteWorldScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\DeleteWorldScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\Font.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\Font.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\Gui.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\Gui.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiComponent.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiComponent.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\InventoryScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\InventoryScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\WorkbenchScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\WorkbenchScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ChestScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ChestScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\FurnaceScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\FurnaceScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\TextEditScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\TextEditScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\OptionsScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\OptionsScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\PauseScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\PauseScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\Screen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\Screen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ScreenSizeCalculator.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ScreenSizeCalculator.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\SelectWorldScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\SelectWorldScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\SlideButton.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\SlideButton.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\SmallButton.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\SmallButton.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiTextField.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiTextField.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ChatLine.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\ChatLine.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiMessage.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiMessage.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiChat.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiChat.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiNewChat.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiNewChat.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiMultiplayer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiMultiplayer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiConnecting.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiConnecting.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiConnectFailed.cpp" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiDownloadTerrain.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiDownloadTerrain.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\gui\GuiConnectFailed.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\multiplayer\MultiPlayerLevel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\multiplayer\MultiPlayerLevel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\multiplayer\MultiPlayerChunkCache.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\multiplayer\MultiPlayerChunkCache.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\locale\Language.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\locale\Language.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\Cube.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\Cube.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\HumanoidModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\HumanoidModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\Model.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\Model.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\Polygon.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\Polygon.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\QuadrupedModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\QuadrupedModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\PigModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\PigModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\CowModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\CowModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\SheepModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\SheepModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\SheepFurModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\SheepFurModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\ChickenModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\ChickenModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\SignModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\SignModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\BoatModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\BoatModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\MinecartModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\MinecartModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\CreeperModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\CreeperModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\ZombieModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\ZombieModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\SkeletonModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\SkeletonModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\SpiderModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\SpiderModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\SlimeModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\SlimeModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\GhastModel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\GhastModel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\model\Vertex.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\model\Vertex.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\player\Input.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\player\Input.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\player\KeyboardInput.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\player\KeyboardInput.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\player\LocalPlayer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\player\LocalPlayer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\player\EntityClientPlayerMP.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\player\EntityClientPlayerMP.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\Chunk.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\Chunk.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\DirtyChunkSorter.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\DistanceChunkSorter.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\GameRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\GameRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\ItemInHandRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\ItemInHandRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\LevelRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\LevelRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\OffsettedRenderList.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\OffsettedRenderList.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\Tesselator.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\Tesselator.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\Textures.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\Textures.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\HttpTexture.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\HttpTexture.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\HttpTextureProcessor.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\MobSkinTextureProcessor.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\MobSkinTextureProcessor.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureFX.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureFX.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureWaterFX.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureWaterFX.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureWaterSideFX.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureWaterSideFX.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureLavaFX.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureLavaFX.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureLavaSideFX.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureLavaSideFX.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureFireFX.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureFireFX.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TexturePortalFX.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TexturePortalFX.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureCompassFX.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureCompassFX.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureClockFX.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TextureClockFX.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TileRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\TileRenderer.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\culling\Culler.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\culling\Frustum.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\culling\Frustum.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\culling\FrustumCuller.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\culling\FrustumCuller.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\culling\FrustumData.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\culling\FrustumData.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\EntityRenderDispatcher.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\EntityRenderDispatcher.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\EntityRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\EntityRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\ItemRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\ItemRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\MobRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\MobRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\PlayerRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\PlayerRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\PigRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\PigRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\CowRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\CowRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\ChickenRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\ChickenRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\SheepRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\SheepRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\FallingTileRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\FallingTileRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\BoatRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\BoatRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\MinecartRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\MinecartRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\PaintingRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\PaintingRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\TntRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\TntRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\ArrowRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\ArrowRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\FishingHookRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\FishingHookRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\CreeperRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\CreeperRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\HumanoidMobRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\HumanoidMobRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\GiantMobRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\GiantMobRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\SlimeRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\SlimeRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\GhastRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\GhastRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\SpiderRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\entity\SpiderRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\tileentity\TileEntityRenderDispatcher.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\tileentity\TileEntityRenderDispatcher.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\tileentity\TileEntityRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\tileentity\TileEntityRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\tileentity\SignRenderer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\renderer\tileentity\SignRenderer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\skins\DefaultTexturePack.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\skins\DefaultTexturePack.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\skins\FileTexturePack.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\skins\FileTexturePack.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\skins\TexturePack.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\skins\TexturePack.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\skins\TexturePackRepository.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\skins\TexturePackRepository.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\skins\TexturePackSelectScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\skins\TexturePackSelectScreen.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\sound\SoundEngine.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\sound\SoundEngine.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\sound\SoundRepository.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\sound\SoundRepository.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\Particle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\Particle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\WaterDropParticle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\WaterDropParticle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\SplashParticle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\SplashParticle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\BubbleParticle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\BubbleParticle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\SmokeParticle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\SmokeParticle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\FlameParticle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\FlameParticle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\LavaParticle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\LavaParticle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\ExplodeParticle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\ExplodeParticle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\RedDustParticle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\RedDustParticle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\PortalParticle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\PortalParticle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\TakeAnimationParticle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\TakeAnimationParticle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\TerrainParticle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\TerrainParticle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\particle\ParticleEngine.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\particle\ParticleEngine.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\sound\Sound.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\client\title\TitleScreen.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\client\title\TitleScreen.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\locale\Descriptive.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\ByteArrayTag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\ByteArrayTag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\ByteTag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\ByteTag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\CompoundTag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\CompoundTag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\DoubleTag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\DoubleTag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\EndTag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\EndTag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\FloatTag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\FloatTag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\IntTag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\IntTag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\ListTag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\ListTag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\LongTag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\LongTag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\NbtIo.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\NbtIo.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\ShortTag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\ShortTag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\StringTag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\StringTag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\nbt\Tag.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\nbt\Tag.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\util\GLU.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\util\GLU.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\util\IntHashMap.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\util\Memory.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\util\Mth.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\util\Mth.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\util\musDecode.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\util\ProgressListener.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\util\BlockDropTest.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\util\BlockDropTest.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\Entity.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\Entity.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\EntityEvent.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\EntityIO.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\EntityIO.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\EntityPos.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\EntityPos.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\Mob.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\Mob.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\DataWatcher.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\DataWatcher.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\WatchableObject.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\FlyingMob.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\FlyingMob.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\MobCategory.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\MobCategory.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\PathfinderMob.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\PathfinderMob.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Monster.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Monster.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Creeper.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Creeper.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Skeleton.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Skeleton.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Spider.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Spider.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Giant.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Giant.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Zombie.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Zombie.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Slime.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Slime.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Ghast.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\Ghast.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\PigZombie.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\monster\PigZombie.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\animal\Animal.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\animal\Animal.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\animal\Chicken.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\animal\Chicken.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\animal\Cow.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\animal\Cow.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\animal\Pig.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\animal\Pig.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\animal\Sheep.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\animal\Sheep.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\player\Player.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\player\Player.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\player\EntityOtherPlayerMP.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\player\EntityOtherPlayerMP.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\player\InventoryPlayer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\player\InventoryPlayer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\item\EntityItem.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\item\EntityItem.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\projectile\Arrow.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\projectile\Arrow.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\projectile\Snowball.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\projectile\Snowball.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\projectile\Fireball.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\projectile\Fireball.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\projectile\FishingHook.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\projectile\FishingHook.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\Painting.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\Painting.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\PrimedTnt.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\PrimedTnt.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\item\FallingTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\item\FallingTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\item\Boat.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\item\Boat.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\entity\item\Minecart.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\entity\item\Minecart.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\Explosion.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\Explosion.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\CompoundContainer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\CompoundContainer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemInstance.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemInstance.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\Item.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\Item.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemStack.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemStack.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemTool.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemTool.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemPickaxe.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemPickaxe.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSpade.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSpade.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemAxe.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemAxe.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSword.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSword.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemFood.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemFood.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemFlintAndSteel.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemFlintAndSteel.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemBow.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemBow.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemHoe.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemHoe.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSeeds.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSeeds.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemArmor.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemArmor.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemPainting.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemPainting.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSign.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSign.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemDoor.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemDoor.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemBucket.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemBucket.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemMinecart.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemMinecart.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSaddle.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSaddle.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemRedstone.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemRedstone.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSnowball.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemSnowball.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemBoat.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemBoat.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemReed.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemReed.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemFishingRod.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemFishingRod.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemRecord.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\ItemRecord.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\Items.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\Items.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\Recipy.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\ShapedRecipy.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\ShapedRecipy.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\ShapelessRecipy.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\ShapelessRecipy.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\CraftingContainer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\Recipes.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\Recipes.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\ToolRecipies.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\ToolRecipies.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\WeaponRecipies.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\WeaponRecipies.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\OreRecipies.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\OreRecipies.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\FoodRecipies.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\FoodRecipies.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\StructureRecipies.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\StructureRecipies.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\ArmorRecipes.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\ArmorRecipes.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\FurnaceRecipes.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\item\crafting\FurnaceRecipes.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\ChunkPos.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\ChunkPos.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\Coord.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\FoliageColor.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\FoliageColor.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\GrassColor.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\GrassColor.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\Level.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\Level.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\LevelListener.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\LevelSource.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\LightLayer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\LightUpdate.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\LightUpdate.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\NextTickListEntry.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\NextTickListEntry.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\Region.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\Region.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\TilePos.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\MobSpawner.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\MobSpawner.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\pathfinder\BinaryHeap.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\pathfinder\Node.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\pathfinder\Node.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\pathfinder\Path.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\pathfinder\Path.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\pathfinder\PathFinder.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\pathfinder\PathFinder.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\biome\BiomeSource.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\biome\BiomeSource.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\biome\BiomeMobs.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\biome\BiomeMobs.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\storage\OldChunkStorage.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\storage\OldChunkStorage.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\storage\ChunkStorage.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\ChunkCache.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\ChunkCache.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\ChunkSource.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\DataLayer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\DataLayer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\EmptyLevelChunk.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\EmptyLevelChunk.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\LevelChunk.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\chunk\LevelChunk.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\dimension\Dimension.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\dimension\Dimension.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\dimension\HellDimension.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\dimension\HellDimension.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\CaveFeature.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\CaveFeature.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\Feature.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\TreeFeature.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\TreeFeature.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenerator.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenFlowers.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenFlowers.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenReed.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenReed.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenCactus.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenCactus.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenMinable.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenMinable.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenLakes.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenLakes.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenLiquids.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenLiquids.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\MonsterRoomFeature.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\MonsterRoomFeature.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenBigTree.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\WorldGenBigTree.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\PumpkinFeature.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\PumpkinFeature.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\OreFeature.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\feature\OreFeature.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\synth\ImprovedNoise.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\synth\ImprovedNoise.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\synth\PerlinNoise.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\synth\PerlinNoise.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\synth\PerlinSimplexNoise.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\synth\PerlinSimplexNoise.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\synth\SimplexNoise.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\synth\SimplexNoise.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\synth\Synth.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\synth\Synth.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\LargeCaveFeature.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\LargeCaveFeature.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\LargeFeature.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\LargeFeature.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\RandomLevelSource.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\levelgen\RandomLevelSource.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\material\DecorationMaterial.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\material\DecorationMaterial.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\material\GasMaterial.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\material\GasMaterial.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\material\LiquidMaterial.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\material\LiquidMaterial.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\material\Material.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\material\Material.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\material\PlantMaterial.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\material\PlantMaterial.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\TileEntity.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\TileEntity.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\ChestTileEntity.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\ChestTileEntity.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\MobSpawnerTileEntity.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\MobSpawnerTileEntity.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\FurnaceTileEntity.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\FurnaceTileEntity.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\SignTileEntity.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\SignTileEntity.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\InventoryBasic.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\entity\InventoryBasic.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\DirtTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\DirtTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\GrassTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\GrassTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\GravelTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\GravelTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\LeafTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\LeafTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SandTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SandTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\StoneTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\StoneTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\CobblestoneTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\CobblestoneTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\WoodTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\WoodTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\UnbreakableTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\UnbreakableTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ObsidianTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ObsidianTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\RedBrickTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\RedBrickTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\Tile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\Tile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\TransparentTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\TransparentTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\TreeTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\TreeTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FlowerTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FlowerTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SaplingTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SaplingTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\MushroomTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\MushroomTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ReedTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ReedTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\CactusTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\CactusTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ClayTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ClayTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\CropTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\CropTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FarmTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FarmTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FurnaceTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FurnaceTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\LadderTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\LadderTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SignTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SignTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\RailTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\RailTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FenceTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FenceTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ButtonTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ButtonTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\LeverTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\LeverTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\DoorTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\DoorTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\RedStoneDustTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\RedStoneDustTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\RedStoneOreTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\RedStoneOreTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\NotGateTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\NotGateTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\PressurePlateTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\PressurePlateTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\IceTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\IceTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\MossyCobblestoneTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\MossyCobblestoneTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ChestTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ChestTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\MobSpawnerTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\MobSpawnerTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SnowTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SnowTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SnowBlockTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SnowBlockTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\TorchTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\TorchTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FireTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FireTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\WorkbenchTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\WorkbenchTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\StoneSlabTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\StoneSlabTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\StairTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\StairTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\MetalTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\MetalTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\GlassTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\GlassTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ClothTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\ClothTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SpongeTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\SpongeTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\BookshelfTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\BookshelfTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\TntTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\TntTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\OreTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\OreTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FluidTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FluidTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FluidFlowingTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FluidFlowingTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FluidStationaryTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\FluidStationaryTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\RecordPlayerTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\RecordPlayerTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\PumpkinTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\PumpkinTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\HellStoneTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\HellStoneTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\HellSandTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\HellSandTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\LightGemTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\LightGemTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\PortalTile.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\level\tile\PortalTile.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\phys\AABB.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\phys\AABB.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\phys\ChunkCoordinates.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\phys\HitResult.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\phys\HitResult.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\world\phys\Vec3.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\world\phys\Vec3.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet0KeepAlive.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet0KeepAlive.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet1Login.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet1Login.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet2Handshake.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet2Handshake.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet3Chat.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet3Chat.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet4UpdateTime.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet4UpdateTime.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet5PlayerInventory.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet5PlayerInventory.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet6SpawnPosition.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet6SpawnPosition.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet7.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet7.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet8.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet8.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet9.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet9.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet10Flying.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet10Flying.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet11PlayerPosition.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet11PlayerPosition.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet12PlayerLook.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet12PlayerLook.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet13PlayerLookMove.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet13PlayerLookMove.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet14BlockDig.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet14BlockDig.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet15Place.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet15Place.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet16BlockItemSwitch.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet16BlockItemSwitch.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet17Sleep.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet17Sleep.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet18ArmAnimation.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet18ArmAnimation.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet19EntityAction.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet19EntityAction.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet20NamedEntitySpawn.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet20NamedEntitySpawn.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet21PickupSpawn.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet21PickupSpawn.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet22Collect.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet22Collect.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet23VehicleSpawn.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet23VehicleSpawn.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet24MobSpawn.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet24MobSpawn.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet25EntityPainting.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet25EntityPainting.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet27Position.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet27Position.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet28.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet28.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet29DestroyEntity.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet29DestroyEntity.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet30Entity.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet30Entity.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet31RelEntityMove.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet31RelEntityMove.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet32EntityLook.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet32EntityLook.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet33RelEntityMoveLook.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet33RelEntityMoveLook.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet34EntityTeleport.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet34EntityTeleport.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet38.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet38.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet39.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet39.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet40EntityMetadata.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet40EntityMetadata.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet50PreChunk.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet50PreChunk.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet51MapChunk.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet51MapChunk.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet52MultiBlockChange.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet52MultiBlockChange.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet53BlockChange.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet53BlockChange.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet54PlayNoteBlock.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet54PlayNoteBlock.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet60.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet60.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet61DoorChange.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet61DoorChange.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet62Sound.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet62Sound.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet63Digging.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet63Digging.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet70Bed.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet70Bed.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet71Weather.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet71Weather.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet100OpenWindow.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet100OpenWindow.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet101CloseWindow.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet101CloseWindow.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet102WindowClick.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet102WindowClick.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet103SetSlot.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet103SetSlot.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet104WindowItems.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet104WindowItems.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet105UpdateProgressbar.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet105UpdateProgressbar.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet106Transaction.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet106Transaction.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet130UpdateSign.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet130UpdateSign.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet131MapData.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet131MapData.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet200Statistic.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet200Statistic.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\Packet255KickDisconnect.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\Packet255KickDisconnect.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\PacketRegistration.cpp" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\NetHandler.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\NetHandler.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\NetClientHandler.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\NetClientHandler.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\NetworkManager.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\NetworkManager.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\NetworkReaderThread.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\NetworkReaderThread.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\NetworkWriterThread.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\NetworkWriterThread.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\NetworkMasterThread.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\NetworkMasterThread.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\ThreadCloseConnection.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\ThreadCloseConnection.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\ThreadConnectToServer.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\ThreadConnectToServer.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\network\SocketStreams.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\network\SocketStreams.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\java\BufferedImage.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\java\BufferedImage.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\java\File.cpp">
+      <ObjectFileName>$(IntDir)/src/java/File.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\java\File.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\java\IOUtil.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\java\IOUtil.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\java\Math.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\java\Math.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\java\Random.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\java\Random.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\java\Resource.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\java\Runtime.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\java\String.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\java\String.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\java\System.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\java\System.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\java\Type.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\external\stb_image.cpp" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\Main.cpp" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\WinMain.cpp" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\CrashHandler.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\pc\CrashHandler.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\external\CrashMessageBox.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\pc\external\CrashMessageBox.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\pc\external\SDLCompat.h" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\pc\OpenGL.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\external\miniaudio.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\pc\external\SDLException.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\external\stb_vorbis.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\pc\external\stb_vorbis.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\lwjgl\Display.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\pc\lwjgl\Display.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\lwjgl\GLContext.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\pc\lwjgl\GLContext.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\lwjgl\Keyboard.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\pc\lwjgl\Keyboard.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\lwjgl\Mouse.cpp" />
+    <ClInclude Include="F:\aaaa\a126cpp-sdl1\src\pc\lwjgl\Mouse.h" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\win32\java\File.cpp">
+      <ObjectFileName>$(IntDir)/src/pc/win32/java/File.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\win32\java\Resource.cpp" />
+    <ClCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\win32\java\Runtime.cpp" />
+    <ResourceCompile Include="F:\aaaa\a126cpp-sdl1\src\pc\win32\Alpha126Cpp.rc" />
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="F:\aaaa\a126cpp-sdl1\build\ZERO_CHECK.vcxproj">
+      <Project>{AB9636EC-105B-303C-A748-FF627BD00C49}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="F:\aaaa\a126cpp-sdl1\build\external\openal-soft\OpenAL32.vcxproj">
+      <Project>{06430A59-9649-3F5D-836B-281A72CFD25D}</Project>
+      <Name>OpenAL32</Name>
+    </ProjectReference>
+    <ProjectReference Include="F:\aaaa\a126cpp-sdl1\build\external\glad\glad.vcxproj">
+      <Project>{80D2D65B-328D-3402-AABC-484A2A186451}</Project>
+      <Name>glad</Name>
+    </ProjectReference>
+    <ProjectReference Include="F:\aaaa\a126cpp-sdl1\build\external\zlib\zlibstatic.vcxproj">
+      <Project>{21087991-74C0-3E67-A3D1-5B79A4D4E46C}</Project>
+      <Name>zlibstatic</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
