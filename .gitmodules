@@ -1,0 +1,18 @@
+[submodule "external/SDL-1.2"]
+	path = external/SDL-1.2
+	url = https://github.com/libsdl-org/SDL-1.2
+[submodule "external/zlib"]
+	path = external/zlib
+	url = https://github.com/cuckydev/zlib
+[submodule "external/gzip-hpp"]
+	path = external/gzip-hpp
+	url = https://github.com/mapbox/gzip-hpp
+[submodule "external/stb"]
+	path = external/stb
+	url = https://github.com/nothings/stb
+[submodule "external/miniaudio"]
+	path = external/miniaudio
+	url = https://github.com/mackron/miniaudio
+[submodule "external/cpp-httplib"]
+	path = external/cpp-httplib
+	url = https://github.com/yhirose/cpp-httplib.git
