@@ -12,6 +12,8 @@
 #include "util/Mth.h"
 #include "Facing.h"
 
+#include "OpenGL.h"
+
 TileRenderer::TileRenderer(LevelSource *levelSource) : level(levelSource)
 {
 

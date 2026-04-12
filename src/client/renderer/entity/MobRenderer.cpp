@@ -2,6 +2,8 @@
 
 #include "client/renderer/entity/EntityRenderDispatcher.h"
 
+#include "OpenGL.h"
+
 MobRenderer::MobRenderer(EntityRenderDispatcher &entityRenderDispatcher, const std::shared_ptr<Model> &model, float shadow) : EntityRenderer(entityRenderDispatcher)
 {
 	this->model = model;

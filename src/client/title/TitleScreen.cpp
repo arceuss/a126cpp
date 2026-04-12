@@ -13,6 +13,8 @@
 #include "client/gui/GuiMultiplayer.h"
 #include "client/gui/GuiConnecting.h"
 
+#include "OpenGL.h"
+
 #include "world/level/tile/StoneTile.h"
 
 #include "client/gamemode/SurvivalMode.h"

@@ -2,6 +2,8 @@
 
 #include "client/renderer/Tesselator.h"
 
+#include "OpenGL.h"
+
 void GuiComponent::fill(int_t x0, int_t y0, int_t x1, int_t y1, int_t col)
 {
 	float a = ((col >> 24) & 0xFF) / 255.0f;

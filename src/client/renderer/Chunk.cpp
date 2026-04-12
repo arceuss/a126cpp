@@ -12,6 +12,8 @@
 
 #include "util/Mth.h"
 
+#include "OpenGL.h"
+
 int_t Chunk::updates = 0;
 
 Tesselator &Chunk::t = Tesselator::instance;

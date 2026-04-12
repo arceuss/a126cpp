@@ -5,14 +5,12 @@
 #include <algorithm>
 #include <cstring>
 
-#include "lwjgl/GLContext.h"
+#include "OpenGL.h"
 
 Tesselator Tesselator::instance(MAX_FLOATS);
 
 Tesselator::Tesselator(int_t size)
 {
-	lwjgl::GLContext::instantiate();
-
 	// Initialize buffer
 	this->size = size;
 
@@ -21,11 +19,11 @@ Tesselator::Tesselator(int_t size)
 	buffer_e = buffer.get() + (size * 4);
 
 	// Setup VBO - automatically enable if hardware supports it
-	vboMode = GLAD_GL_VERSION_1_5 || GLAD_GL_ARB_vertex_buffer_object;
+	vboMode = RenderBackend_SupportsVBO() || RenderBackend_SupportsARBVBO();
 	if (vboMode)
 	{
-		vboIds = Util::make_unique<GLuint[]>(vboCounts);
-		if (GLAD_GL_VERSION_1_5)
+		vboIds = Util::make_unique<unsigned int[]>(vboCounts);
+		if (RenderBackend_SupportsVBO())
 			glGenBuffers(vboCounts, vboIds.get());
 		else
 			glGenBuffersARB(vboCounts, vboIds.get());
@@ -49,7 +47,7 @@ void Tesselator::end()
 		if (vboMode)
 		{
 			vboId = (vboId + 1) % vboCounts;
-			if (GLAD_GL_VERSION_1_5)
+			if (RenderBackend_SupportsVBO())
 			{
 				glBindBuffer(GL_ARRAY_BUFFER, vboIds[vboId]);
 				glBufferData(GL_ARRAY_BUFFER, buffer_p - buffer.get(), buffer.get(), GL_STREAM_DRAW);
@@ -66,23 +64,23 @@ void Tesselator::end()
 
 		if (hasTexture)
 		{
-			glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 12));
+			glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<void *>(vbo_base + 12));
 			glEnableClientState(GL_TEXTURE_COORD_ARRAY);
 		}
 
 		if (hasColor)
 		{
-			glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 20));
+			glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<void *>(vbo_base + 20));
 			glEnableClientState(GL_COLOR_ARRAY);
 		}
 
 		if (hasNormal)
 		{
-			glNormalPointer(GL_BYTE, 32, reinterpret_cast<GLvoid *>(vbo_base + 24));
+			glNormalPointer(GL_BYTE, 32, reinterpret_cast<void *>(vbo_base + 24));
 			glEnableClientState(GL_NORMAL_ARRAY);
 		}
 
-		glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<GLvoid *>(vbo_base + 0));
+		glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<void *>(vbo_base + 0));
 		glEnableClientState(GL_VERTEX_ARRAY);
 
 		// Draw arrays
@@ -116,7 +114,7 @@ void Tesselator::begin()
 	begin(GL_QUADS);
 }
 
-void Tesselator::begin(GLenum mode)
+void Tesselator::begin(unsigned int mode)
 {
 	if (tesselating)
 		throw std::runtime_error("Already tesselating!");

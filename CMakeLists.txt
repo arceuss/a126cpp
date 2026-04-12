@@ -929,9 +929,13 @@ set(Alpha126Cpp_SOURCES
 	"src/external/stb_image.cpp"
 )
 
+# Backend selection (CSE2-style compile-time dispatch)
+set(BACKEND_RENDERER "OpenGL2" CACHE STRING "Rendering backend: OpenGL2")
+set(BACKEND_PLATFORM "SDL2" CACHE STRING "Platform backend: SDL2")
+
 add_executable(Alpha126Cpp
 	${Alpha126Cpp_SOURCES}
-	
+
 	"src/pc/Main.cpp"
 
 	"src/pc/CrashHandler.cpp"
@@ -943,18 +947,29 @@ add_executable(Alpha126Cpp
 	"src/pc/external/stb_vorbis.cpp"
 	"src/pc/external/stb_vorbis.h"
 
-	"src/pc/lwjgl/Display.cpp"
 	"src/pc/lwjgl/Display.h"
-	"src/pc/lwjgl/GLContext.cpp"
 	"src/pc/lwjgl/GLContext.h"
-	"src/pc/lwjgl/Keyboard.cpp"
 	"src/pc/lwjgl/Keyboard.h"
-	"src/pc/lwjgl/Mouse.cpp"
 	"src/pc/lwjgl/Mouse.h"
 )
 target_include_directories(Alpha126Cpp PRIVATE "src/pc")
 
 target_include_directories(Alpha126Cpp PRIVATE "src")
+
+# Rendering backend
+if(BACKEND_RENDERER STREQUAL "OpenGL2")
+	target_sources(Alpha126Cpp PRIVATE "src/Backends/Rendering/OpenGL2.cpp")
+endif()
+
+# Platform backend
+if(BACKEND_PLATFORM STREQUAL "SDL2")
+	target_sources(Alpha126Cpp PRIVATE
+		"src/Backends/Platform/SDL2/SDL2_Display.cpp"
+		"src/Backends/Platform/SDL2/SDL2_Keyboard.cpp"
+		"src/Backends/Platform/SDL2/SDL2_Mouse.cpp"
+		"src/Backends/Platform/SDL2/SDL2_GLContext.cpp"
+	)
+endif()
 
 # OpenAL-Soft headers (for SoundEngine)
 target_include_directories(Alpha126Cpp PRIVATE "external/openal-soft/include")
@@ -1029,10 +1044,17 @@ endif()
 
 # Third party
 add_subdirectory("external/glad" EXCLUDE_FROM_ALL)
-target_link_libraries(Alpha126Cpp PRIVATE glad)
-
 add_subdirectory("external/SDL2" EXCLUDE_FROM_ALL)
-target_link_libraries(Alpha126Cpp PRIVATE SDL2-static)
+
+# Link rendering backend dependencies
+if(BACKEND_RENDERER STREQUAL "OpenGL2")
+	target_link_libraries(Alpha126Cpp PRIVATE glad)
+endif()
+
+# Link platform backend dependencies
+if(BACKEND_PLATFORM STREQUAL "SDL2")
+	target_link_libraries(Alpha126Cpp PRIVATE SDL2-static)
+endif()
 
 add_subdirectory("external/zlib" EXCLUDE_FROM_ALL)
 

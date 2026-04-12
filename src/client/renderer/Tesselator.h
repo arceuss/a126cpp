@@ -4,8 +4,6 @@
 
 #include "java/Type.h"
 
-#include "OpenGL.h"
-
 #include "util/Memory.h"
 
 class Tesselator
@@ -33,7 +31,7 @@ private:
 	int_t count = 0;
 	bool noColorFlag = false;
 
-	GLenum draw_mode = 0;
+	unsigned int draw_mode = 0;
 
 	double xo = 0.0;
 	double yo = 0.0;
@@ -50,7 +48,7 @@ private:
 	bool vboMode = false;
 
 	// VBO state
-	std::unique_ptr<GLuint[]> vboIds;
+	std::unique_ptr<unsigned int[]> vboIds;
 	int_t vboId = 0;
 	int_t vboCounts = 10;
 
@@ -66,7 +64,7 @@ public:
 	void end();
 	void clear();
 	void begin();
-	void begin(GLenum mode);
+	void begin(unsigned int mode);
 	void tex(double u, double v);
 	void color(float r, float g, float b);
 	void color(float r, float g, float b, float a);

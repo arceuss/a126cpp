@@ -194,7 +194,7 @@ void Textures::releaseTexture(int_t id)
 	loadedImages.erase(id);
 
 	ib[0] = id;
-	glDeleteTextures(1, reinterpret_cast<GLuint*>(ib.data()));
+	glDeleteTextures(1, reinterpret_cast<unsigned int*>(ib.data()));
 }
 
 // newb12: Textures.loadHttpTexture() - loads HTTP texture (Textures.java:177-194)

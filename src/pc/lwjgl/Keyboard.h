@@ -5,7 +5,8 @@
 #include "java/Type.h"
 #include "java/String.h"
 
-#include "SDL_events.h"
+// Forward declaration for platform event type
+union SDL_Event;
 
 namespace lwjgl
 {

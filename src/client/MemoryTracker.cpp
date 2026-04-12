@@ -7,7 +7,7 @@ std::vector<int_t> MemoryTracker::textures;
 
 int_t MemoryTracker::genLists(int_t count)
 {
-	GLint id = glGenLists(count);
+	int id = glGenLists(count);
 	lists.push_back(id);
 	lists.push_back(count);
 	return id;
@@ -15,8 +15,8 @@ int_t MemoryTracker::genLists(int_t count)
 
 void MemoryTracker::genTextures(std::vector<int_t> &ib)
 {
-	static_assert(sizeof(GLuint) == sizeof(int_t), "sizeof(GLuint) != sizeof(int_t)");
-	glGenTextures(ib.size(), reinterpret_cast<GLuint*>(ib.data()));
+	static_assert(sizeof(unsigned int) == sizeof(int_t), "sizeof(unsigned int) != sizeof(int_t)");
+	glGenTextures(ib.size(), reinterpret_cast<unsigned int*>(ib.data()));
 }
 
 void MemoryTracker::release()
@@ -31,7 +31,7 @@ void MemoryTracker::release()
 	for (int_t i = 0; i < textures.size(); i++)
 		ib[i] = textures[i];
 
-	glDeleteTextures(ib.size(), reinterpret_cast<GLuint*>(ib.data()));
+	glDeleteTextures(ib.size(), reinterpret_cast<unsigned int*>(ib.data()));
 
 	lists.clear();
 	textures.clear();

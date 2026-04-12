@@ -54,6 +54,8 @@
 
 #include "CrashHandler.h"
 
+#include "OpenGL.h"
+
 const jstring Minecraft::VERSION_STRING = u"Minecraft " + SharedConstants::VERSION_STRING;
 
 std::array<long, 512> Minecraft::frameTimes = {};
@@ -277,7 +279,7 @@ void Minecraft::setScreen(std::shared_ptr<Screen> screen)
 
 void Minecraft::checkGlError(const std::string &at)
 {
-	GLenum error_code = glGetError();
+	unsigned int error_code = glGetError();
 	if (error_code != GL_NO_ERROR)
 	{
 		std::string error_string;

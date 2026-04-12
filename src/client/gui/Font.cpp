@@ -230,7 +230,7 @@ void Font::draw(const jstring &str, int_t x, int_t y, int_t color, bool darken)
 			glCallList(colorListIndex);  // This calls glColor3f, setting RGB but preserving alpha
 			// Restore alpha explicitly to ensure it's correct for fading
 			// Get current RGB from OpenGL state, then restore alpha
-			GLfloat currentColor[4];
+			float currentColor[4];
 			glGetFloatv(GL_CURRENT_COLOR, currentColor);
 			glColor4f(currentColor[0], currentColor[1], currentColor[2], alpha);
 			

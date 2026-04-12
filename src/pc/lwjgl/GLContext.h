@@ -3,12 +3,10 @@
 #include <string>
 #include <set>
 
-#include "SDL.h"
-#include "glad/glad.h"
-
-#ifdef _WIN32
-#undef APIENTRY
-#endif
+// Forward declarations for platform types
+// The actual types are defined by the platform backend (e.g., SDL2)
+struct SDL_Window;
+typedef void* SDL_GLContext;
 
 namespace lwjgl
 {
@@ -37,7 +35,7 @@ public:
 	}
 };
 
-// Context singletons
+// Context singletons - implemented by platform backend
 SDL_Window *getWindow();
 SDL_GLContext getGLContext();
 

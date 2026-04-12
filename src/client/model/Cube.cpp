@@ -3,6 +3,8 @@
 #include "client/MemoryTracker.h"
 #include "client/renderer/Tesselator.h"
 
+#include "OpenGL.h"
+
 Cube::Cube(int_t xTexOffs, int_t yTexOffs)
 {
 	this->xTexOffs = xTexOffs;

@@ -3,6 +3,8 @@
 #include "client/Minecraft.h"
 #include "client/renderer/Tesselator.h"
 
+#include "OpenGL.h"
+
 Button::Button(int_t id, int_t x, int_t y, jstring msg) : Button(id, x, y, 200, 20, msg)
 {
 

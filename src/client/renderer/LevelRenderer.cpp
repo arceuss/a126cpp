@@ -28,6 +28,8 @@
 
 #include "util/Mth.h"
 
+#include "OpenGL.h"
+
 LevelRenderer::LevelRenderer(Minecraft &mc, Textures &textures) : mc(mc), textures(textures)
 {
 	int_t maxChunksWidth = 64;
