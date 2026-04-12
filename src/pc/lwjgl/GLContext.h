@@ -6,6 +6,10 @@
 #include "SDL.h"
 #include "glad/glad.h"
 
+#ifdef _WIN32
+#undef APIENTRY
+#endif
+
 namespace lwjgl
 {
 namespace GLContext

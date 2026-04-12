@@ -2212,9 +2212,8 @@ void NetClientHandler::handleSignUpdate(Packet130UpdateSign* var1)
 				{
 					signEntity->messages[i] = var1->signLines[i];
 				}
-				// Alpha: Call onInventoryChanged() to notify renderer
-				// Note: In our implementation, we might not have onInventoryChanged(), 
-				// but the sign will be re-rendered on next frame anyway
+				signEntity->invalidateRenderCache();
+				signEntity->setChanged();
 			}
 		}
 	}

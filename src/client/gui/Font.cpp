@@ -360,11 +360,97 @@ jstring Font::sanitize(const jstring &str)
 	return result;
 }
 
-// Optimized batch rendering for signs - renders all text in a single draw call
-// This significantly improves performance by batching all characters together
-void Font::drawSignTextBatched(const jstring lines[4], int_t xOffsets[4], int_t yOffsets[4], int_t baseColor)
+// Ultra-optimized sign text: builds ALL glyphs into ONE Tesselator batch with vertex colors.
+// Reduces sign rendering from ~60 draw calls to 1 draw call.
+void Font::drawSignTextSingleBatch(const jstring lines[4], const int_t xOffsets[4], const int_t yOffsets[4], int_t baseColor)
 {
-	// Parse base color (same logic as draw())
+	int_t color = baseColor;
+	if ((color & 0xFF000000) == 0 && color != 0)
+	{
+		color |= 0xFF000000;
+	}
+	
+	int_t r = (color >> 16) & 0xFF;
+	int_t g = (color >> 8) & 0xFF;
+	int_t b = color & 0xFF;
+	int_t a = (color >> 24) & 0xFF;
+	if (a == 0) a = 255;
+	
+	static const jstring colorCodes = u"0123456789abcdef";
+	
+	glBindTexture(GL_TEXTURE_2D, fontTexture);
+	
+	Tesselator &t = Tesselator::instance;
+	t.begin();
+	t.color(r, g, b, a);
+	
+	for (int_t lineIdx = 0; lineIdx < 4; lineIdx++)
+	{
+		const jstring &str = lines[lineIdx];
+		if (str.empty()) continue;
+		
+		float xPos = static_cast<float>(xOffsets[lineIdx]);
+		float yPos = static_cast<float>(yOffsets[lineIdx]);
+		
+		// Reset to base color at start of each line
+		r = (color >> 16) & 0xFF;
+		g = (color >> 8) & 0xFF;
+		b = color & 0xFF;
+		
+		for (int_t i = 0; i < str.length(); i++)
+		{
+			if (str[i] == 167 && i + 1 < str.length())  // Color code
+			{
+				char_t codeChar = str[i + 1];
+				char_t lowerCode = codeChar;
+				if (codeChar >= u'A' && codeChar <= u'F')
+					lowerCode = codeChar + (u'a' - u'A');
+				
+				int_t codeIndex = colorCodes.find(lowerCode);
+				if (codeIndex == jstring::npos || codeIndex > 15)
+					codeIndex = 15;
+				
+				// Convert float color back to int
+				r = static_cast<int_t>(colorCodeR[codeIndex] * 255.0f);
+				g = static_cast<int_t>(colorCodeG[codeIndex] * 255.0f);
+				b = static_cast<int_t>(colorCodeB[codeIndex] * 255.0f);
+				i++;
+				continue;
+			}
+			
+			char_t ch = str[i];
+			int_t chIndex = SharedConstants::acceptableLetters.find(ch);
+			if (chIndex == jstring::npos) continue;
+			
+			int_t glyphIndex = chIndex + 32;
+			int_t ix = glyphIndex % 16 * 8;
+			int_t iy = glyphIndex / 16 * 8;
+			
+			float s = 7.99f;
+			float u0 = ix / 128.0f;
+			float v0 = iy / 128.0f;
+			float u1 = (ix + s) / 128.0f;
+			float v1 = (iy + s) / 128.0f;
+			
+			// Set color for this quad (vertex colors)
+			t.color(r, g, b, a);
+			
+			// Emit quad vertices (same winding as original glyph display lists)
+			t.vertexUV(xPos, yPos + s, 0.0, u0, v1);
+			t.vertexUV(xPos + s, yPos + s, 0.0, u1, v1);
+			t.vertexUV(xPos + s, yPos, 0.0, u1, v0);
+			t.vertexUV(xPos, yPos, 0.0, u0, v0);
+			
+			xPos += charWidths[glyphIndex];
+		}
+	}
+	
+	t.end();
+}
+
+// Sign text uses the existing glyph display lists so it avoids rebuilding and uploading quads every frame.
+void Font::drawSignTextBatched(const jstring lines[4], const int_t xOffsets[4], const int_t yOffsets[4], int_t baseColor)
+{
 	int_t color = baseColor;
 	if ((color & 0xFF000000) == 0 && color != 0)
 	{
@@ -380,35 +466,35 @@ void Font::drawSignTextBatched(const jstring lines[4], int_t xOffsets[4], int_t 
 	float baseG = ((color >> 8) & 0xFF) / 255.0f;
 	float baseB = (color & 0xFF) / 255.0f;
 	
-	// Use pre-calculated color code RGB values (includes anaglyph3d transformation if enabled)
 	static const jstring colorCodes = u"0123456789abcdef";
 	
-	// Bind font texture
 	glBindTexture(GL_TEXTURE_2D, fontTexture);
-	
-	// Use Tesselator to batch all quads
-	Tesselator &t = Tesselator::instance;
-	t.begin();
-	
-	// Process each line
+	glColor4f(baseR, baseG, baseB, alpha);
+	glPushMatrix();
+
 	for (int_t lineIdx = 0; lineIdx < 4; lineIdx++)
 	{
 		const jstring &str = lines[lineIdx];
 		if (str.empty())
+		{
 			continue;
-		
-		float currentR = baseR;
-		float currentG = baseG;
-		float currentB = baseB;
-		float x = static_cast<float>(xOffsets[lineIdx]);
-		float y = static_cast<float>(yOffsets[lineIdx]);
-		
-		// Parse string and render characters
+		}
+
+		glPushMatrix();
+		glTranslatef(static_cast<float>(xOffsets[lineIdx]), static_cast<float>(yOffsets[lineIdx]), 0.0f);
+		glColor4f(baseR, baseG, baseB, alpha);
+		ib.clear();
+
 		for (int_t i = 0; i < str.length(); i++)
 		{
-			char_t ch = str[i];
-			if (ch == 167 && i + 1 < str.length())  // Color code (167 = 0xA7 = §)
+			if (str[i] == 167 && i + 1 < str.length())
 			{
+				if (!ib.empty())
+				{
+					glCallLists(ib.size(), GL_UNSIGNED_INT, ib.data());
+					ib.clear();
+				}
+
 				char_t codeChar = str[i + 1];
 				char_t lowerCode = codeChar;
 				if (codeChar >= u'A' && codeChar <= u'F')
@@ -422,46 +508,26 @@ void Font::drawSignTextBatched(const jstring lines[4], int_t xOffsets[4], int_t 
 				if (codeIndex == jstring::npos || codeIndex > 15)
 					codeIndex = 15;
 				
-				// Update current color using pre-calculated values
-				currentR = colorCodeR[codeIndex];
-				currentG = colorCodeG[codeIndex];
-				currentB = colorCodeB[codeIndex];
-				
-				i++;  // Skip the color code character
+				glColor4f(colorCodeR[codeIndex], colorCodeG[codeIndex], colorCodeB[codeIndex], alpha);
+				i++;
 			}
 			else
 			{
-				// Find character index
-				int_t chIndex = SharedConstants::acceptableLetters.find(ch);
+				int_t chIndex = SharedConstants::acceptableLetters.find(str[i]);
 				if (chIndex != jstring::npos)
 				{
-					// Calculate texture coordinates
-					int_t charCode = chIndex + 32;
-					int_t ix = charCode % 16 * 8;
-					int_t iy = charCode / 16 * 8;
-					
-					float s = 7.99f;
-					float u0 = ix / 128.0f;
-					float u1 = (ix + s) / 128.0f;
-					float v0 = iy / 128.0f;
-					float v1 = (iy + s) / 128.0f;
-					
-					// Set color for this character
-					t.color(currentR, currentG, currentB, alpha);
-					
-					// Render character quad
-					t.vertexUV(x, y + s, 0.0, u0, v1);
-					t.vertexUV(x + s, y + s, 0.0, u1, v1);
-					t.vertexUV(x + s, y, 0.0, u1, v0);
-					t.vertexUV(x, y, 0.0, u0, v0);
-					
-					// Advance x position
-					x += static_cast<float>(charWidths[charCode]);
+					ib.push_back(listPos + chIndex + 32);
 				}
 			}
 		}
+
+		if (!ib.empty())
+		{
+			glCallLists(ib.size(), GL_UNSIGNED_INT, ib.data());
+		}
+
+		glPopMatrix();
 	}
 	
-	// Render all batched quads in one draw call
-	t.end();
+	glPopMatrix();
 }

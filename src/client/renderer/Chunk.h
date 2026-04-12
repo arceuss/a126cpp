@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 
 #include "client/renderer/Tesselator.h"
@@ -63,6 +64,8 @@ public:
 
 private:
 	void translateToPos();
+	void removeRenderableTileEntitiesFromGlobal();
+	void addRenderableTileEntitiesToGlobal();
 
 public:
 	void rebuild();

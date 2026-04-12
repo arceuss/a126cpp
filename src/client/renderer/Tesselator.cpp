@@ -21,11 +21,14 @@ Tesselator::Tesselator(int_t size)
 	buffer_e = buffer.get() + (size * 4);
 
 	// Setup VBO - automatically enable if hardware supports it
-	vboMode = lwjgl::GLContext::getCapabilities()["GL_ARB_vertex_buffer_object"];
+	vboMode = GLAD_GL_VERSION_1_5 || GLAD_GL_ARB_vertex_buffer_object;
 	if (vboMode)
 	{
 		vboIds = Util::make_unique<GLuint[]>(vboCounts);
-		glGenBuffersARB(vboCounts, vboIds.get());
+		if (GLAD_GL_VERSION_1_5)
+			glGenBuffers(vboCounts, vboIds.get());
+		else
+			glGenBuffersARB(vboCounts, vboIds.get());
 	}
 }
 
@@ -46,8 +49,16 @@ void Tesselator::end()
 		if (vboMode)
 		{
 			vboId = (vboId + 1) % vboCounts;
-			glBindBufferARB(GL_ARRAY_BUFFER_ARB, vboIds[vboId]);
-			glBufferDataARB(GL_ARRAY_BUFFER_ARB, buffer_p - buffer.get(), buffer.get(), GL_STREAM_DRAW_ARB);
+			if (GLAD_GL_VERSION_1_5)
+			{
+				glBindBuffer(GL_ARRAY_BUFFER, vboIds[vboId]);
+				glBufferData(GL_ARRAY_BUFFER, buffer_p - buffer.get(), buffer.get(), GL_STREAM_DRAW);
+			}
+			else
+			{
+				glBindBufferARB(GL_ARRAY_BUFFER_ARB, vboIds[vboId]);
+				glBufferDataARB(GL_ARRAY_BUFFER_ARB, buffer_p - buffer.get(), buffer.get(), GL_STREAM_DRAW_ARB);
+			}
 		}
 
 		// Setup attributes

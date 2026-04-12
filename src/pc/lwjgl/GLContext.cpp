@@ -126,6 +126,13 @@ namespace GLContext
 namespace detail
 {
 
+static void setContextAttributes(int major, int minor)
+{
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, major);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, minor);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+}
+
 // Context singleton
 class GLContext
 {
@@ -137,10 +144,8 @@ private:
 public:
 	GLContext()
 	{
-		// Setup SDL to use OpenGL 1.1
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+		// Prefer a 2.1 compatibility context and fall back to the legacy path if needed.
+		setContextAttributes(2, 1);
 
 		// SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
 
@@ -236,7 +241,18 @@ public:
 		// Create OpenGL context
 		gl_context = SDL_GL_CreateContext(window);
 		if (gl_context == nullptr)
-			throw SDLException();
+		{
+			std::string requestedContextError = SDL_GetError();
+			SDL_ClearError();
+
+			setContextAttributes(1, 1);
+			gl_context = SDL_GL_CreateContext(window);
+			if (gl_context == nullptr)
+				throw SDLException();
+
+			if (!requestedContextError.empty())
+				std::cerr << "OpenGL 2.1 compatibility context unavailable, falling back to 1.1: " << requestedContextError << '\n';
+		}
 
 		if (SDL_GL_MakeCurrent(window, gl_context))
 			throw SDLException();
@@ -251,24 +267,30 @@ public:
 		// Parse capabilities
 		{
 			const GLubyte *extensions = glGetString(GL_EXTENSIONS);
-			std::string cap;
-
-			const char *extension_p = reinterpret_cast<const char *>(extensions);
-			while (*extension_p != '\0')
+			if (extensions != nullptr)
 			{
-				if (*extension_p == ' ')
+				std::string cap;
+
+				const char *extension_p = reinterpret_cast<const char *>(extensions);
+				while (*extension_p != '\0')
 				{
-					if (!cap.empty())
+					if (*extension_p == ' ')
 					{
-						capabilties.add(cap);
-						cap.clear();
+						if (!cap.empty())
+						{
+							capabilties.add(cap);
+							cap.clear();
+						}
+						while (*extension_p == ' ')
+							extension_p++;
+						continue;
 					}
-					while (*extension_p == ' ')
-						extension_p++;
-					continue;
+
+					cap.push_back(*extension_p++);
 				}
 
-				cap.push_back(*extension_p++);
+				if (!cap.empty())
+					capabilties.add(cap);
 			}
 		}
 

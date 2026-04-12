@@ -10,7 +10,6 @@
 #include "external/SDLException.h"
 
 #include "SDL.h"
-#include <glad/glad.h>
 
 namespace lwjgl
 {

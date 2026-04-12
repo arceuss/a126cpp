@@ -1,5 +1,7 @@
 #include "client/renderer/Chunk.h"
 
+#include <algorithm>
+
 #include "client/renderer/Tesselator.h"
 #include "client/renderer/entity/EntityRenderer.h"
 #include "client/renderer/TileRenderer.h"
@@ -60,6 +62,32 @@ void Chunk::translateToPos()
 	glTranslatef(xRenderOffs, yRenderOffs, zRenderOffs);
 }
 
+void Chunk::removeRenderableTileEntitiesFromGlobal()
+{
+	if (renderableTileEntities.empty())
+	{
+		return;
+	}
+
+	globalRenderableTileEntities.erase(std::remove_if(globalRenderableTileEntities.begin(), globalRenderableTileEntities.end(), [this](const std::shared_ptr<TileEntity> &tileEntity)
+	{
+		return std::find(renderableTileEntities.begin(), renderableTileEntities.end(), tileEntity) != renderableTileEntities.end();
+	}), globalRenderableTileEntities.end());
+
+	renderableTileEntities.clear();
+}
+
+void Chunk::addRenderableTileEntitiesToGlobal()
+{
+	for (const auto &tileEntity : renderableTileEntities)
+	{
+		if (std::find(globalRenderableTileEntities.begin(), globalRenderableTileEntities.end(), tileEntity) == globalRenderableTileEntities.end())
+		{
+			globalRenderableTileEntities.push_back(tileEntity);
+		}
+	}
+}
+
 void Chunk::rebuild()
 {
 	if (!dirty) return;
@@ -76,9 +104,7 @@ void Chunk::rebuild()
 
 	LevelChunk::touchedSky = false;
 
-	std::unordered_set<std::shared_ptr<TileEntity>> oldTileEntities;
-	oldTileEntities.insert(renderableTileEntities.begin(), renderableTileEntities.end());
-	renderableTileEntities.clear();
+	removeRenderableTileEntitiesFromGlobal();
 
 	int_t r = 1;
 	Region region(level, x0 - r, y0 - r, z0 - r, x1 + r, y1 + r, z1 + r);
@@ -120,15 +146,10 @@ void Chunk::rebuild()
 
 					if (i == 0 && Tile::isEntityTile[tileId])
 					{
-						// newb12: Collect tile entities for rendering (Chunk.java:148-152)
-						// newb12: TileEntity et = region.getTileEntity(x, y, z);
-						// newb12: if (TileEntityRenderDispatcher.instance.hasRenderer(et)) {
-						// newb12:     this.renderableTileEntities.add(et);
-						// newb12: }
 						std::shared_ptr<TileEntity> tileEntity = region.getTileEntity(x, y, z);
 						if (tileEntity != nullptr && TileEntityRenderDispatcher::instance.hasRenderer(tileEntity.get()))
 						{
-							globalRenderableTileEntities.push_back(tileEntity);
+							renderableTileEntities.push_back(tileEntity);
 						}
 					}
 
@@ -163,6 +184,8 @@ void Chunk::rebuild()
 		if (!renderNextLayer) break;
 	}
 
+	addRenderableTileEntitiesToGlobal();
+
 	skyLit = LevelChunk::touchedSky;
 	compiled = true;
 }
@@ -185,6 +208,7 @@ float Chunk::squishedDistanceToSqr(Entity &player)
 
 void Chunk::reset()
 {
+	removeRenderableTileEntitiesFromGlobal();
 	empty.fill(true);
 	visible = false;
 	compiled = false;

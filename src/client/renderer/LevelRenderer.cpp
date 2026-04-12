@@ -1377,5 +1377,25 @@ void LevelRenderer::skyColorChanged()
 
 void LevelRenderer::tileEntityChanged(int_t x, int_t y, int_t z, std::shared_ptr<TileEntity> tileEntity)
 {
+	if (tileEntity == nullptr)
+	{
+		return;
+	}
 
+	auto existing = std::find(renderableTileEntities.begin(), renderableTileEntities.end(), tileEntity);
+	bool shouldRender = TileEntityRenderDispatcher::instance.hasRenderer(tileEntity.get());
+
+	if (shouldRender)
+	{
+		if (existing == renderableTileEntities.end())
+		{
+			renderableTileEntities.push_back(tileEntity);
+		}
+		return;
+	}
+
+	if (existing != renderableTileEntities.end())
+	{
+		renderableTileEntities.erase(std::remove(renderableTileEntities.begin(), renderableTileEntities.end(), tileEntity), renderableTileEntities.end());
+	}
 }

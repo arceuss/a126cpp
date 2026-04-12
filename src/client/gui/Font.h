@@ -35,7 +35,9 @@ public:
 	void draw(const jstring &str, int_t x, int_t y, int_t color, bool darken);
 
 	// Optimized batch rendering for signs - renders all text in a single draw call
-	void drawSignTextBatched(const jstring lines[4], int_t xOffsets[4], int_t yOffsets[4], int_t baseColor);
+	void drawSignTextBatched(const jstring lines[4], const int_t xOffsets[4], const int_t yOffsets[4], int_t baseColor);
+	// Ultra-optimized: builds ALL sign text into ONE Tesselator batch with vertex colors (1 draw call total)
+	void drawSignTextSingleBatch(const jstring lines[4], const int_t xOffsets[4], const int_t yOffsets[4], int_t baseColor);
 
 	int_t width(const jstring &str);
 	jstring trimStringToWidth(const jstring &str, int_t width, bool reverse = false);

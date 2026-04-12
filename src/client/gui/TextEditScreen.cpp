@@ -97,6 +97,7 @@ void TextEditScreen::keyPressed(char_t eventCharacter, int_t eventKey)
 	if (eventKey == 14 && sign->messages[line].length() > 0)  // Backspace
 	{
 		sign->messages[line] = sign->messages[line].substr(0, sign->messages[line].length() - 1);
+		sign->invalidateRenderCache();
 	}
 	
 	// Beta: if (allowedChars.indexOf(ch) >= 0 && this.sign.messages[this.line].length() < 15) { ... } (TextEditScreen.java:68-70)
@@ -104,6 +105,7 @@ void TextEditScreen::keyPressed(char_t eventCharacter, int_t eventKey)
 	if (allowedChars.find(static_cast<char16_t>(eventCharacter)) != jstring::npos && sign->messages[line].length() < 15)
 	{
 		sign->messages[line] += static_cast<char16_t>(eventCharacter);
+		sign->invalidateRenderCache();
 	}
 }
 
