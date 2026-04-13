@@ -1,5 +1,7 @@
 #include "client/renderer/GameRenderer.h"
 
+#include <cmath>
+
 #include "client/Minecraft.h"
 #include "client/Lighting.h"
 #include "client/gui/ScreenSizeCalculator.h"

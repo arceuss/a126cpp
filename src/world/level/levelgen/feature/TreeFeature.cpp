@@ -1,5 +1,7 @@
 #include "world/level/levelgen/feature/TreeFeature.h"
 
+#include <cmath>
+
 #include "world/level/Level.h"
 
 #include "world/level/tile/Tile.h"

@@ -1,5 +1,6 @@
 #include "Minecraft.h"
 
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <thread>

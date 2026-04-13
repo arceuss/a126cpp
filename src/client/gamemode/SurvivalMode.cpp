@@ -1,6 +1,8 @@
 #include "client/gamemode/SurvivalMode.h"
 #include "world/item/ItemStack.h"
 
+#include <cmath>
+
 #include "client/Minecraft.h"
 
 SurvivalMode::SurvivalMode(Minecraft &minecraft) : GameMode(minecraft)

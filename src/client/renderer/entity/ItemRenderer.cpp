@@ -11,6 +11,8 @@
 #include "pc/OpenGL.h"
 #include "java/String.h"
 
+#include <cmath>
+
 // Beta: GL_RESCALE_NORMAL constant (GL_EXT_rescale_normal = 32826)
 // Use numeric value to match Beta exactly
 #ifndef GL_RESCALE_NORMAL
