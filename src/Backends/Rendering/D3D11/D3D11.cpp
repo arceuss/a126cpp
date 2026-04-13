@@ -1421,6 +1421,18 @@ void glNewList(GLuint list, GLenum mode)
     (void)mode; // Always GL_COMPILE
     g_recording = true;
     g_recordingListId = list;
+
+    // Release GPU buffers from any existing list with this ID
+    auto it = g_displayLists().find(list);
+    if (it != g_displayLists().end())
+    {
+        for (auto& cmd : it->second.commands)
+        {
+            if (cmd.type == DLCmd::Draw && cmd.draw.vbo)
+                cmd.draw.vbo->Release();
+        }
+    }
+
     g_displayLists()[list] = DisplayList();
     g_recordingList = &g_displayLists()[list];
     g_recordingList->valid = true;
