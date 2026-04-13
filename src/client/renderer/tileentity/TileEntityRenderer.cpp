@@ -15,6 +15,15 @@ void TileEntityRenderer::bindTexture(const jstring &resourceName)
 	}
 }
 
+void TileEntityRenderer::bindTextureId(int_t id)
+{
+	Textures *t = tileEntityRenderDispatcher->textures;
+	if (t != nullptr)
+	{
+		t->bind(id);
+	}
+}
+
 // Beta: TileEntityRenderer.bindTexture() with backup (TileEntityRenderer.java:18-21)
 void TileEntityRenderer::bindTexture(const jstring &urlTexture, const jstring &backupTexture)
 {

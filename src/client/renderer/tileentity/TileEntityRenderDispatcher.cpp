@@ -8,7 +8,6 @@
 #include "world/entity/player/Player.h"
 #include "world/level/tile/entity/TileEntity.h"
 #include "world/level/tile/entity/SignTileEntity.h"
-#include "world/level/tile/entity/MobSpawnerTileEntity.h"
 #include "OpenGL.h"
 
 TileEntityRenderDispatcher TileEntityRenderDispatcher::instance;
@@ -87,18 +86,10 @@ void TileEntityRenderDispatcher::render(TileEntity *e, float a)
 // Beta: TileEntityRenderDispatcher.render() - renders at position (TileEntityRenderDispatcher.java:77-82)
 void TileEntityRenderDispatcher::render(TileEntity *entity, double x, double y, double z, float a)
 {
-	TileEntityRenderer *renderer = getRenderer(entity);  // Beta: TileEntityRenderer<TileEntity> renderer = this.getRenderer(entity) (TileEntityRenderDispatcher.java:78)
+	TileEntityRenderer *renderer = getRenderer(entity);
 	if (renderer != nullptr)
 	{
-		// Beta: Call renderer.render() (TileEntityRenderDispatcher.java:80)
-		// Use dynamic_cast to call the specific renderer's render method
-		// For SignRenderer, we have renderEntity() helper
-		SignRenderer *signRenderer = dynamic_cast<SignRenderer *>(renderer);
-		if (signRenderer != nullptr)
-		{
-			signRenderer->renderEntity(entity, x, y, z, a);
-		}
-		// TODO: Add other renderer types (MobSpawnerRenderer, etc.)
+		renderer->renderEntity(entity, x, y, z, a);
 	}
 }
 

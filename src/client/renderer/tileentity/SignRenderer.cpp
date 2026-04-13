@@ -1,6 +1,7 @@
 #include "client/renderer/tileentity/SignRenderer.h"
 
 #include "client/renderer/tileentity/TileEntityRenderDispatcher.h"
+#include "client/renderer/Textures.h"
 #include "world/level/tile/entity/SignTileEntity.h"
 #include "world/level/tile/SignTile.h"
 #include "world/level/tile/Tile.h"
@@ -8,116 +9,85 @@
 #include "client/gui/Font.h"
 #include "OpenGL.h"
 
-// newb12: SignRenderer.render() (SignRenderer.java:12-68)
 SignRenderer::SignRenderer()
 {
-	// newb12: SignModel is initialized in member initializer
 }
 
-// newb12: SignRenderer.render() (SignRenderer.java:12-68)
 void SignRenderer::render(SignTileEntity &sign, double x, double y, double z, float a)
 {
-	// Safety check: Skip rendering if tile entity has no valid level
-	// This can happen during world unloading or when chunk is unloaded
 	if (sign.level == nullptr)
+		return;
+
+	// Cache the sign texture ID on first use (avoids per-sign string hash + map lookup)
+	if (signTextureId < 0)
 	{
-		return;  // Don't render if level is null
+		Textures *t = tileEntityRenderDispatcher->textures;
+		if (t != nullptr)
+			signTextureId = t->loadTexture(u"/item/sign.png");
 	}
-	
-	// Safety check: Ensure chunk is loaded before trying to get tile
-	// When chunks unload, tile entities may still be in render list but chunk data is unavailable
-	if (!sign.level->hasChunkAt(sign.x, sign.y, sign.z))
-	{
-		return;  // Don't render if chunk is not loaded
-	}
-	
-	// Safety: Get tile ID and validate tile pointer before calling getTile()
-	// This prevents dereferencing null pointers
+
+	// Get tile type from the sign's cached data instead of querying the world each frame.
+	// sign.getData() is already stored on the tile entity -- we just need to know if it's
+	// a standing sign or wall sign, which we determine from the tile ID.
+	// Still need to query the tile ID, but skip hasChunkAt -- tile entities are only in
+	// the render list while their chunk is loaded.
 	int_t tileId = sign.level->getTile(sign.x, sign.y, sign.z);
-	
-	// Validate tile ID is in valid range
+
 	if (tileId < 0 || tileId >= 256)
-	{
-		// Invalid tile ID - use air tile (ID 0) as fallback
-		tileId = 0;
-	}
-	
-	// Check if tile pointer is null - if so, use air tile
+		return;
+
 	Tile *tilePtr = Tile::tiles[tileId];
 	if (tilePtr == nullptr)
+		return;
+
+	Tile &tile = *tilePtr;
+	glPushMatrix();
+	float size = 0.6666667f;
+
+	if (tile.id == Tile::sign.id)
 	{
-		// Tile is null - use air tile as fallback
-		tilePtr = Tile::tiles[0];
-		if (tilePtr == nullptr)
-		{
-			return;  // Even air tile is null - skip rendering (critical error)
-		}
-	}
-	
-	Tile &tile = *tilePtr;  // Now safe to use
-	glPushMatrix();  // newb12: GL11.glPushMatrix() (SignRenderer.java:14)
-	float size = 0.6666667f;  // newb12: float size = 0.6666667F (SignRenderer.java:15)
-	
-	if (tile.id == Tile::sign.id)  // newb12: if (tile == Tile.sign) (SignRenderer.java:16)
-	{
-		// newb12: Sign post rendering (SignRenderer.java:17-20)
-		glTranslatef((float)x + 0.5f, (float)y + 0.75f * size, (float)z + 0.5f);  // newb12: GL11.glTranslatef((float)x + 0.5F, (float)y + 0.75F * size, (float)z + 0.5F) (SignRenderer.java:17)
-		float rot = sign.getData() * 360 / 16.0f;  // newb12: float rot = sign.getData() * 360 / 16.0F (SignRenderer.java:18)
-		glRotatef(-rot, 0.0f, 1.0f, 0.0f);  // newb12: GL11.glRotatef(-rot, 0.0F, 1.0F, 0.0F) (SignRenderer.java:19)
-		signModel.cube2.visible = true;  // newb12: this.signModel.cube2.visible = true (SignRenderer.java:20)
+		glTranslatef((float)x + 0.5f, (float)y + 0.75f * size, (float)z + 0.5f);
+		float rot = sign.getData() * 360 / 16.0f;
+		glRotatef(-rot, 0.0f, 1.0f, 0.0f);
+		signModel.cube2.visible = true;
 	}
 	else
 	{
-		// newb12: Wall sign rendering (SignRenderer.java:22-39)
-		int_t face = sign.getData();  // newb12: int face = sign.getData() (SignRenderer.java:22)
-		float rot = 0.0f;  // newb12: float rot = 0.0F (SignRenderer.java:23)
-		
-		if (face == 2)  // newb12: if (face == 2) (SignRenderer.java:24)
-		{
-			rot = 180.0f;  // newb12: rot = 180.0F (SignRenderer.java:25)
-		}
-		
-		if (face == 4)  // newb12: if (face == 4) (SignRenderer.java:28)
-		{
-			rot = 90.0f;  // newb12: rot = 90.0F (SignRenderer.java:29)
-		}
-		
-		if (face == 5)  // newb12: if (face == 5) (SignRenderer.java:32)
-		{
-			rot = -90.0f;  // newb12: rot = -90.0F (SignRenderer.java:33)
-		}
-		
-		glTranslatef((float)x + 0.5f, (float)y + 0.75f * size, (float)z + 0.5f);  // newb12: GL11.glTranslatef((float)x + 0.5F, (float)y + 0.75F * size, (float)z + 0.5F) (SignRenderer.java:36)
-		glRotatef(-rot, 0.0f, 1.0f, 0.0f);  // newb12: GL11.glRotatef(-rot, 0.0F, 1.0F, 0.0F) (SignRenderer.java:37)
-		glTranslatef(0.0f, -0.3125f, -0.4375f);  // newb12: GL11.glTranslatef(0.0F, -0.3125F, -0.4375F) (SignRenderer.java:38)
-		signModel.cube2.visible = false;  // newb12: this.signModel.cube2.visible = false (SignRenderer.java:39)
+		int_t face = sign.getData();
+		float rot = 0.0f;
+
+		if (face == 2) rot = 180.0f;
+		if (face == 4) rot = 90.0f;
+		if (face == 5) rot = -90.0f;
+
+		glTranslatef((float)x + 0.5f, (float)y + 0.75f * size, (float)z + 0.5f);
+		glRotatef(-rot, 0.0f, 1.0f, 0.0f);
+		glTranslatef(0.0f, -0.3125f, -0.4375f);
+		signModel.cube2.visible = false;
 	}
-	
-	bindTexture(u"/item/sign.png");  // newb12: this.bindTexture("/item/sign.png") (SignRenderer.java:42)
-	glPushMatrix();  // newb12: GL11.glPushMatrix() (SignRenderer.java:43)
-	glScalef(size, -size, -size);  // newb12: GL11.glScalef(size, -size, -size) (SignRenderer.java:44)
-	signModel.render();  // newb12: this.signModel.render() (SignRenderer.java:45)
-	glPopMatrix();  // newb12: GL11.glPopMatrix() (SignRenderer.java:46)
-	
-	Font *font = getFont();  // newb12: Font font = this.getFont() (SignRenderer.java:47)
-	float s = 0.016666668f * size;  // newb12: float s = 0.016666668F * size (SignRenderer.java:48)
-	glTranslatef(0.0f, 0.5f * size, 0.07f * size);  // newb12: GL11.glTranslatef(0.0F, 0.5F * size, 0.07F * size) (SignRenderer.java:49)
-	glScalef(s, -s, s);  // newb12: GL11.glScalef(s, -s, s) (SignRenderer.java:50)
-	glNormal3f(0.0f, 0.0f, -1.0f * s);  // newb12: GL11.glNormal3f(0.0F, 0.0F, -1.0F * s) (SignRenderer.java:51)
-	glDepthMask(false);  // newb12: GL11.glDepthMask(false) (SignRenderer.java:52)
-	int_t col = 0;  // newb12: int col = 0 (SignRenderer.java:53)
+
+	bindTextureId(signTextureId);
+	glPushMatrix();
+	glScalef(size, -size, -size);
+	signModel.render();
+	glPopMatrix();
+
+	Font *font = getFont();
+	float s = 0.016666668f * size;
+	glTranslatef(0.0f, 0.5f * size, 0.07f * size);
+	glScalef(s, -s, s);
+	glNormal3f(0.0f, 0.0f, -1.0f * s);
+	glDepthMask(false);
+	int_t col = 0;
 	sign.renderCachedText(*font, col);
-	
-	glDepthMask(true);  // newb12: GL11.glDepthMask(true) (SignRenderer.java:65)
-	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);  // newb12: GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F) (SignRenderer.java:66)
-	glPopMatrix();  // newb12: GL11.glPopMatrix() (SignRenderer.java:67)
+
+	glDepthMask(true);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	glPopMatrix();
 }
 
 void SignRenderer::renderEntity(TileEntity *entity, double x, double y, double z, float a)
 {
-	SignTileEntity *sign = dynamic_cast<SignTileEntity *>(entity);
-	if (sign != nullptr)
-	{
-		render(*sign, x, y, z, a);
-	}
+	// Safe: dispatch already confirmed the type via typeid registry
+	render(static_cast<SignTileEntity &>(*entity), x, y, z, a);
 }

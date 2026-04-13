@@ -1,5 +1,7 @@
 #include "client/renderer/ChunkSnapshot.h"
 
+#include <cstring>
+
 #include "world/level/material/GasMaterial.h"
 #include "world/level/tile/Tile.h"
 #include "world/level/tile/FarmTile.h"
