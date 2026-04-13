@@ -933,6 +933,21 @@ set(Alpha126Cpp_SOURCES
 set(BACKEND_RENDERER "OpenGL2" CACHE STRING "Rendering backend: OpenGL2, D3D11")
 set(BACKEND_PLATFORM "SDL2" CACHE STRING "Platform backend: SDL2")
 
+set_property(CACHE BACKEND_RENDERER PROPERTY STRINGS OpenGL2 D3D11)
+set_property(CACHE BACKEND_PLATFORM PROPERTY STRINGS SDL2)
+
+if(BACKEND_RENDERER STREQUAL "OpenGL2")
+	set(ALPHA126CPP_RENDERER_OUTPUT_DIR "opengl2")
+elseif(BACKEND_RENDERER STREQUAL "D3D11")
+	set(ALPHA126CPP_RENDERER_OUTPUT_DIR "d3d11")
+else()
+	message(FATAL_ERROR "Unsupported BACKEND_RENDERER '${BACKEND_RENDERER}'. Expected one of: OpenGL2, D3D11")
+endif()
+
+if(NOT BACKEND_PLATFORM STREQUAL "SDL2")
+	message(FATAL_ERROR "Unsupported BACKEND_PLATFORM '${BACKEND_PLATFORM}'. Expected: SDL2")
+endif()
+
 add_executable(Alpha126Cpp
 	${Alpha126Cpp_SOURCES}
 
@@ -1111,7 +1126,7 @@ endif()
 
 # Output to bin/ directory
 set_target_properties(Alpha126Cpp PROPERTIES
-	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
+	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin/${ALPHA126CPP_RENDERER_OUTPUT_DIR}"
 )
 
 # Copy resource folder to output directory next to executable

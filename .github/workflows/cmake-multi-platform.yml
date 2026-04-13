@@ -2,9 +2,9 @@ name: CMake on multiple platforms
 
 on:
   push:
-    branches: ["main"]
+    branches: ["portable"]
   pull_request:
-    branches: ["main"]
+    branches: ["portable"]
 
 jobs:
   build:
@@ -52,7 +52,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: main
           submodules: recursive
 
       - name: Setup Ninja
@@ -61,19 +60,6 @@ jobs:
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Set reusable strings
-        id: strings
-        shell: bash
-        run: |
-          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            echo "bin-dir=${{ github.workspace }}/bin" >> "$GITHUB_OUTPUT"
-            echo "exe-name=Alpha126Cpp.exe" >> "$GITHUB_OUTPUT"
-          else
-            echo "bin-dir=${{ github.workspace }}/bin" >> "$GITHUB_OUTPUT"
-            echo "exe-name=Alpha126Cpp" >> "$GITHUB_OUTPUT"
-          fi
 
       # SDL3 recommends these build deps on Linux when building with "all features enabled"
       - name: Install Linux dependencies (SDL2)
@@ -138,40 +124,22 @@ jobs:
             libglvnd-dev \
             libthai-dev
 
-      - name: Configure (Unix)
-        if: runner.os != 'Windows'
+      - name: Build backends
         shell: bash
         run: |
-          cmake -S "${{ github.workspace }}" -B "${{ steps.strings.outputs.build-output-dir }}" \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DCMAKE_VERBOSE_MAKEFILE=ON
+          cmake \
+            -DBUILD_CONFIG=${{ matrix.build_type }} \
+            -DGENERATOR=Ninja \
+            -DPARALLEL_LEVEL=4 \
+            -P "${{ github.workspace }}/cmake/BuildBackends.cmake"
 
-      - name: Configure (Windows)
-        if: runner.os == 'Windows'
+      - name: Test builds
         shell: bash
         run: |
-          cmake -S "${{ github.workspace }}" -B "${{ steps.strings.outputs.build-output-dir }}" \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DCMAKE_VERBOSE_MAKEFILE=ON
-
-      - name: Build (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          cmake --build "${{ steps.strings.outputs.build-output-dir }}" --parallel --verbose
-
-      - name: Build (Linux/Windows)
-        if: runner.os != 'macOS'
-        shell: bash
-        run: |
-          cmake --build "${{ steps.strings.outputs.build-output-dir }}" --parallel --verbose
-
-      - name: Test
-        shell: bash
-        run: |
-          ctest --test-dir "${{ steps.strings.outputs.build-output-dir }}" --output-on-failure --timeout 300 || true
+          ctest --test-dir "${{ github.workspace }}/build-opengl2" --output-on-failure --timeout 300 || true
+          if [ "$RUNNER_OS" = "Windows" ] && [ -d "${{ github.workspace }}/build-d3d11" ]; then
+            ctest --test-dir "${{ github.workspace }}/build-d3d11" --output-on-failure --timeout 300 || true
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -179,9 +147,6 @@ jobs:
         with:
           name: ${{ runner.os }}-${{ matrix.os }}-${{ matrix.build_type }}
           path: |
-            ${{ steps.strings.outputs.bin-dir }}/${{ steps.strings.outputs.exe-name }}
-            ${{ steps.strings.outputs.bin-dir }}/resource/
-            ${{ steps.strings.outputs.bin-dir }}/*.dll
-            ${{ steps.strings.outputs.bin-dir }}/*.so
-            ${{ steps.strings.outputs.bin-dir }}/*.dylib
+            ${{ github.workspace }}/bin/opengl2/
+            ${{ github.workspace }}/bin/d3d11/
           retention-days: 30

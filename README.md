@@ -36,7 +36,25 @@ to build:
 3. run cmake: `cmake ..` (or `cmake -G "Visual Studio 17 2022" ..` for visual studio)
 4. build it: `cmake --build .` (or just open the .sln in visual studio)
 
-the executable will be in `bin/Alpha126Cpp.exe` (or just `Alpha126Cpp` on linux).
+if you want a specific renderer backend, pass `-DBACKEND_RENDERER=OpenGL2` or `-DBACKEND_RENDERER=D3D11` when you configure.
+
+the executable now goes into a backend-specific folder so the builds do not overwrite each other:
+- `bin/opengl2/`
+- `bin/d3d11/`
+
+visual studio and other multi-config generators will put `Debug` or `Release` under those folders.
+
+if you want both backends built in one go, run:
+
+```bash
+cmake -P cmake/BuildBackends.cmake
+```
+
+you can override the config or generator too, for example:
+
+```bash
+cmake -DBUILD_CONFIG=Debug -DGENERATOR="Visual Studio 17 2022" -DARCHITECTURE=x64 -P cmake/BuildBackends.cmake
+```
 
 ## resources
 
