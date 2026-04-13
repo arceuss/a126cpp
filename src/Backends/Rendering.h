@@ -206,6 +206,7 @@ typedef void (*GLDEBUGPROC)(GLenum source, GLenum type, GLuint id, GLenum severi
 #define GL_SMOOTH 0x1D01
 
 // Logic op
+#define GL_COPY 0x1503
 #define GL_OR_REVERSE 0x150B
 
 // Display list

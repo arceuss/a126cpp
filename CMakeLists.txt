@@ -930,7 +930,7 @@ set(Alpha126Cpp_SOURCES
 )
 
 # Backend selection (CSE2-style compile-time dispatch)
-set(BACKEND_RENDERER "OpenGL2" CACHE STRING "Rendering backend: OpenGL2")
+set(BACKEND_RENDERER "OpenGL2" CACHE STRING "Rendering backend: OpenGL2, D3D11")
 set(BACKEND_PLATFORM "SDL2" CACHE STRING "Platform backend: SDL2")
 
 add_executable(Alpha126Cpp
@@ -959,6 +959,8 @@ target_include_directories(Alpha126Cpp PRIVATE "src")
 # Rendering backend
 if(BACKEND_RENDERER STREQUAL "OpenGL2")
 	target_sources(Alpha126Cpp PRIVATE "src/Backends/Rendering/OpenGL2.cpp")
+elseif(BACKEND_RENDERER STREQUAL "D3D11")
+	target_sources(Alpha126Cpp PRIVATE "src/Backends/Rendering/D3D11/D3D11.cpp")
 endif()
 
 # Platform backend
@@ -967,8 +969,14 @@ if(BACKEND_PLATFORM STREQUAL "SDL2")
 		"src/Backends/Platform/SDL2/SDL2_Display.cpp"
 		"src/Backends/Platform/SDL2/SDL2_Keyboard.cpp"
 		"src/Backends/Platform/SDL2/SDL2_Mouse.cpp"
-		"src/Backends/Platform/SDL2/SDL2_GLContext.cpp"
 	)
+
+	# Select context module based on rendering backend
+	if(BACKEND_RENDERER STREQUAL "D3D11")
+		target_sources(Alpha126Cpp PRIVATE "src/Backends/Platform/SDL2/SDL2_D3D11Context.cpp")
+	else()
+		target_sources(Alpha126Cpp PRIVATE "src/Backends/Platform/SDL2/SDL2_GLContext.cpp")
+	endif()
 endif()
 
 # OpenAL-Soft headers (for SoundEngine)
@@ -1043,12 +1051,16 @@ else()
 endif()
 
 # Third party
-add_subdirectory("external/glad" EXCLUDE_FROM_ALL)
+if(BACKEND_RENDERER STREQUAL "OpenGL2")
+	add_subdirectory("external/glad" EXCLUDE_FROM_ALL)
+endif()
 add_subdirectory("external/SDL2" EXCLUDE_FROM_ALL)
 
 # Link rendering backend dependencies
 if(BACKEND_RENDERER STREQUAL "OpenGL2")
 	target_link_libraries(Alpha126Cpp PRIVATE glad)
+elseif(BACKEND_RENDERER STREQUAL "D3D11")
+	target_link_libraries(Alpha126Cpp PRIVATE d3d11 dxgi d3dcompiler)
 endif()
 
 # Link platform backend dependencies

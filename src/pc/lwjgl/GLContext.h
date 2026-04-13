@@ -38,6 +38,7 @@ public:
 // Context singletons - implemented by platform backend
 SDL_Window *getWindow();
 SDL_GLContext getGLContext();
+void swapBuffers();
 
 }
 

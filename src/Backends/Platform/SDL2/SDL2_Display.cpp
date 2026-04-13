@@ -127,7 +127,7 @@ void processMessages()
 
 void swapBuffers()
 {
-	SDL_GL_SwapWindow(GLContext::detail::getWindow());
+	GLContext::detail::swapBuffers();
 }
 
 void update(bool doProcessMessages)

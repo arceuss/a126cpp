@@ -346,6 +346,10 @@ SDL_GLContext getGLContext()
 {
 	return getContext().getGLContext();
 }
+void swapBuffers()
+{
+	SDL_GL_SwapWindow(getContext().getWindow());
+}
 
 }
 

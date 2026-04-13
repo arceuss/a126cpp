@@ -199,6 +199,8 @@ void Tesselator::vertex(double x, double y, double z)
 				std::memcpy(buffer_p + 3 * 4, from_p + 3 * 4, 2 * 4);
 			if (hasColor)
 				std::memcpy(buffer_p + 5 * 4, from_p + 5 * 4, 4);
+			if (hasNormal)
+				std::memcpy(buffer_p + 6 * 4, from_p + 6 * 4, 4);
 			std::memcpy(buffer_p + 0 * 4, from_p + 0 * 4, 3 * 4);
 
 			vertices++;
