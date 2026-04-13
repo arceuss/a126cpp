@@ -4,6 +4,7 @@
 
 #include "client/MemoryTracker.h"
 #include "client/renderer/Chunk.h"
+#include "client/renderer/ChunkMeshWorker.h"
 #include "client/renderer/TileRenderer.h"
 #include "client/renderer/Textures.h"
 #include "client/renderer/OffsettedRenderList.h"
@@ -48,6 +49,7 @@ private:
 	Minecraft &mc;
 
 	std::unique_ptr<TileRenderer> tileRenderer;
+	std::unique_ptr<ChunkMeshWorker> meshWorker;
 
 	std::vector<int_t> occlusionCheckIds;
 	bool occlusionCheck = false;

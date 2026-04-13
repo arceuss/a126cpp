@@ -1713,6 +1713,22 @@ void glGenBuffers(GLsizei n, GLuint* buffers)
     }
 }
 
+void glDeleteBuffers(GLsizei n, const GLuint* buffers)
+{
+    for (int i = 0; i < n; i++)
+    {
+        auto it = g_vbos().find(buffers[i]);
+        if (it != g_vbos().end())
+        {
+            if (it->second.buffer)
+                it->second.buffer->Release();
+            g_vbos().erase(it);
+        }
+        if (state.boundVBO == buffers[i])
+            state.boundVBO = 0;
+    }
+}
+
 void glBindBuffer(GLenum target, GLuint buffer)
 {
     (void)target;

@@ -319,6 +319,7 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count);
 
 // --- VBO (GL 1.5) ---
 void glGenBuffers(GLsizei n, GLuint* buffers);
+void glDeleteBuffers(GLsizei n, const GLuint* buffers);
 void glBindBuffer(GLenum target, GLuint buffer);
 void glBufferData(GLenum target, GLsizeiptr size, const void* data, GLenum usage);
 

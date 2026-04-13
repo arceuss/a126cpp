@@ -88,6 +88,7 @@
 
 // VBO (GL 1.5)
 #undef glGenBuffers
+#undef glDeleteBuffers
 #undef glBindBuffer
 #undef glBufferData
 
@@ -201,6 +202,7 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count) { glad_glDrawArrays(m
 
 // --- VBO (GL 1.5) ---
 void glGenBuffers(GLsizei n, GLuint* buffers)                   { glad_glGenBuffers(n, buffers); }
+void glDeleteBuffers(GLsizei n, const GLuint* buffers)           { glad_glDeleteBuffers(n, buffers); }
 void glBindBuffer(GLenum target, GLuint buffer)                 { glad_glBindBuffer(target, buffer); }
 void glBufferData(GLenum target, GLsizeiptr size, const void* data, GLenum usage)
     { glad_glBufferData(target, size, data, usage); }

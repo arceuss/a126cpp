@@ -36,10 +36,10 @@
 
 
 TreeFeature tree_feature_lol;
-LargeCaveFeature large_cave_feature;
 
 RandomLevelSource::RandomLevelSource(Level &level, long_t seed) : level(level),
 	random(seed),
+	pprandom(seed),
 	lperlinNoise1(random, 16),
 	lperlinNoise2(random, 16),
 	perlinNoise1(random, 8),
@@ -52,9 +52,49 @@ RandomLevelSource::RandomLevelSource(Level &level, long_t seed) : level(level),
 
 }
 
-void RandomLevelSource::prepareHeights(int_t x, int_t z, ubyte_t *tiles, double *temperatures)
+// 4J: Fill biome arrays into scratch buffer for thread safety
+void RandomLevelSource::getBiomeBlock(BiomeSource &biomeSource, int_t x, int_t z, int_t xd, int_t zd, ChunkGenScratch &scratch)
 {
-	getHeights(buffer.data(), x * BUFFER_WIDTH, 0, z * BUFFER_WIDTH, BUFFER_WIDTH_1, BUFFER_HEIGHT_1, BUFFER_WIDTH_1);
+	biomeSource.temperatureMap.getRegion(scratch.temperatures.data(), x, z, xd, xd, 0.025, 0.025, 1.0 / 4.0);
+	biomeSource.downfallMap.getRegion(scratch.downfalls.data(), x, z, xd, xd, 0.05, 0.05, 1.0 / 3.0);
+	biomeSource.noiseMap.getRegion(scratch.noises.data(), x, z, xd, xd, 0.25, 0.25, 1.0 / 1.7);
+
+	int_t i2 = 0;
+
+	for (int_t xi = 0; xi < xd; xi++)
+	{
+		for (int_t zi = 0; zi < zd; zi++)
+		{
+			double nv = scratch.noises[i2] * 1.1 + 0.5;
+
+			double d2 = 0.01;
+			double d3 = 1.0 - d2;
+
+			double temperature = (scratch.temperatures[i2] * 0.15 + 0.7) * d3 + nv * d2;
+
+			d2 = 0.002;
+			d3 = 1.0 - d2;
+
+			double downfall = (scratch.downfalls[i2] * 0.15 + 0.5) * d3 + nv * d2;
+
+			temperature = 1.0 - (1.0 - temperature) * (1.0 - temperature);
+
+			if (temperature < 0.0) temperature = 0.0;
+			if (downfall < 0.0) downfall = 0.0;
+			if (temperature > 1.0) temperature = 1.0;
+			if (downfall > 1.0) downfall = 1.0;
+
+			scratch.temperatures[i2] = temperature;
+			scratch.downfalls[i2] = downfall;
+
+			i2++;
+		}
+	}
+}
+
+void RandomLevelSource::prepareHeights(int_t x, int_t z, ubyte_t *tiles, double *temperatures, ChunkGenScratch &scratch)
+{
+	getHeights(scratch.buffer.data(), x * BUFFER_WIDTH, 0, z * BUFFER_WIDTH, BUFFER_WIDTH_1, BUFFER_HEIGHT_1, BUFFER_WIDTH_1, temperatures, scratch.downfalls.data(), scratch);
 
 	for (int_t xi = 0; xi < BUFFER_WIDTH; xi++)
 	{
@@ -64,14 +104,14 @@ void RandomLevelSource::prepareHeights(int_t x, int_t z, ubyte_t *tiles, double 
 			{
 				double ddiv = 0.125;
 
-				double v000 = buffer[((xi + 0) * BUFFER_WIDTH_1 + zi + 0) * BUFFER_HEIGHT_1 + yi + 0];
-				double v010 = buffer[((xi + 0) * BUFFER_WIDTH_1 + zi + 1) * BUFFER_HEIGHT_1 + yi + 0];
-				double v100 = buffer[((xi + 1) * BUFFER_WIDTH_1 + zi + 0) * BUFFER_HEIGHT_1 + yi + 0];
-				double v110 = buffer[((xi + 1) * BUFFER_WIDTH_1 + zi + 1) * BUFFER_HEIGHT_1 + yi + 0];
-				double d001 = (buffer[((xi + 0) * BUFFER_WIDTH_1 + zi + 0) * BUFFER_HEIGHT_1 + yi + 1] - v000) * ddiv;
-				double d011 = (buffer[((xi + 0) * BUFFER_WIDTH_1 + zi + 1) * BUFFER_HEIGHT_1 + yi + 1] - v010) * ddiv;
-				double d101 = (buffer[((xi + 1) * BUFFER_WIDTH_1 + zi + 0) * BUFFER_HEIGHT_1 + yi + 1] - v100) * ddiv;
-				double d111 = (buffer[((xi + 1) * BUFFER_WIDTH_1 + zi + 1) * BUFFER_HEIGHT_1 + yi + 1] - v110) * ddiv;
+				double v000 = scratch.buffer[((xi + 0) * BUFFER_WIDTH_1 + zi + 0) * BUFFER_HEIGHT_1 + yi + 0];
+				double v010 = scratch.buffer[((xi + 0) * BUFFER_WIDTH_1 + zi + 1) * BUFFER_HEIGHT_1 + yi + 0];
+				double v100 = scratch.buffer[((xi + 1) * BUFFER_WIDTH_1 + zi + 0) * BUFFER_HEIGHT_1 + yi + 0];
+				double v110 = scratch.buffer[((xi + 1) * BUFFER_WIDTH_1 + zi + 1) * BUFFER_HEIGHT_1 + yi + 0];
+				double d001 = (scratch.buffer[((xi + 0) * BUFFER_WIDTH_1 + zi + 0) * BUFFER_HEIGHT_1 + yi + 1] - v000) * ddiv;
+				double d011 = (scratch.buffer[((xi + 0) * BUFFER_WIDTH_1 + zi + 1) * BUFFER_HEIGHT_1 + yi + 1] - v010) * ddiv;
+				double d101 = (scratch.buffer[((xi + 1) * BUFFER_WIDTH_1 + zi + 0) * BUFFER_HEIGHT_1 + yi + 1] - v100) * ddiv;
+				double d111 = (scratch.buffer[((xi + 1) * BUFFER_WIDTH_1 + zi + 1) * BUFFER_HEIGHT_1 + yi + 1] - v110) * ddiv;
 
 				for (int_t cyi = 0; cyi < CHUNK_HEIGHT; cyi++)
 				{
@@ -97,29 +137,21 @@ void RandomLevelSource::prepareHeights(int_t x, int_t z, ubyte_t *tiles, double 
 							double temperature = temperatures[(cxi + CHUNK_WIDTH * xi) * 16 + (czi + zi * CHUNK_WIDTH)];
 
 							int_t tile = 0;
-							
-							// Alpha: Place water at Y < 64 (SEA_LEVEL + 1) (ChunkProviderGenerate.java:81-87)
-							// Alpha: generateTerrain() places water/ice during terrain generation
+
 							int_t yCoord = yi * CHUNK_HEIGHT + cyi;
 							if (yCoord < Level::SEA_LEVEL + 1)
 							{
-								// Alpha: Ice generation logic (ChunkProviderGenerate.java:81-87)
-								// Condition: var53 < 0.5D && var13 * 8 + var32 >= var7 - 1
-								// var53 = temperature, var7 = 64 (SEA_LEVEL + 1)
-								// So: temperature < 0.5 AND Y >= 63 (SEA_LEVEL)
-								// Alpha uses raw temperature for this check, but we use biome classification for accuracy
 								int_t tempIndex = (cxi + CHUNK_WIDTH * xi) * 16 + (czi + zi * CHUNK_WIDTH);
-								double downfall = level.getBiomeSource().downfalls[tempIndex];
+								double downfall = scratch.downfalls[tempIndex];
 								BiomeType biome = BiomeSource::getBiome(static_cast<float>(temperature), static_cast<float>(downfall));
-								
-								// Alpha: Only freeze at surface (Y == 63, SEA_LEVEL) in cold biomes
+
 								if (BiomeSource::isCold(biome) && yCoord >= Level::SEA_LEVEL)
 								{
-									tile = Tile::ice.id;  // Alpha: Block.blockIce.blockID (ID 79)
+									tile = Tile::ice.id;
 								}
 								else
 								{
-									tile = Tile::calmWater.id;  // Alpha: Block.waterMoving.blockID (ID 9)
+									tile = Tile::calmWater.id;
 								}
 							}
 
@@ -146,23 +178,23 @@ void RandomLevelSource::prepareHeights(int_t x, int_t z, ubyte_t *tiles, double 
 	}
 }
 
-void RandomLevelSource::buildSurfaces(int_t x, int_t z, ubyte_t *tiles)
+void RandomLevelSource::buildSurfaces(int_t x, int_t z, ubyte_t *tiles, Random &rng, ChunkGenScratch &scratch)
 {
 	int_t seaLevel = Level::SEA_LEVEL + 1;
 
 	double scale = 1.0 / 32.0;
-	perlinNoise2.getRegion(sandBuffer.data(), x * 16, z * 16, 0.0, 16, 16, 1, scale, scale, 1.0);
-	perlinNoise2.getRegion(gravelBuffer.data(), z * 16, 109.0134, x * 16, 16, 1, 16, scale, 1.0, scale);
-	perlinNoise3.getRegion(depthBuffer.data(), x * 16, z * 16, 0.0, 16, 16, 1, scale * 2.0, scale * 2.0, scale * 2.0);
+	perlinNoise2.getRegion(scratch.sandBuffer.data(), x * 16, z * 16, 0.0, 16, 16, 1, scale, scale, 1.0);
+	perlinNoise2.getRegion(scratch.gravelBuffer.data(), z * 16, 109.0134, x * 16, 16, 1, 16, scale, 1.0, scale);
+	perlinNoise3.getRegion(scratch.depthBuffer.data(), x * 16, z * 16, 0.0, 16, 16, 1, scale * 2.0, scale * 2.0, scale * 2.0);
 
 	for (int_t x = 0; x < 16; x++)
 	{
 		for (int_t z = 0; z < 16; z++)
 		{
-			bool isSand = (sandBuffer[x + z * 16] + random.nextDouble() * 0.2) > 0.0;
-			bool isGravel = (gravelBuffer[x + z * 16] + random.nextDouble() * 0.2) > 3.0;
+			bool isSand = (scratch.sandBuffer[x + z * 16] + rng.nextDouble() * 0.2) > 0.0;
+			bool isGravel = (scratch.gravelBuffer[x + z * 16] + rng.nextDouble() * 0.2) > 3.0;
 
-			int_t depth = static_cast<int_t>(depthBuffer[x + z * 16] / 3.0 + 3.0 + random.nextDouble() * 0.25);
+			int_t depth = static_cast<int_t>(scratch.depthBuffer[x + z * 16] / 3.0 + 3.0 + rng.nextDouble() * 0.25);
 			int_t depthI = 0;
 
 			int_t topTile = Tile::grass.id;
@@ -171,9 +203,9 @@ void RandomLevelSource::buildSurfaces(int_t x, int_t z, ubyte_t *tiles)
 			for (int_t y = Level::DEPTH - 1; y >= 0; y--)
 			{
 				int_t i = (x * 16 + z) * Level::DEPTH + y;
-				
+
 				// Bedrock
-				if (y <= 0 + random.nextInt(5))
+				if (y <= 0 + rng.nextInt(5))
 				{
 					continue;
 				}
@@ -224,39 +256,46 @@ void RandomLevelSource::buildSurfaces(int_t x, int_t z, ubyte_t *tiles)
 	}
 }
 
-std::shared_ptr<LevelChunk> RandomLevelSource::getChunk(int_t x, int_t z)
+std::shared_ptr<LevelChunk> RandomLevelSource::generateTerrain(int_t x, int_t z, Random &rng, ChunkGenScratch &scratch, LargeCaveFeature &caveFeature)
 {
-	random.setSeed(x * 341873128712LL + z * 132897987541LL);
+	rng.setSeed(x * 341873128712LL + z * 132897987541LL);
 
 	std::shared_ptr<LevelChunk> chunk = Util::make_shared<LevelChunk>(level, x, z);
 
-	level.getBiomeSource().getBiomeBlock(x * 16, z * 16, 16, 16);
+	// 4J: Use per-task scratch buffers instead of BiomeSource member arrays
+	getBiomeBlock(level.getBiomeSource(), x * 16, z * 16, 16, 16, scratch);
 
-	double *temperatures = level.getBiomeSource().temperatures.data();
-	prepareHeights(x, z, chunk->blocks.data(), temperatures);
+	prepareHeights(x, z, chunk->blocks.data(), scratch.temperatures.data(), scratch);
+	buildSurfaces(x, z, chunk->blocks.data(), rng, scratch);
 
-	buildSurfaces(x, z, chunk->blocks.data());
+	// Per-task cave feature instance (has mutable Random)
+	caveFeature.apply(*this, level, x, z, chunk->blocks);
 
-	large_cave_feature.apply(*this, level, x, z, chunk->blocks);
+	return chunk;
+}
 
+std::shared_ptr<LevelChunk> RandomLevelSource::getChunk(int_t x, int_t z)
+{
+	// Synchronous path: uses main-thread scratch
+	ChunkGenScratch scratch;
+	LargeCaveFeature caveFeature;
+
+	auto chunk = generateTerrain(x, z, random, scratch, caveFeature);
 	chunk->recalcHeightmap();
 
 	return chunk;
 }
 
-void RandomLevelSource::getHeights(double *out, int_t x, int_t y, int_t z, int_t xd, int_t yd, int_t zd)
+void RandomLevelSource::getHeights(double *out, int_t x, int_t y, int_t z, int_t xd, int_t yd, int_t zd, double *temperatures, double *downfalls, ChunkGenScratch &scratch)
 {
 	double xscale = 684.412;
 	double yscale = 684.412;
 
-	double *temperatures = level.getBiomeSource().temperatures.data();
-	double *downfalls = level.getBiomeSource().downfalls.data();
-
-	scaleNoise.getRegion(sr.data(), x, z, xd, zd, 1.121, 1.121, 0.5);
-	depthNoise.getRegion(dr.data(), x, z, xd, zd, 200.0, 200.0, 0.5);
-	perlinNoise1.getRegion(pnr.data(), x, y, z, xd, yd, zd, xscale / 80.0, yscale / 160.0, xscale / 80.0);
-	lperlinNoise1.getRegion(ar.data(), x, y, z, xd, yd, zd, xscale, yscale, xscale);
-	lperlinNoise2.getRegion(br.data(), x, y, z, xd, yd, zd, xscale, yscale, xscale);
+	scaleNoise.getRegion(scratch.sr.data(), x, z, xd, zd, 1.121, 1.121, 0.5);
+	depthNoise.getRegion(scratch.dr.data(), x, z, xd, zd, 200.0, 200.0, 0.5);
+	perlinNoise1.getRegion(scratch.pnr.data(), x, y, z, xd, yd, zd, xscale / 80.0, yscale / 160.0, xscale / 80.0);
+	lperlinNoise1.getRegion(scratch.ar.data(), x, y, z, xd, yd, zd, xscale, yscale, xscale);
+	lperlinNoise2.getRegion(scratch.br.data(), x, y, z, xd, yd, zd, xscale, yscale, xscale);
 
 	int_t i3 = 0;
 	int_t i2 = 0;
@@ -277,11 +316,11 @@ void RandomLevelSource::getHeights(double *out, int_t x, int_t y, int_t z, int_t
 			factor *= factor;
 			factor = 1.0 - factor;
 
-			double sv = (sr[i2] + 256.0) / 512.0;
+			double sv = (scratch.sr[i2] + 256.0) / 512.0;
 			sv *= factor;
 			if (sv > 1.0) sv = 1.0;
 
-			double dv = dr[i2] / 8000.0;
+			double dv = scratch.dr[i2] / 8000.0;
 			if (dv < 0.0) dv = -dv * 0.3;
 			dv = dv * 3.0 - 2.0;
 
@@ -312,13 +351,13 @@ void RandomLevelSource::getHeights(double *out, int_t x, int_t y, int_t z, int_t
 			for (int_t yi = 0; yi < yd; yi++)
 			{
 				double final = 0.0;
-				
+
 				double heightFactor = (yi - height) * 12.0 / sv;
 				if (heightFactor < 0.0) heightFactor *= 4.0;
 
-				double av = ar[i3] / 512.0;
-				double bv = br[i3] / 512.0;
-				double pnv = (pnr[i3] / 10.0 + 1.0) / 2.0;
+				double av = scratch.ar[i3] / 512.0;
+				double bv = scratch.br[i3] / 512.0;
+				double pnv = (scratch.pnr[i3] / 10.0 + 1.0) / 2.0;
 
 				if (pnv < 0.0)
 					final = av;
@@ -353,168 +392,153 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	int_t cx = x * 16;
 	int_t cz = z * 16;
 
-	// Alpha: Set RNG seed for deterministic decoration (ChunkProviderGenerate.java:307-310)
-	random.setSeed(level.seed);
-	long_t cs0 = random.nextLong() / 2LL * 2LL + 1LL;
-	long_t cs1 = random.nextLong() / 2LL * 2LL + 1LL;
-	random.setSeed((x * cs0 + z * cs1) ^ level.seed);
-	
+	// 4J: Use pprandom for postProcess so it can run in parallel with getChunk
+	pprandom.setSeed(level.seed);
+	long_t cs0 = pprandom.nextLong() / 2LL * 2LL + 1LL;
+	long_t cs1 = pprandom.nextLong() / 2LL * 2LL + 1LL;
+	pprandom.setSeed((x * cs0 + z * cs1) ^ level.seed);
+
 	// Disable neighbor updates during world generation to prevent stack overflow
-	// Fluid blocks trigger neighbor updates which can cascade infinitely during generation
 	bool oldNoNeighborUpdate = level.noNeighborUpdate;
 	level.noNeighborUpdate = true;
 
-	// Lakes (water) - 1/4 chance (ChunkProviderGenerate.java:315-320)
-	if (random.nextInt(4) == 0)
+	// Lakes (water) - 1/4 chance
+	if (pprandom.nextInt(4) == 0)
 	{
-		int_t lakeX = cx + random.nextInt(16) + 8;
-		int_t lakeY = random.nextInt(128);
-		int_t lakeZ = cz + random.nextInt(16) + 8;
-		WorldGenLakes waterLake(8);  // Alpha: Block.waterMoving.blockID (ID 8 - flowing water)
-		waterLake.generate(level, random, lakeX, lakeY, lakeZ);
+		int_t lakeX = cx + pprandom.nextInt(16) + 8;
+		int_t lakeY = pprandom.nextInt(128);
+		int_t lakeZ = cz + pprandom.nextInt(16) + 8;
+		WorldGenLakes waterLake(8);
+		waterLake.generate(level, pprandom, lakeX, lakeY, lakeZ);
 	}
-	
-	// Lava lakes - 1/8 chance (ChunkProviderGenerate.java:322-329)
-	if (random.nextInt(8) == 0)
+
+	// Lava lakes - 1/8 chance
+	if (pprandom.nextInt(8) == 0)
 	{
-		int_t lakeX = cx + random.nextInt(16) + 8;
-		int_t lakeY = random.nextInt(random.nextInt(120) + 8);  // Alpha: nested random.nextInt
-		int_t lakeZ = cz + random.nextInt(16) + 8;
-		// Alpha: Only place if Y < 64 or 1/10 chance (line 326)
-		if (lakeY < 64 || random.nextInt(10) == 0)
+		int_t lakeX = cx + pprandom.nextInt(16) + 8;
+		int_t lakeY = pprandom.nextInt(pprandom.nextInt(120) + 8);
+		int_t lakeZ = cz + pprandom.nextInt(16) + 8;
+		if (lakeY < 64 || pprandom.nextInt(10) == 0)
 		{
-			WorldGenLakes lavaLake(10);  // Alpha: Block.lavaMoving.blockID (ID 10 - flowing lava)
-			lavaLake.generate(level, random, lakeX, lakeY, lakeZ);
+			WorldGenLakes lavaLake(10);
+			lavaLake.generate(level, pprandom, lakeX, lakeY, lakeZ);
 		}
 	}
-	
-	// Dungeons (MonsterRoomFeature) - 8 attempts (Beta RandomLevelSource.java:421-425)
-	// Beta: MonsterRoomFeature.place() - 8 attempts per chunk
+
+	// Dungeons - 8 attempts
 	for (int_t i = 0; i < 8; ++i)
 	{
-		int_t dungeonX = cx + random.nextInt(16) + 8;
-		int_t dungeonY = random.nextInt(128);
-		int_t dungeonZ = cz + random.nextInt(16) + 8;
+		int_t dungeonX = cx + pprandom.nextInt(16) + 8;
+		int_t dungeonY = pprandom.nextInt(128);
+		int_t dungeonZ = cz + pprandom.nextInt(16) + 8;
 		MonsterRoomFeature dungeon;
-		dungeon.place(level, random, dungeonX, dungeonY, dungeonZ);
+		dungeon.place(level, pprandom, dungeonX, dungeonY, dungeonZ);
 	}
 
-	// Clay - 10 attempts, vein size 32 (ChunkProviderGenerate.java:339-344)
+	// Clay - 10 attempts, vein size 32
 	for (int_t i = 0; i < 10; ++i)
 	{
-		WorldGenMinable clayVein(82, 32);  // Clay block ID 82
-		clayVein.generate(level, random, cx + random.nextInt(16), random.nextInt(128), cz + random.nextInt(16));
+		WorldGenMinable clayVein(82, 32);
+		clayVein.generate(level, pprandom, cx + pprandom.nextInt(16), pprandom.nextInt(128), cz + pprandom.nextInt(16));
 	}
 
-	// Dirt veins - 20 attempts, vein size 32 (ChunkProviderGenerate.java:346-351)
+	// Dirt veins - 20 attempts, vein size 32
 	for (int_t i = 0; i < 20; ++i)
 	{
 		WorldGenMinable dirtVein(Tile::dirt.id, 32);
-		dirtVein.generate(level, random, cx + random.nextInt(16), random.nextInt(128), cz + random.nextInt(16));
+		dirtVein.generate(level, pprandom, cx + pprandom.nextInt(16), pprandom.nextInt(128), cz + pprandom.nextInt(16));
 	}
 
-	// Gravel veins - 10 attempts, vein size 32 (ChunkProviderGenerate.java:353-358)
+	// Gravel veins - 10 attempts, vein size 32
 	for (int_t i = 0; i < 10; ++i)
 	{
 		WorldGenMinable gravelVein(Tile::gravel.id, 32);
-		gravelVein.generate(level, random, cx + random.nextInt(16), random.nextInt(128), cz + random.nextInt(16));
+		gravelVein.generate(level, pprandom, cx + pprandom.nextInt(16), pprandom.nextInt(128), cz + pprandom.nextInt(16));
 	}
 
-	// Coal ore - 20 attempts, vein size 16, Y 0-127 (ChunkProviderGenerate.java:360-365)
+	// Coal ore - 20 attempts, vein size 16, Y 0-127
 	for (int_t i = 0; i < 20; ++i)
 	{
 		WorldGenMinable coalVein(Tile::getOreCoalId(), 16);
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (coalVein.generate(level, random, cx + random.nextInt(16), random.nextInt(128), cz + random.nextInt(16)))
+		if (coalVein.generate(level, pprandom, cx + pprandom.nextInt(16), pprandom.nextInt(128), cz + pprandom.nextInt(16)))
 			oreBlocksPlaced += 16;
 		#else
-		coalVein.generate(level, random, cx + random.nextInt(16), random.nextInt(128), cz + random.nextInt(16));
+		coalVein.generate(level, pprandom, cx + pprandom.nextInt(16), pprandom.nextInt(128), cz + pprandom.nextInt(16));
 		#endif
 	}
 
-	// Iron ore - 20 attempts, vein size 8, Y 0-63 (ChunkProviderGenerate.java:367-372)
+	// Iron ore - 20 attempts, vein size 8, Y 0-63
 	for (int_t i = 0; i < 20; ++i)
 	{
 		WorldGenMinable ironVein(Tile::getOreIronId(), 8);
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (ironVein.generate(level, random, cx + random.nextInt(16), random.nextInt(64), cz + random.nextInt(16)))
+		if (ironVein.generate(level, pprandom, cx + pprandom.nextInt(16), pprandom.nextInt(64), cz + pprandom.nextInt(16)))
 			oreBlocksPlaced += 8;
 		#else
-		ironVein.generate(level, random, cx + random.nextInt(16), random.nextInt(64), cz + random.nextInt(16));
+		ironVein.generate(level, pprandom, cx + pprandom.nextInt(16), pprandom.nextInt(64), cz + pprandom.nextInt(16));
 		#endif
 	}
 
-	// Gold ore - 2 attempts, vein size 8, Y 0-31 (ChunkProviderGenerate.java:374-379)
+	// Gold ore - 2 attempts, vein size 8, Y 0-31
 	for (int_t i = 0; i < 2; ++i)
 	{
 		WorldGenMinable goldVein(Tile::getOreGoldId(), 8);
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (goldVein.generate(level, random, cx + random.nextInt(16), random.nextInt(32), cz + random.nextInt(16)))
+		if (goldVein.generate(level, pprandom, cx + pprandom.nextInt(16), pprandom.nextInt(32), cz + pprandom.nextInt(16)))
 			oreBlocksPlaced += 8;
 		#else
-		goldVein.generate(level, random, cx + random.nextInt(16), random.nextInt(32), cz + random.nextInt(16));
+		goldVein.generate(level, pprandom, cx + pprandom.nextInt(16), pprandom.nextInt(32), cz + pprandom.nextInt(16));
 		#endif
 	}
 
-	// Beta: Redstone ore - 8 attempts, vein size 7, Y 0-15 (RandomLevelSource.java:470-475)
+	// Redstone ore - 8 attempts, vein size 7, Y 0-15
 	for (int_t var32 = 0; var32 < 8; var32++)
 	{
-		int_t var44 = cx + random.nextInt(16);
-		int_t var56 = random.nextInt(16);
-		int_t var73 = cz + random.nextInt(16);
-		// Beta: new OreFeature(Tile.redStoneOre.id, 7).place(this.level, this.random, var44, var56, var73) (RandomLevelSource.java:474)
+		int_t var44 = cx + pprandom.nextInt(16);
+		int_t var56 = pprandom.nextInt(16);
+		int_t var73 = cz + pprandom.nextInt(16);
 		OreFeature redstoneOre(Tile::redStoneOre.id, 7);
-		redstoneOre.place(level, random, var44, var56, var73);
+		redstoneOre.place(level, pprandom, var44, var56, var73);
 	}
 
-	// Beta: Diamond ore (called emeraldOre internally) - 1 attempt, vein size 7, Y 0-15 (RandomLevelSource.java:477-482)
-	// Note: Beta 1.2 uses Tile.emeraldOre (ID 56) which is actually Diamond ore (descriptionId "oreDiamond")
+	// Diamond ore - 1 attempt, vein size 7, Y 0-15
 	for (int_t var33 = 0; var33 < 1; var33++)
 	{
-		int_t var45 = cx + random.nextInt(16);
-		int_t var57 = random.nextInt(16);
-		int_t var74 = cz + random.nextInt(16);
-		// Beta: new OreFeature(Tile.emeraldOre.id, 7).place(this.level, this.random, var45, var57, var74) (RandomLevelSource.java:481)
-		// Tile.emeraldOre is ID 56, which is Diamond ore (oreDiamond)
-		OreFeature(Tile::oreDiamond.id, 7).place(level, random, var45, var57, var74);
+		int_t var45 = cx + pprandom.nextInt(16);
+		int_t var57 = pprandom.nextInt(16);
+		int_t var74 = cz + pprandom.nextInt(16);
+		OreFeature(Tile::oreDiamond.id, 7).place(level, pprandom, var45, var57, var74);
 	}
 
-	// Trees - Alpha order with biome adjustments (ChunkProviderGenerate.java:395-446)
+	// Trees
 	double scale = 0.5;
-	int_t treeCount = (int_t)((forestNoise.getValue(cx * scale, cz * scale) / 8.0 + random.nextDouble() * 4.0 + 4.0) / 3.0);
-	
-	// Alpha: Base tree count adjustments
-	if (random.nextInt(10) == 0)
+	int_t treeCount = (int_t)((forestNoise.getValue(cx * scale, cz * scale) / 8.0 + pprandom.nextDouble() * 4.0 + 4.0) / 3.0);
+
+	if (pprandom.nextInt(10) == 0)
 		treeCount++;
-	
-	// TODO: Biome-based tree count adjustments (forest, rainforest, seasonalForest, taiga, desert, tundra, plains)
-	// For now, use base count
-	// treeCount += 5; // Default forest bonus
-	
-	// Alpha: 10% chance for big tree (ChunkProviderGenerate.java:431-433)
+
 	WorldGenBigTree bigTree;
 	TreeFeature normalTree;
-	
+
 	for (int_t i = 0; i < treeCount; ++i)
 	{
-		int_t tx = cx + random.nextInt(16) + 8;
-		int_t tz = cz + random.nextInt(16) + 8;
-		// Alpha: Use getHeightValue (ChunkProviderGenerate.java:445)
+		int_t tx = cx + pprandom.nextInt(16) + 8;
+		int_t tz = cz + pprandom.nextInt(16) + 8;
 		int_t ty = level.getHeightmap(tx, tz);
-		
-		// Alpha: 10% chance for big tree (ChunkProviderGenerate.java:431-433)
-		if (random.nextInt(10) == 0)
+
+		if (pprandom.nextInt(10) == 0)
 		{
 			bigTree.init(1.0, 1.0, 1.0);
-			bigTree.place(level, random, tx, ty, tz);
+			bigTree.place(level, pprandom, tx, ty, tz);
 		}
 		else
 		{
-			normalTree.place(level, random, tx, ty, tz);
+			normalTree.place(level, pprandom, tx, ty, tz);
 		}
 	}
 
-	// Flowers (yellow) - 2 attempts (ChunkProviderGenerate.java:449-454)
+	// Flowers (yellow) - 2 attempts
 	#ifdef ENABLE_DECORATION_DEBUG
 	int_t flowersYellowPlaced = 0;
 	int_t flowersRedPlaced = 0;
@@ -523,54 +547,54 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	{
 		WorldGenFlowers yellowFlowers(Tile::getPlantYellowId());
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (yellowFlowers.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (yellowFlowers.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8))
 			flowersYellowPlaced++;
 		#else
-		yellowFlowers.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		yellowFlowers.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8);
 		#endif
 	}
 
-	// Flowers (red) - 1/2 chance (ChunkProviderGenerate.java:456-461)
-	if (random.nextInt(2) == 0)
+	// Flowers (red) - 1/2 chance
+	if (pprandom.nextInt(2) == 0)
 	{
 		WorldGenFlowers redFlowers(Tile::getPlantRedId());
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (redFlowers.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (redFlowers.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8))
 			flowersRedPlaced++;
 		#else
-		redFlowers.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		redFlowers.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8);
 		#endif
 	}
 
-	// Mushrooms (brown) - 1/4 chance (ChunkProviderGenerate.java:463-468)
+	// Mushrooms (brown) - 1/4 chance
 	#ifdef ENABLE_DECORATION_DEBUG
 	int_t mushroomsBrownPlaced = 0;
 	int_t mushroomsRedPlaced = 0;
 	#endif
-	if (random.nextInt(4) == 0)
+	if (pprandom.nextInt(4) == 0)
 	{
 		WorldGenFlowers brownMushrooms(Tile::getMushroomBrownId());
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (brownMushrooms.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (brownMushrooms.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8))
 			mushroomsBrownPlaced++;
 		#else
-		brownMushrooms.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		brownMushrooms.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8);
 		#endif
 	}
 
-	// Mushrooms (red) - 1/8 chance (ChunkProviderGenerate.java:470-475)
-	if (random.nextInt(8) == 0)
+	// Mushrooms (red) - 1/8 chance
+	if (pprandom.nextInt(8) == 0)
 	{
 		WorldGenFlowers redMushrooms(Tile::getMushroomRedId());
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (redMushrooms.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (redMushrooms.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8))
 			mushroomsRedPlaced++;
 		#else
-		redMushrooms.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		redMushrooms.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8);
 		#endif
 	}
 
-	// Reeds (sugar cane) - 10 attempts (ChunkProviderGenerate.java:477-482)
+	// Reeds (sugar cane) - 10 attempts
 	#ifdef ENABLE_DECORATION_DEBUG
 	int_t reedsPlaced = 0;
 	#endif
@@ -578,93 +602,83 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	{
 		WorldGenReed reeds;
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (reeds.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (reeds.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8))
 			reedsPlaced++;
 		#else
-		reeds.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		reeds.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8);
 		#endif
 	}
 
-	// TODO: Pumpkins - 1/32 chance (ChunkProviderGenerate.java:484-489)
-
-	// Cactus - 10 attempts if desert biome (ChunkProviderGenerate.java:491-502)
+	// Cactus
 	#ifdef ENABLE_DECORATION_DEBUG
 	int_t cactusPlaced = 0;
 	int_t oreBlocksPlaced = 0;
 	#endif
 	int_t cactusCount = 0;
-	// Alpha: Check if chunk is in desert biome (MobSpawnerBase.desert) (ChunkProviderGenerate.java:492-493)
-	// Check center of chunk for biome classification
 	BiomeType centerBiome = level.getBiomeSource().getBiomeAt(cx + 8, cz + 8);
 	if (BiomeSource::isDesert(centerBiome))
 	{
-		cactusCount = 10;  // Alpha: var16 += 10 if biome == desert
+		cactusCount = 10;
 	}
 	for (int_t i = 0; i < cactusCount; ++i)
 	{
 		WorldGenCactus cactus;
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (cactus.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (cactus.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8))
 			cactusPlaced++;
 		#else
-		cactus.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		cactus.generate(level, pprandom, cx + pprandom.nextInt(16) + 8, pprandom.nextInt(128), cz + pprandom.nextInt(16) + 8);
 		#endif
 	}
 
-	// Water liquids - 50 attempts (ChunkProviderGenerate.java:504-509)
+	// Water liquids - 50 attempts
 	int_t waterSpringAttempts = 0;
 	int_t waterSpringSuccess = 0;
 	for (int_t i = 0; i < 50; ++i)
 	{
-		int_t liquidX = cx + random.nextInt(16) + 8;
-		int_t liquidY = random.nextInt(random.nextInt(120) + 8);  // Alpha: nested random.nextInt
-		int_t liquidZ = cz + random.nextInt(16) + 8;
-		WorldGenLiquids waterSpring(8);  // Alpha: Block.waterStill.blockID (ID 8)
+		int_t liquidX = cx + pprandom.nextInt(16) + 8;
+		int_t liquidY = pprandom.nextInt(pprandom.nextInt(120) + 8);
+		int_t liquidZ = cz + pprandom.nextInt(16) + 8;
+		WorldGenLiquids waterSpring(8);
 		waterSpringAttempts++;
-		bool success = waterSpring.generate(level, random, liquidX, liquidY, liquidZ);
+		bool success = waterSpring.generate(level, pprandom, liquidX, liquidY, liquidZ);
 		if (success)
 			waterSpringSuccess++;
 	}
-	
-	// Lava liquids - 20 attempts (ChunkProviderGenerate.java:511-516)
+
+	// Lava liquids - 20 attempts
 	for (int_t i = 0; i < 20; ++i)
 	{
-		int_t liquidX = cx + random.nextInt(16) + 8;
-		int_t liquidY = random.nextInt(random.nextInt(random.nextInt(112) + 8) + 8);  // Alpha: triple nested random.nextInt
-		int_t liquidZ = cz + random.nextInt(16) + 8;
-		WorldGenLiquids lavaSpring(10);  // Alpha: Block.lavaStill.blockID (ID 10)
-		lavaSpring.generate(level, random, liquidX, liquidY, liquidZ);
+		int_t liquidX = cx + pprandom.nextInt(16) + 8;
+		int_t liquidY = pprandom.nextInt(pprandom.nextInt(pprandom.nextInt(112) + 8) + 8);
+		int_t liquidZ = cz + pprandom.nextInt(16) + 8;
+		WorldGenLiquids lavaSpring(10);
+		lavaSpring.generate(level, pprandom, liquidX, liquidY, liquidZ);
 	}
-	
-	// Snow placement - Beta 1.2 (RandomLevelSource.java:602-619)
-	// Beta: Get temperatures for chunk (16x16) using getTemperatureBlock()
+
+	// Snow placement
 	std::array<double, 16 * 16> &temperatures = level.getBiomeSource().getTemperatureBlock(cx + 8, cz + 8, 16, 16);
-	
+
 	for (int_t sx = cx + 8; sx < cx + 8 + 16; ++sx)
 	{
 		for (int_t sz = cz + 8; sz < cz + 8 + 16; ++sz)
 		{
-			// Beta: Calculate local index (RandomLevelSource.java:606-607)
 			int_t var102 = sx - (cx + 8);
 			int_t var105 = sz - (cz + 8);
-			// Beta: Get temperature from array (RandomLevelSource.java:609)
-			// Beta: Get top solid block (RandomLevelSource.java:608)
 			int_t var20 = level.getTopSolidBlock(sx, sz);
-			// Beta: Adjust temperature based on height (RandomLevelSource.java:609)
 			double var21 = temperatures[var102 * 16 + var105] - (static_cast<double>(var20) - 64.0) / 64.0 * 0.3;
-			// Beta: Place snow if conditions met (RandomLevelSource.java:610-616)
 			if (var21 < 0.5 && var20 > 0 && var20 < 128 && level.isEmptyTile(sx, var20, sz) &&
 			    level.getMaterial(sx, var20 - 1, sz).blocksMotion() &&
 			    &level.getMaterial(sx, var20 - 1, sz) != &Material::ice)
 			{
-				level.setTileAndData(sx, var20, sz, Tile::snow.id, 0);  // Beta: Tile.topSnow.id (ID 78)
+				level.setTileAndData(sx, var20, sz, Tile::snow.id, 0);
 			}
 		}
 	}
-	
+
 	// Restore neighbor update flag
 	level.noNeighborUpdate = oldNoNeighborUpdate;
-	
+
 	#ifdef ENABLE_DECORATION_DEBUG
 	std::cout << "Decoration debug [chunk " << x << "," << z << "]: "
 	          << "flowers(yellow=" << flowersYellowPlaced << ",red=" << flowersRedPlaced << "), "

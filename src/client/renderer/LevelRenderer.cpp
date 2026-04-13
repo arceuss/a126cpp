@@ -8,6 +8,7 @@
 #include "client/Minecraft.h"
 #include "world/entity/item/EntityItem.h"
 #include "client/renderer/DirtyChunkSorter.h"
+#include "client/renderer/ChunkSnapshot.h"
 #include "client/renderer/DistanceChunkSorter.h"
 #include "client/renderer/entity/EntityRenderDispatcher.h"
 #include "client/renderer/tileentity/TileEntityRenderDispatcher.h"
@@ -145,6 +146,12 @@ void LevelRenderer::setLevel(std::shared_ptr<Level> level)
 {
 	this->tileRenderer.reset();
 
+	if (meshWorker)
+	{
+		meshWorker->stop();
+		meshWorker.reset();
+	}
+
 	if (this->level != nullptr)
 		this->level->removeListener(*this);
 
@@ -169,6 +176,17 @@ void LevelRenderer::allChanged()
 	Tile::leaves.setFancy(mc.options.fancyGraphics);
 
 	lastViewDistance = mc.options.viewDistance;
+
+	// Start the mesh worker if not already running
+	if (!meshWorker)
+	{
+		meshWorker = Util::make_unique<ChunkMeshWorker>();
+		meshWorker->start();
+	}
+	else
+	{
+		meshWorker->clearAll();
+	}
 
 	for (auto &chunk : chunks)
 		chunk->remove();
@@ -497,8 +515,9 @@ int_t LevelRenderer::renderChunks(int_t from, int_t to, int_t layer, double alph
 
 		if (!sortedChunks[i]->empty[layer] && sortedChunks[i]->visible && sortedChunks[i]->occlusion_visible)
 		{
+			const ChunkVBOEntry *vboEntry = sortedChunks[i]->getVBOEntry(layer);
 			int_t list = sortedChunks[i]->getList(layer);
-			if (list >= 0)
+			if (list >= 0 || vboEntry != nullptr)
 			{
 				renderChunksList.push_back(sortedChunks[i]);
 				count++;
@@ -537,7 +556,13 @@ int_t LevelRenderer::renderChunks(int_t from, int_t to, int_t layer, double alph
 			renderLists[list].init(chunk->xRender, chunk->yRender, chunk->zRender, xOff, yOff, zOff);
 		}
 
-		renderLists[list].add(chunk->getList(layer));
+		// Add to the appropriate render list (VBO or display list)
+		const ChunkVBOEntry *vboEntry = chunk->getVBOEntry(layer);
+		int_t displayList = chunk->getList(layer);
+		if (vboEntry != nullptr)
+			renderLists[list].addVBO(vboEntry);
+		else if (displayList >= 0)
+			renderLists[list].add(displayList);
 	}
 
 	renderSameAsLast(layer, alpha);
@@ -928,8 +953,12 @@ void LevelRenderer::renderAdvancedClouds(float alpha)
 
 bool LevelRenderer::updateDirtyChunks(Player &player, bool force)
 {
-	bool slow = false;
-	if (slow)
+	// Always drain completed async mesh tasks first (upload VBOs on main thread)
+	if (meshWorker)
+		meshWorker->drainCompleted(8);
+
+	// Force mode = synchronous rebuild (initial world load, prepareLevel)
+	if (force)
 	{
 		std::sort(dirtyChunks.begin(), dirtyChunks.end(), DirtyChunkSorter(player));
 
@@ -939,126 +968,127 @@ bool LevelRenderer::updateDirtyChunks(Player &player, bool force)
 		for (int_t i = 0; i < amount; i++)
 		{
 			std::shared_ptr<Chunk> chunk = dirtyChunks[s - i];
-			if (!force)
-			{
-				if (chunk->distanceToSqr(player) > 1024.0f)
-				{
-					if (chunk->visible)
-					{
-						if (i >= 3)
-							return false;
-					}
-					else
-					{
-						if (i >= 1)
-							return false;
-					}
-				}
-			}
-			else if (!chunk->visible)
-			{
+			if (!chunk->visible)
 				continue;
-			}
 
 			chunk->rebuild();
 			dirtyChunks.erase(dirtyChunks.begin() + (s - i));
 			chunk->dirty = false;
 		}
 
-		if (dirtyChunks.empty())
-			return true;
-		else
-			return false;
+		return dirtyChunks.empty();
 	}
-	else
+
+	// Normal mode: async meshing via worker thread
+	DirtyChunkSorter dirtyChunkSorter(player);
+
+	std::array<std::shared_ptr<Chunk>, 3> toAdd = {};
+	std::vector<std::shared_ptr<Chunk>> nearChunks;
+
+	int_t pendingChunkSize = dirtyChunks.size();
+	int_t pendingChunkRemoved = 0;
+
+	for (int_t i = 0; i < pendingChunkSize; i++)
 	{
-		DirtyChunkSorter dirtyChunkSorter(player);
+		std::shared_ptr<Chunk> chunk = dirtyChunks[i];
 
-		std::array<std::shared_ptr<Chunk>, 3> toAdd = {};
-		std::vector<std::shared_ptr<Chunk>> nearChunks;
+		// Skip chunks already being processed by the worker
+		if (chunk->inFlight) continue;
 
-		int_t pendingChunkSize = dirtyChunks.size();
-		int_t pendingChunkRemoved = 0;
-
-		for (int_t i = 0; i < pendingChunkSize; i++)
+		if (chunk->distanceToSqr(player) > 1024.0f)
 		{
-			std::shared_ptr<Chunk> chunk = dirtyChunks[i];
-			if (!force)
+			int_t index;
+			for (index = 0; index < 3 && (toAdd[index] == nullptr || dirtyChunkSorter(toAdd[index], chunk)); index++);
+			index--;
+			if (index > 0)
 			{
-				if (chunk->distanceToSqr(player) > 1024.0f)
-				{
-					int_t index;
-					for (index = 0; index < 3 && (toAdd[index] == nullptr || dirtyChunkSorter(toAdd[index], chunk)); index++);
-					index--;
-					if (index > 0)
-					{
-						int_t x = index;
-						while (--x != 0) toAdd[x - 1] = toAdd[x];
-						toAdd[index] = chunk;
-					}
-					continue;
-				}
+				int_t x = index;
+				while (--x != 0) toAdd[x - 1] = toAdd[x];
+				toAdd[index] = chunk;
 			}
-			else if (!chunk->visible)
-			{
-				continue;
-			}
-
-			pendingChunkRemoved++;
-			nearChunks.emplace_back(chunk);
-			dirtyChunks[i] = nullptr;
 			continue;
 		}
 
-		if (!nearChunks.empty())
-		{
-			if (nearChunks.size() > 1)
-				std::sort(nearChunks.begin(), nearChunks.end(), dirtyChunkSorter);
-			for (int_t i = nearChunks.size() - 1; i >= 0; i--)
-			{
-				std::shared_ptr<Chunk> chunk = nearChunks[i];
-				chunk->rebuild();
-				chunk->dirty = false;
-			}
-		}
-
-		int_t secondaryRemoved = 0;
-		for (int_t j = 2; j >= 0; j--)
-		{
-			std::shared_ptr<Chunk> chunk = toAdd[j];
-			if (chunk != nullptr)
-			{
-				if (!chunk->visible && j != 2)
-				{
-					toAdd[j] = nullptr;
-					toAdd[0] = nullptr;
-					break;
-				}
-				toAdd[j]->rebuild();
-				toAdd[j]->dirty = false;
-				secondaryRemoved++;
-			}
-		}
-
-		int_t cursor = 0;
-		int_t target = 0;
-		int_t arraySize = dirtyChunks.size();
-		while (cursor != arraySize)
-		{
-			std::shared_ptr<Chunk> chunk = dirtyChunks[cursor];
-			if (chunk != nullptr && chunk != toAdd[0] && chunk != toAdd[1] && chunk != toAdd[2])
-			{
-				if (target != cursor)
-					dirtyChunks[target] = chunk;
-				target++;
-			}
-			cursor++;
-		}
-		while (--cursor >= target)
-			dirtyChunks.erase(dirtyChunks.begin() + cursor);
-	
-		return pendingChunkSize == (pendingChunkRemoved + secondaryRemoved);
+		pendingChunkRemoved++;
+		nearChunks.emplace_back(chunk);
+		dirtyChunks[i] = nullptr;
+		continue;
 	}
+
+	// Submit near chunks to the async worker
+	if (!nearChunks.empty())
+	{
+		if (nearChunks.size() > 1)
+			std::sort(nearChunks.begin(), nearChunks.end(), dirtyChunkSorter);
+		for (int_t i = nearChunks.size() - 1; i >= 0; i--)
+		{
+			auto &chunk = nearChunks[i];
+			if (meshWorker && !chunk->inFlight)
+			{
+				int_t r = 1;
+				auto task = Util::make_unique<ChunkBuildTask>();
+				task->chunk = chunk;
+				task->snapshot = Util::make_unique<ChunkSnapshot>(
+					level ? *level : chunk->level,
+					chunk->x - r, chunk->y - r, chunk->z - r,
+					chunk->x + chunk->xs + r, chunk->y + chunk->ys + r, chunk->z + chunk->zs + r);
+				chunk->dirty = false;
+				chunk->inFlight = true;
+				meshWorker->submitTask(std::move(task));
+			}
+		}
+	}
+
+	// Submit distant chunks to the async worker
+	int_t secondaryRemoved = 0;
+	for (int_t j = 2; j >= 0; j--)
+	{
+		std::shared_ptr<Chunk> chunk = toAdd[j];
+		if (chunk != nullptr)
+		{
+			if (!chunk->visible && j != 2)
+			{
+				toAdd[j] = nullptr;
+				toAdd[0] = nullptr;
+				break;
+			}
+			if (meshWorker && !chunk->inFlight)
+			{
+				int_t r = 1;
+				auto task = Util::make_unique<ChunkBuildTask>();
+				task->chunk = chunk;
+				task->snapshot = Util::make_unique<ChunkSnapshot>(
+					level ? *level : chunk->level,
+					chunk->x - r, chunk->y - r, chunk->z - r,
+					chunk->x + chunk->xs + r, chunk->y + chunk->ys + r, chunk->z + chunk->zs + r);
+				chunk->dirty = false;
+				chunk->inFlight = true;
+				meshWorker->submitTask(std::move(task));
+			}
+			secondaryRemoved++;
+		}
+	}
+
+	// Compact the dirty chunks list (remove nulled / submitted entries)
+	int_t cursor = 0;
+	int_t target = 0;
+	int_t arraySize = dirtyChunks.size();
+	while (cursor != arraySize)
+	{
+		std::shared_ptr<Chunk> chunk = dirtyChunks[cursor];
+		if (chunk != nullptr && chunk != toAdd[0] && chunk != toAdd[1] && chunk != toAdd[2]
+			&& !chunk->inFlight)
+		{
+			if (target != cursor)
+				dirtyChunks[target] = chunk;
+			target++;
+		}
+		cursor++;
+	}
+	while (--cursor >= target)
+		dirtyChunks.erase(dirtyChunks.begin() + cursor);
+
+	return pendingChunkSize == (pendingChunkRemoved + secondaryRemoved);
 }
 
 void LevelRenderer::renderHit(Player &player, HitResult &h, int_t mode, ItemInstance *inventoryItem, float a)

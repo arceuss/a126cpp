@@ -101,7 +101,7 @@ bool TileRenderer::tesselateBlockInWorld(Tile &tt, int_t x, int_t y, int_t z)
 
 bool TileRenderer::tesselateBlockInWorld(Tile &tt, int_t x, int_t y, int_t z, float r, float g, float b)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 
 	bool changed = false;
 	float c10 = 0.5f;
@@ -204,7 +204,7 @@ void TileRenderer::renderBlock(Tile &tt, Level &level, int_t x, int_t y, int_t z
 	float c11 = 1.0f;  // newb12: float c11 = 1.0F (TileRenderer.java:1047)
 	float c2 = 0.8f;  // newb12: float c2 = 0.8F (TileRenderer.java:1048)
 	float c3 = 0.6f;  // newb12: float c3 = 0.6F (TileRenderer.java:1049)
-	Tesselator &t = Tesselator::instance;  // newb12: Tesselator t = Tesselator.instance (TileRenderer.java:1050)
+	Tesselator &t = Tesselator::getInstance();  // newb12: Tesselator t = Tesselator.instance (TileRenderer.java:1050)
 	t.begin();  // newb12: t.begin() (TileRenderer.java:1051)
 	
 	float center = tt.getBrightness(level, x, y, z);  // newb12: float center = tt.getBrightness(level, x, y, z) (TileRenderer.java:1052)
@@ -254,7 +254,7 @@ void TileRenderer::renderBlock(Tile &tt, Level &level, int_t x, int_t y, int_t z
 
 void TileRenderer::renderFaceUp(Tile &tt, double x, double y, double z, int_t tex)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 
 	if (fixedTexture >= 0) tex = fixedTexture;
 
@@ -292,7 +292,7 @@ void TileRenderer::renderFaceUp(Tile &tt, double x, double y, double z, int_t te
 
 void TileRenderer::renderFaceDown(Tile &tt, double x, double y, double z, int_t tex)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 
 	if (fixedTexture >= 0) tex = fixedTexture;
 
@@ -330,7 +330,7 @@ void TileRenderer::renderFaceDown(Tile &tt, double x, double y, double z, int_t 
 
 void TileRenderer::renderNorth(Tile &tt, double x, double y, double z, int_t tex)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 
 	if (fixedTexture >= 0) tex = fixedTexture;
 	int_t xt = (tex & 0xF) << 4;
@@ -372,7 +372,7 @@ void TileRenderer::renderNorth(Tile &tt, double x, double y, double z, int_t tex
 
 void TileRenderer::renderSouth(Tile &tt, double x, double y, double z, int_t tex)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 
 	if (fixedTexture >= 0) tex = fixedTexture;
 	int_t xt = (tex & 0xF) << 4;
@@ -414,7 +414,7 @@ void TileRenderer::renderSouth(Tile &tt, double x, double y, double z, int_t tex
 
 void TileRenderer::renderWest(Tile &tt, double x, double y, double z, int_t tex)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 
 	if (fixedTexture >= 0) tex = fixedTexture;
 	int_t xt = (tex & 0xF) << 4;
@@ -456,7 +456,7 @@ void TileRenderer::renderWest(Tile &tt, double x, double y, double z, int_t tex)
 
 void TileRenderer::renderEast(Tile &tt, double x, double y, double z, int_t tex)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 
 	if (fixedTexture >= 0) tex = fixedTexture;
 	int_t xt = (tex & 0xF) << 4;
@@ -499,7 +499,7 @@ void TileRenderer::renderEast(Tile &tt, double x, double y, double z, int_t tex)
 void TileRenderer::renderCube(Tile &tile, float alpha)
 {
 	int shape = tile.getRenderShape();
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	
 	if (shape == Tile::SHAPE_BLOCK)
 	{
@@ -534,7 +534,7 @@ void TileRenderer::renderCube(Tile &tile, float alpha)
 // Beta: TileRenderer.renderTile() - renders tile at current position with data (TileRenderer.java:1746)
 void TileRenderer::renderTile(Tile &tile, int_t data)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	int_t shape = tile.getRenderShape();
 	tile.updateDefaultShape();
 	
@@ -813,7 +813,7 @@ float TileRenderer::calculateCornerHeight(int_t x, int_t y, int_t z, const Mater
 // Alpha: RenderBlocks.renderBottomFace() - renders bottom face of block
 void TileRenderer::renderBottomFace(Tile &tt, double x, double y, double z, int_t tex)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 
 	if (fixedTexture >= 0) tex = fixedTexture;
 
@@ -853,7 +853,7 @@ void TileRenderer::renderBottomFace(Tile &tt, double x, double y, double z, int_
 bool TileRenderer::tesselateWaterInWorld(Tile &tt, int_t x, int_t y, int_t z)
 {
 	// Beta: TileRenderer.tesselateWaterInWorld() (TileRenderer.java:867-1013)
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	
 	// Beta: Check which faces should be rendered
 	bool renderTop = noCulling || tt.shouldRenderFace(*level, x, y + 1, z, Facing::UP);
@@ -1076,7 +1076,7 @@ bool TileRenderer::tesselateWaterInWorld(Tile &tt, int_t x, int_t y, int_t z)
 bool TileRenderer::tesselateCrossTextureInWorld(Tile &tt, int_t x, int_t y, int_t z)
 {
 	// Beta: RenderBlocks.renderBlockReed() calls func_1239_a (RenderBlocks.java:690-695)
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	
 	// Beta: Get brightness and set color (RenderBlocks.java:692-693)
 	float brightness = tt.getBrightness(*level, x, y, z);
@@ -1141,7 +1141,7 @@ bool TileRenderer::tesselateCrossTextureInWorld(Tile &tt, int_t x, int_t y, int_
 bool TileRenderer::tesselateCactusInWorld(Tile &tt, int_t x, int_t y, int_t z)
 {
 	// Beta: tesselateCactusInWorld renders cactus with translation offsets on side faces
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	
 	// Beta: Get color multipliers (TileRenderer.java:1198-1201)
 	int_t col = tt.getColor(*level, x, y, z);
@@ -1249,7 +1249,7 @@ bool TileRenderer::tesselateCactusInWorld(Tile &tt, int_t x, int_t y, int_t z)
 bool TileRenderer::tesselateTorchInWorld(Tile &tt, int_t x, int_t y, int_t z)
 {
 	int_t dir = level->getData(x, y, z);
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	float br = tt.getBrightness(*level, x, y, z);
 	if (Tile::lightEmission[tt.id] > 0)
 	{
@@ -1287,7 +1287,7 @@ bool TileRenderer::tesselateTorchInWorld(Tile &tt, int_t x, int_t y, int_t z)
 // Beta: TileRenderer.tesselateTorch() - helper for torch rendering (TileRenderer.java:730-775)
 void TileRenderer::tesselateTorch(Tile &tt, double x, double y, double z, double xxa, double zza)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	int_t tex = tt.getTexture(Facing::NORTH);
 	if (fixedTexture >= 0)
 	{
@@ -1337,7 +1337,7 @@ void TileRenderer::tesselateTorch(Tile &tt, double x, double y, double z, double
 // Beta: TileRenderer.tesselateLadderInWorld() - renders ladder blocks (TileRenderer.java:665-712)
 bool TileRenderer::tesselateLadderInWorld(Tile &tt, int_t x, int_t y, int_t z)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	int_t tex = tt.getTexture(Facing::NORTH);
 	if (fixedTexture >= 0)
 	{
@@ -1393,7 +1393,7 @@ bool TileRenderer::tesselateLadderInWorld(Tile &tt, int_t x, int_t y, int_t z)
 // Beta: TileRenderer.tesselateDoorInWorld() - renders door blocks (TileRenderer.java:1386-1496)
 bool TileRenderer::tesselateDoorInWorld(Tile &tt, int_t x, int_t y, int_t z)
 {
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	DoorTile *dt = dynamic_cast<DoorTile *>(&tt);  // Beta: DoorTile dt = (DoorTile)tt (TileRenderer.java:1388)
 	if (dt == nullptr)
 		return false;  // Not a door tile
@@ -1582,7 +1582,7 @@ bool TileRenderer::tesselateStairsInWorld(Tile &tt, int_t x, int_t y, int_t z)
 bool TileRenderer::tesselateFireInWorld(Tile &tt, int_t x, int_t y, int_t z)
 {
 	// Beta: Fire rendering - RenderBlocks.renderBlockFire() (RenderBlocks.java:220-406) - 1:1 port
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	
 	// Beta: Get texture (RenderBlocks.java:222-225)
 	int_t tex = tt.getTexture(Facing::UP, 0);
@@ -1819,7 +1819,7 @@ bool TileRenderer::tesselateFireInWorld(Tile &tt, int_t x, int_t y, int_t z)
 bool TileRenderer::tesselateDustInWorld(Tile &tt, int_t x, int_t y, int_t z)
 {
 	// Beta: TileRenderer.tesselateDustInWorld() - renders redstone dust as flat layer (TileRenderer.java:444-563)
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	
 	// Beta: Get texture based on data (TileRenderer.java:446)
 	// Beta: getTexture(1, data) where 1 = Facing::UP
@@ -1951,7 +1951,7 @@ bool TileRenderer::tesselateRowInWorld(Tile &tt, int_t x, int_t y, int_t z)
 bool TileRenderer::tesselateRailInWorld(Tile &tt, int_t x, int_t y, int_t z)
 {
 	// Beta: TileRenderer.tesselateRailInWorld() - renders rails based on data value (TileRenderer.java:600-663)
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	int_t data = level->getData(x, y, z);  // Beta: int data = this.level.getData(x, y, z) (TileRenderer.java:602)
 	int_t tex = tt.getTexture(Facing::DOWN, data);  // Beta: int tex = tt.getTexture(0, data) (TileRenderer.java:603)
 	if (fixedTexture >= 0)  // Beta: if (this.fixedTexture >= 0) (TileRenderer.java:604)
@@ -2111,7 +2111,7 @@ bool TileRenderer::tesselateLeverInWorld(Tile &tt, int_t x, int_t y, int_t z)
 	int_t data = level->getData(x, y, z);
 	int_t dir = data & 7;
 	bool flipped = (data & 8) > 0;
-	Tesselator &t = Tesselator::instance;
+	Tesselator &t = Tesselator::getInstance();
 	bool hadFixed = fixedTexture >= 0;
 	if (!hadFixed)
 	{

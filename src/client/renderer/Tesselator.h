@@ -6,6 +6,19 @@
 
 #include "util/Memory.h"
 
+struct ChunkMeshData
+{
+	std::unique_ptr<char[]> vertexData;
+	int_t vertexCount = 0;
+	int_t dataSize = 0;
+	bool hasTexture = false;
+	bool hasColor = false;
+	bool hasNormal = false;
+	bool empty = true;
+
+	void appendFrom(const char *src, int_t srcSize, int_t srcVertices, bool tex, bool col, bool norm);
+};
+
 class Tesselator
 {
 private:
@@ -42,6 +55,11 @@ private:
 public:
 	static Tesselator instance;
 
+	// Thread-local instance pointer (LCE pattern: Tesselator::getInstance() via TLS)
+	// Main thread sets this to &instance. Worker threads set it to their own offline Tesselator.
+	static Tesselator &getInstance();
+	static void setThreadInstance(Tesselator *tess);
+
 private:
 	// State
 	bool tesselating = false;
@@ -55,10 +73,17 @@ private:
 	// Buffer state
 	int_t size = 0;
 
+	// Offline mode (for off-thread chunk meshing)
+	bool offlineMode = false;
+	ChunkMeshData *outputTarget = nullptr;
+
 public:
 	Tesselator(int_t size);
+	Tesselator(int_t size, bool offline);
 
 	Tesselator getUniqueInstance(int_t size);
+
+	void setOutputTarget(ChunkMeshData *target);
 
 	// Tessellator functions
 	void end();
@@ -78,4 +103,6 @@ public:
 	void normal(float x, float y, float z);
 	void offset(double x, double y, double z);
 	void addOffset(float x, float y, float z);
+
+	bool isOffline() const { return offlineMode; }
 };

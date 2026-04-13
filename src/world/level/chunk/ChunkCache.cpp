@@ -3,6 +3,8 @@
 #include "world/level/Level.h"
 
 #include "world/level/chunk/EmptyLevelChunk.h"
+#include "world/level/levelgen/ChunkGenWorker.h"
+#include "world/level/levelgen/RandomLevelSource.h"
 
 ChunkCache::ChunkCache(Level &level, ChunkStorage *storage, ChunkSource *source) : level(level)
 {
@@ -10,12 +12,33 @@ ChunkCache::ChunkCache(Level &level, ChunkStorage *storage, ChunkSource *source)
 
 	this->source = std::unique_ptr<ChunkSource>(source);
 	this->storage = std::unique_ptr<ChunkStorage>(storage);
+
+	// Start async chunk generation worker if we have a RandomLevelSource
+	RandomLevelSource *rls = dynamic_cast<RandomLevelSource *>(source);
+	if (rls)
+	{
+		genWorker = std::unique_ptr<ChunkGenWorker>(new ChunkGenWorker(*rls, level));
+		genWorker->start();
+	}
+}
+
+ChunkCache::~ChunkCache()
+{
+	if (genWorker)
+	{
+		genWorker->stop();
+		genWorker.reset();
+	}
 }
 
 void ChunkCache::centerOn(int_t x, int_t y)
 {
 	xCenter = x;
 	yCenter = y;
+
+	// Prefetch chunks around the new center
+	if (genWorker)
+		prefetchChunks(x, y, 3);
 }
 
 bool ChunkCache::fits(int_t x, int_t y)
@@ -61,10 +84,25 @@ std::shared_ptr<LevelChunk> ChunkCache::getChunk(int_t x, int_t z)
 		std::shared_ptr<LevelChunk> chunk = load(x, z);
 		if (chunk == nullptr)
 		{
-			if (source == nullptr)
-				chunk = emptyChunk;
+			// Check if the async worker already generated this chunk
+			if (genWorker)
+				chunk = genWorker->pollCompleted(x, z);
+
+			if (chunk != nullptr)
+			{
+				// Worker generated terrain but didn't run recalcHeightmap (needs Level access)
+				// 4J: "removed & moved into its own method from getChunk, so we can call
+				// recalcHeightmap after the chunk is added into the cache"
+				chunk->recalcHeightmap();
+			}
 			else
-				chunk = source->getChunk(x, z);
+			{
+				// Fallback: synchronous generation
+				if (source == nullptr)
+					chunk = emptyChunk;
+				else
+					chunk = source->getChunk(x, z);
+			}
 		}
 
 		chunks[ri] = chunk;
@@ -81,6 +119,10 @@ std::shared_ptr<LevelChunk> ChunkCache::getChunk(int_t x, int_t z)
 			postProcess(*this, x, z - 1);
 		if (hasChunk(x - 1, z - 1) && !(getChunk(x - 1, z - 1))->terrainPopulated && hasChunk(x - 1, z - 1) && hasChunk(x, z - 1) && hasChunk(x - 1, z))
 			postProcess(*this, x - 1, z - 1);
+
+		// Prefetch nearby chunks for the player's direction of travel
+		if (genWorker)
+			prefetchChunks(x, z, 2);
 	}
 
 	xLast = x;
@@ -186,4 +228,30 @@ jstring ChunkCache::gatherStats()
 {
 	// TODO
 	return u"ChunkCache: " + String::toString((int)chunks.size());
+}
+
+void ChunkCache::prefetchChunks(int_t cx, int_t cz, int_t radius)
+{
+	if (!genWorker)
+		return;
+
+	for (int_t dx = -radius; dx <= radius; dx++)
+	{
+		for (int_t dz = -radius; dz <= radius; dz++)
+		{
+			int_t x = cx + dx;
+			int_t z = cz + dz;
+
+			if (!fits(x, z))
+				continue;
+
+			// Don't request if already cached or already in-flight
+			if (hasChunk(x, z))
+				continue;
+
+			// Don't request if there's a saved chunk on disk
+			// (we can't check cheaply, so only prefetch uncached coords)
+			genWorker->requestChunk(x, z);
+		}
+	}
 }

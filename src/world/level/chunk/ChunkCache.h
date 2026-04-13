@@ -9,6 +9,7 @@
 #include "util/Memory.h"
 
 class Level;
+class ChunkGenWorker;
 
 class ChunkCache : public ChunkSource
 {
@@ -23,6 +24,9 @@ private:
 
 	Level &level;
 
+	// Async chunk generation worker
+	std::unique_ptr<ChunkGenWorker> genWorker;
+
 public:
 	int_t xLast = -999999999;
 	int_t zLast = -999999999;
@@ -36,6 +40,7 @@ private:
 
 public:
 	ChunkCache(Level &level, ChunkStorage *storage, ChunkSource *source);
+	~ChunkCache();
 
 	void centerOn(int_t x, int_t y);
 	bool fits(int_t x, int_t y);
@@ -54,4 +59,8 @@ public:
 	jstring gatherStats() override;
 
 	virtual bool isChunkCache() const override { return true; }
+
+private:
+	// Prefetch chunks in a radius around the given chunk coords
+	void prefetchChunks(int_t cx, int_t cz, int_t radius);
 };

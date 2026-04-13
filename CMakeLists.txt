@@ -162,6 +162,10 @@ set(Alpha126Cpp_SOURCES
 	
 	"src/client/renderer/Chunk.cpp"
 	"src/client/renderer/Chunk.h"
+	"src/client/renderer/ChunkMeshWorker.cpp"
+	"src/client/renderer/ChunkMeshWorker.h"
+	"src/client/renderer/ChunkSnapshot.cpp"
+	"src/client/renderer/ChunkSnapshot.h"
 	"src/client/renderer/DirtyChunkSorter.h"
 	"src/client/renderer/DistanceChunkSorter.h"
 	"src/client/renderer/GameRenderer.cpp"
@@ -606,6 +610,8 @@ set(Alpha126Cpp_SOURCES
 	
 	"src/world/level/levelgen/LargeCaveFeature.cpp"
 	"src/world/level/levelgen/LargeCaveFeature.h"
+	"src/world/level/levelgen/ChunkGenWorker.cpp"
+	"src/world/level/levelgen/ChunkGenWorker.h"
 	"src/world/level/levelgen/LargeFeature.cpp"
 	"src/world/level/levelgen/LargeFeature.h"
 	"src/world/level/levelgen/RandomLevelSource.cpp"

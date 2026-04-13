@@ -25,7 +25,9 @@ enum class BiomeType
 
 class BiomeSource
 {
-private:
+public:
+	// Noise generators are immutable after construction -- thread-safe for concurrent reads
+	// Made public so RandomLevelSource::getBiomeBlock() can write to per-task scratch buffers
 	PerlinSimplexNoise temperatureMap;
 	PerlinSimplexNoise downfallMap;
 	PerlinSimplexNoise noiseMap;

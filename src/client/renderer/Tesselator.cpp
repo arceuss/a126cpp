@@ -9,6 +9,50 @@
 
 Tesselator Tesselator::instance(MAX_FLOATS);
 
+// Thread-local instance pointer (matches LCE's TlsGetValue/TlsSetValue pattern)
+static thread_local Tesselator *tl_instance = &Tesselator::instance;
+
+Tesselator &Tesselator::getInstance()
+{
+	return *tl_instance;
+}
+
+void Tesselator::setThreadInstance(Tesselator *tess)
+{
+	tl_instance = tess;
+}
+
+// ChunkMeshData
+
+void ChunkMeshData::appendFrom(const char *src, int_t srcSize, int_t srcVertices, bool tex, bool col, bool norm)
+{
+	if (srcVertices == 0) return;
+
+	if (vertexData == nullptr)
+	{
+		vertexData = Util::make_unique<char[]>(srcSize);
+		std::memcpy(vertexData.get(), src, srcSize);
+		dataSize = srcSize;
+		vertexCount = srcVertices;
+	}
+	else
+	{
+		auto newData = Util::make_unique<char[]>(dataSize + srcSize);
+		std::memcpy(newData.get(), vertexData.get(), dataSize);
+		std::memcpy(newData.get() + dataSize, src, srcSize);
+		vertexData = std::move(newData);
+		dataSize += srcSize;
+		vertexCount += srcVertices;
+	}
+
+	hasTexture |= tex;
+	hasColor |= col;
+	hasNormal |= norm;
+	empty = false;
+}
+
+// Tesselator
+
 Tesselator::Tesselator(int_t size)
 {
 	// Initialize buffer
@@ -30,9 +74,26 @@ Tesselator::Tesselator(int_t size)
 	}
 }
 
+Tesselator::Tesselator(int_t size, bool offline) : offlineMode(offline)
+{
+	this->size = size;
+
+	buffer = Util::make_unique<char[]>(size * 4);
+	buffer_p = buffer.get();
+	buffer_e = buffer.get() + (size * 4);
+
+	// No VBO/GL init in offline mode
+	vboMode = false;
+}
+
 Tesselator Tesselator::getUniqueInstance(int_t size)
 {
 	return Tesselator(size);
+}
+
+void Tesselator::setOutputTarget(ChunkMeshData *target)
+{
+	outputTarget = target;
 }
 
 void Tesselator::end()
@@ -43,60 +104,72 @@ void Tesselator::end()
 
 	if (vertices > 0)
 	{
-		// Bind VBO
-		if (vboMode)
+		if (offlineMode)
 		{
-			vboId = (vboId + 1) % vboCounts;
-			if (RenderBackend_SupportsVBO())
+			// Offline mode: append vertex data to output target instead of drawing
+			if (outputTarget != nullptr)
 			{
-				glBindBuffer(GL_ARRAY_BUFFER, vboIds[vboId]);
-				glBufferData(GL_ARRAY_BUFFER, buffer_p - buffer.get(), buffer.get(), GL_STREAM_DRAW);
-			}
-			else
-			{
-				glBindBufferARB(GL_ARRAY_BUFFER_ARB, vboIds[vboId]);
-				glBufferDataARB(GL_ARRAY_BUFFER_ARB, buffer_p - buffer.get(), buffer.get(), GL_STREAM_DRAW_ARB);
+				int_t dataSize = static_cast<int_t>(buffer_p - buffer.get());
+				outputTarget->appendFrom(buffer.get(), dataSize, vertices, hasTexture, hasColor, hasNormal);
 			}
 		}
-
-		// Setup attributes
-		char *vbo_base = vboMode ? reinterpret_cast<char *>(0) : reinterpret_cast<char *>(buffer.get());
-
-		if (hasTexture)
-		{
-			glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<void *>(vbo_base + 12));
-			glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-		}
-
-		if (hasColor)
-		{
-			glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<void *>(vbo_base + 20));
-			glEnableClientState(GL_COLOR_ARRAY);
-		}
-
-		if (hasNormal)
-		{
-			glNormalPointer(GL_BYTE, 32, reinterpret_cast<void *>(vbo_base + 24));
-			glEnableClientState(GL_NORMAL_ARRAY);
-		}
-
-		glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<void *>(vbo_base + 0));
-		glEnableClientState(GL_VERTEX_ARRAY);
-
-		// Draw arrays
-		if (draw_mode == GL_QUADS && TRIANGLE_MODE)
-			glDrawArrays(GL_TRIANGLES, 0, vertices);
 		else
-			glDrawArrays(draw_mode, 0, vertices);
+		{
+			// Bind VBO
+			if (vboMode)
+			{
+				vboId = (vboId + 1) % vboCounts;
+				if (RenderBackend_SupportsVBO())
+				{
+					glBindBuffer(GL_ARRAY_BUFFER, vboIds[vboId]);
+					glBufferData(GL_ARRAY_BUFFER, buffer_p - buffer.get(), buffer.get(), GL_STREAM_DRAW);
+				}
+				else
+				{
+					glBindBufferARB(GL_ARRAY_BUFFER_ARB, vboIds[vboId]);
+					glBufferDataARB(GL_ARRAY_BUFFER_ARB, buffer_p - buffer.get(), buffer.get(), GL_STREAM_DRAW_ARB);
+				}
+			}
 
-		// Reset attributes
-		glDisableClientState(GL_VERTEX_ARRAY);
-		if (hasTexture)
-			glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-		if (hasColor)
-			glDisableClientState(GL_COLOR_ARRAY);
-		if (hasNormal)
-			glDisableClientState(GL_NORMAL_ARRAY);
+			// Setup attributes
+			char *vbo_base = vboMode ? reinterpret_cast<char *>(0) : reinterpret_cast<char *>(buffer.get());
+
+			if (hasTexture)
+			{
+				glTexCoordPointer(2, GL_FLOAT, 32, reinterpret_cast<void *>(vbo_base + 12));
+				glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+			}
+
+			if (hasColor)
+			{
+				glColorPointer(4, GL_UNSIGNED_BYTE, 32, reinterpret_cast<void *>(vbo_base + 20));
+				glEnableClientState(GL_COLOR_ARRAY);
+			}
+
+			if (hasNormal)
+			{
+				glNormalPointer(GL_BYTE, 32, reinterpret_cast<void *>(vbo_base + 24));
+				glEnableClientState(GL_NORMAL_ARRAY);
+			}
+
+			glVertexPointer(3, GL_FLOAT, 32, reinterpret_cast<void *>(vbo_base + 0));
+			glEnableClientState(GL_VERTEX_ARRAY);
+
+			// Draw arrays
+			if (draw_mode == GL_QUADS && TRIANGLE_MODE)
+				glDrawArrays(GL_TRIANGLES, 0, vertices);
+			else
+				glDrawArrays(draw_mode, 0, vertices);
+
+			// Reset attributes
+			glDisableClientState(GL_VERTEX_ARRAY);
+			if (hasTexture)
+				glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+			if (hasColor)
+				glDisableClientState(GL_COLOR_ARRAY);
+			if (hasNormal)
+				glDisableClientState(GL_NORMAL_ARRAY);
+		}
 	}
 
 	clear();
