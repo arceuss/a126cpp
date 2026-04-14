@@ -23,6 +23,7 @@ public:
 
 	void mirror();
 	void render(Tesselator &t, float scale);
-	
+	void renderBatched(Tesselator &t, float scale);
+
 	Poly &flipNormal();
 };

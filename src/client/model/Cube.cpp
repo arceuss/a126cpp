@@ -162,8 +162,10 @@ void Cube::compile(float scale)
 
 	glNewList(list, GL_COMPILE);
 	Tesselator &t = Tesselator::instance;
+	t.begin();
 	for (auto &p : polygons)
-		p.render(t, scale);
+		p.renderBatched(t, scale);
+	t.end();
 	glEndList();
 
 	compiled = true;

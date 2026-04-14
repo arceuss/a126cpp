@@ -16,10 +16,10 @@ class Font
 {
 private:
 	std::array<int_t, 256> charWidths;
-	// Pre-calculated color code RGB values (for optimized sign rendering)
-	std::array<float, 16> colorCodeR;
-	std::array<float, 16> colorCodeG;
-	std::array<float, 16> colorCodeB;
+	// Pre-calculated color code RGB values (0-15 = normal, 16-31 = darkened/shadow)
+	std::array<float, 32> colorCodeR;
+	std::array<float, 32> colorCodeG;
+	std::array<float, 32> colorCodeB;
 public:
 	int_t fontTexture = 0;
 

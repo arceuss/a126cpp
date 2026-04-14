@@ -936,18 +936,20 @@ set(Alpha126Cpp_SOURCES
 )
 
 # Backend selection (CSE2-style compile-time dispatch)
-set(BACKEND_RENDERER "OpenGL2" CACHE STRING "Rendering backend: OpenGL2, D3D11")
+set(BACKEND_RENDERER "OpenGL2" CACHE STRING "Rendering backend: OpenGL2, D3D11, Vulkan")
 set(BACKEND_PLATFORM "SDL2" CACHE STRING "Platform backend: SDL2")
 
-set_property(CACHE BACKEND_RENDERER PROPERTY STRINGS OpenGL2 D3D11)
+set_property(CACHE BACKEND_RENDERER PROPERTY STRINGS OpenGL2 D3D11 Vulkan)
 set_property(CACHE BACKEND_PLATFORM PROPERTY STRINGS SDL2)
 
 if(BACKEND_RENDERER STREQUAL "OpenGL2")
 	set(ALPHA126CPP_RENDERER_OUTPUT_DIR "opengl2")
 elseif(BACKEND_RENDERER STREQUAL "D3D11")
 	set(ALPHA126CPP_RENDERER_OUTPUT_DIR "d3d11")
+elseif(BACKEND_RENDERER STREQUAL "Vulkan")
+	set(ALPHA126CPP_RENDERER_OUTPUT_DIR "vulkan")
 else()
-	message(FATAL_ERROR "Unsupported BACKEND_RENDERER '${BACKEND_RENDERER}'. Expected one of: OpenGL2, D3D11")
+	message(FATAL_ERROR "Unsupported BACKEND_RENDERER '${BACKEND_RENDERER}'. Expected one of: OpenGL2, D3D11, Vulkan")
 endif()
 
 if(NOT BACKEND_PLATFORM STREQUAL "SDL2")
@@ -982,6 +984,8 @@ if(BACKEND_RENDERER STREQUAL "OpenGL2")
 	target_sources(Alpha126Cpp PRIVATE "src/Backends/Rendering/OpenGL2.cpp")
 elseif(BACKEND_RENDERER STREQUAL "D3D11")
 	target_sources(Alpha126Cpp PRIVATE "src/Backends/Rendering/D3D11/D3D11.cpp")
+elseif(BACKEND_RENDERER STREQUAL "Vulkan")
+	target_sources(Alpha126Cpp PRIVATE "src/Backends/Rendering/Vulkan/Vulkan.cpp")
 endif()
 
 # Platform backend
@@ -995,6 +999,8 @@ if(BACKEND_PLATFORM STREQUAL "SDL2")
 	# Select context module based on rendering backend
 	if(BACKEND_RENDERER STREQUAL "D3D11")
 		target_sources(Alpha126Cpp PRIVATE "src/Backends/Platform/SDL2/SDL2_D3D11Context.cpp")
+	elseif(BACKEND_RENDERER STREQUAL "Vulkan")
+		target_sources(Alpha126Cpp PRIVATE "src/Backends/Platform/SDL2/SDL2_VulkanContext.cpp")
 	else()
 		target_sources(Alpha126Cpp PRIVATE "src/Backends/Platform/SDL2/SDL2_GLContext.cpp")
 	endif()
@@ -1082,6 +1088,9 @@ if(BACKEND_RENDERER STREQUAL "OpenGL2")
 	target_link_libraries(Alpha126Cpp PRIVATE glad)
 elseif(BACKEND_RENDERER STREQUAL "D3D11")
 	target_link_libraries(Alpha126Cpp PRIVATE d3d11 dxgi d3dcompiler)
+elseif(BACKEND_RENDERER STREQUAL "Vulkan")
+	find_package(Vulkan REQUIRED)
+	target_link_libraries(Alpha126Cpp PRIVATE Vulkan::Vulkan)
 endif()
 
 # Link platform backend dependencies

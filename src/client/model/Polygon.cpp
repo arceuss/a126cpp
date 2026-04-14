@@ -57,6 +57,24 @@ void Poly::render(Tesselator &t, float scale)
 	t.end();
 }
 
+void Poly::renderBatched(Tesselator &t, float scale)
+{
+	Vec3 *v0 = vertices[1].pos.vectorTo(vertices[0].pos);
+	Vec3 *v1 = vertices[1].pos.vectorTo(vertices[2].pos);
+	Vec3 *n = v1->cross(*v0)->normalize();
+
+	if (flipNormalFlag)
+		t.normal(-n->x, -n->y, -n->z);
+	else
+		t.normal(n->x, n->y, n->z);
+
+	for (int_t i = 0; i < vertices.size(); i++)
+	{
+		Vertex &v = vertices[i];
+		t.vertexUV(v.pos.x * scale, v.pos.y * scale, v.pos.z * scale, v.u, v.v);
+	}
+}
+
 Poly &Poly::flipNormal()
 {
 	flipNormalFlag = true;
