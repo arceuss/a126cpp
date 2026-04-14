@@ -311,10 +311,11 @@ static_assert(sizeof(CBData) % 16 == 0, "CBData must be 16-byte aligned");
 // Vulkan Resources
 // ============================================================================
 
-static constexpr int MAX_FRAMES = 2;
+static constexpr int MAX_FRAMES = 3;
 static constexpr uint32_t MAX_DESCRIPTOR_SETS = 16384;
 static constexpr size_t DYNAMIC_VB_SIZE = 32 * 1024 * 1024; // 32MB per frame
 static constexpr size_t UBO_SIZE = MAX_DESCRIPTOR_SETS * 512; // ~8MB per frame (512 bytes aligned per draw)
+static constexpr size_t STAGING_RING_SIZE = 4 * 1024 * 1024; // 4MB per frame for texture uploads
 
 VkShaderModule g_vertShaderModule = VK_NULL_HANDLE;
 VkShaderModule g_fragShaderModule = VK_NULL_HANDLE;
@@ -346,9 +347,34 @@ struct FrameResources
     std::vector<VkDescriptorSet> descriptorSets;
 
     std::vector<DeferredBuffer> pendingDeletes;
+
+    // Staging ring buffer for texture uploads (glTexSubImage2D)
+    VkBuffer stagingRing = VK_NULL_HANDLE;
+    VkDeviceMemory stagingRingMemory = VK_NULL_HANDLE;
+    void* stagingRingMapped = nullptr;
+    size_t stagingRingOffset = 0;
 };
 
 FrameResources g_frames[MAX_FRAMES];
+
+// Deferred deletion for resources referenced by multiple in-flight frames
+// (e.g., display list buffers). framesRemaining counts down each frame reset.
+struct GlobalDeferredBuffer
+{
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+    int framesRemaining; // delete when this reaches 0
+};
+std::vector<GlobalDeferredBuffer> g_globalDeferredDeletes;
+
+struct GlobalDeferredTexture
+{
+    VkImage image;
+    VkDeviceMemory memory;
+    VkImageView imageView;
+    int framesRemaining; // delete when this reaches 0
+};
+std::vector<GlobalDeferredTexture> g_globalDeferredTextures;
 
 // Pipeline cache
 std::unordered_map<uint64_t, VkPipeline>& g_pipelineCache()
@@ -356,6 +382,7 @@ std::unordered_map<uint64_t, VkPipeline>& g_pipelineCache()
     static std::unordered_map<uint64_t, VkPipeline> inst;
     return inst;
 }
+VkPipelineCache g_vkPipelineCache = VK_NULL_HANDLE;
 
 // Sampler cache
 std::unordered_map<uint32_t, VkSampler>& g_samplerCache()
@@ -380,6 +407,25 @@ VkPipeline      g_lastBoundPipeline   = VK_NULL_HANDLE;
 bool            g_viewportDirty       = true;
 bool            g_scissorDirty        = true;
 
+// UBO dirty tracking — skip CBData upload when uniform state is unchanged
+CBData          g_lastCBData          = {};
+uint32_t        g_lastUBOOffset       = UINT32_MAX;  // UINT32_MAX = invalid/no previous
+uint32_t        g_lastBoundUBOOffset  = UINT32_MAX;  // last offset passed to vkCmdBindDescriptorSets
+bool            g_lastCBDataValid     = false;
+bool            g_cbDirty             = true;   // true when any state feeding CBData has changed
+bool            g_lastHasTexCoord     = false;
+bool            g_lastHasColor        = false;
+bool            g_lastHasNormal       = false;
+
+// Depth bias tracking
+float           g_lastDepthBiasConstant = 0.0f;
+float           g_lastDepthBiasSlope    = 0.0f;
+bool            g_depthBiasDirty        = true;
+
+// Vertex buffer binding tracking
+VkBuffer        g_lastBoundVB         = VK_NULL_HANDLE;
+VkDeviceSize    g_lastBoundVBOff      = UINT64_MAX;
+
 // Dummy white texture for when no texture is bound
 VkImage g_dummyImage = VK_NULL_HANDLE;
 VkDeviceMemory g_dummyMemory = VK_NULL_HANDLE;
@@ -401,6 +447,27 @@ struct TextureData
     bool samplerDirty = true;
     VkSampler sampler = VK_NULL_HANDLE;
 };
+
+static void destroyTextureResources(VkDevice device, VkImage image, VkDeviceMemory memory, VkImageView imageView)
+{
+    if (imageView != VK_NULL_HANDLE)
+        vkDestroyImageView(device, imageView, nullptr);
+    if (image != VK_NULL_HANDLE)
+        vkDestroyImage(device, image, nullptr);
+    if (memory != VK_NULL_HANDLE)
+        vkFreeMemory(device, memory, nullptr);
+}
+
+static void deferTextureResources(TextureData& tex)
+{
+    if (tex.image == VK_NULL_HANDLE && tex.memory == VK_NULL_HANDLE && tex.imageView == VK_NULL_HANDLE)
+        return;
+
+    g_globalDeferredTextures.push_back({tex.image, tex.memory, tex.imageView, MAX_FRAMES});
+    tex.image = VK_NULL_HANDLE;
+    tex.memory = VK_NULL_HANDLE;
+    tex.imageView = VK_NULL_HANDLE;
+}
 
 std::unordered_map<GLuint, TextureData>& g_textures()
 {
@@ -463,8 +530,7 @@ enum class DLCmd : uint8_t
 
 struct DLDrawData
 {
-    VkBuffer vbo;
-    VkDeviceMemory vboMemory;
+    VkDeviceSize vboOffset; // offset into DisplayList::consolidatedBuffer
     GLenum mode;
     int first;
     int count;
@@ -495,6 +561,8 @@ struct DisplayList
 {
     std::vector<DLCommand> commands;
     bool valid = false;
+    VkBuffer consolidatedBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory consolidatedMemory = VK_NULL_HANDLE;
 };
 
 std::unordered_map<GLuint, DisplayList>& g_displayLists()
@@ -511,6 +579,7 @@ GLuint& g_nextListId()
 bool g_recording = false;
 GLuint g_recordingListId = 0;
 DisplayList* g_recordingList = nullptr;
+std::vector<uint8_t> g_vertexAccumulator; // CPU-side vertex data during recording
 
 // Pixel store state
 int g_packAlignment = 4;
@@ -901,7 +970,7 @@ static VkPipeline getOrCreatePipeline(VkPrimitiveTopology topology)
     pipelineCI.subpass = 0;
 
     VkPipeline pipeline;
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline) != VK_SUCCESS)
+    if (vkCreateGraphicsPipelines(device, g_vkPipelineCache, 1, &pipelineCI, nullptr, &pipeline) != VK_SUCCESS)
     {
         std::cerr << "Failed to create graphics pipeline (key=" << key << ")" << std::endl;
         return VK_NULL_HANDLE;
@@ -1097,6 +1166,13 @@ static void initVulkanResources()
         vkCreatePipelineLayout(device, &layoutCI, nullptr, &g_pipelineLayout);
     }
 
+    // Vulkan pipeline cache for faster pipeline creation
+    {
+        VkPipelineCacheCreateInfo cacheCI = {};
+        cacheCI.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+        vkCreatePipelineCache(device, &cacheCI, nullptr, &g_vkPipelineCache);
+    }
+
     // Per-frame resources
     for (int i = 0; i < MAX_FRAMES; i++)
     {
@@ -1113,6 +1189,12 @@ static void initVulkanResources()
                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                      fr.dynamicVB, fr.dynamicVBMemory);
         vkMapMemory(device, fr.dynamicVBMemory, 0, DYNAMIC_VB_SIZE, 0, &fr.dynamicVBMapped);
+
+        // Staging ring buffer for texture uploads (persistently mapped)
+        createBuffer(STAGING_RING_SIZE, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     fr.stagingRing, fr.stagingRingMemory);
+        vkMapMemory(device, fr.stagingRingMemory, 0, STAGING_RING_SIZE, 0, &fr.stagingRingMapped);
 
         // Descriptor pool
         VkDescriptorPoolSize poolSizes[2] = {};
@@ -1166,13 +1248,18 @@ static void ensureRenderPass()
     if (cb == VK_NULL_HANDLE) return; // Frame acquire failed (e.g. window minimized)
     auto imageIndex = Vulkan_Shared::getCurrentImageIndex();
 
+    // Use LOAD_OP_LOAD render pass if we already started (and ended) one this frame,
+    // to preserve previously drawn content. First render pass uses LOAD_OP_CLEAR.
+    bool midFrameRestart = Vulkan_Shared::hasRenderPassBegunThisFrame();
+    VkRenderPass rp = midFrameRestart ? Vulkan_Shared::getRenderPassLoad() : Vulkan_Shared::getRenderPass();
+
     VkClearValue clearValues[2] = {};
     clearValues[0].color = {{state.clearColor[0], state.clearColor[1], state.clearColor[2], state.clearColor[3]}};
     clearValues[1].depthStencil = {(float)state.clearDepth, 0};
 
     VkRenderPassBeginInfo rpBI = {};
     rpBI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpBI.renderPass = Vulkan_Shared::getRenderPass();
+    rpBI.renderPass = rp;
     rpBI.framebuffer = Vulkan_Shared::getSwapchainFramebuffers()[imageIndex];
     rpBI.renderArea.extent = Vulkan_Shared::getSwapchainExtent();
     rpBI.clearValueCount = 2;
@@ -1180,11 +1267,29 @@ static void ensureRenderPass()
 
     vkCmdBeginRenderPass(cb, &rpBI, VK_SUBPASS_CONTENTS_INLINE);
     Vulkan_Shared::setRenderPassActive(true);
+    Vulkan_Shared::setRenderPassBegunThisFrame(true);
 
     // Dynamic state is invalidated after vkCmdBeginRenderPass
     g_viewportDirty = true;
     g_scissorDirty  = true;
     g_lastBoundPipeline = VK_NULL_HANDLE;
+    g_lastCBDataValid     = false;
+    g_lastUBOOffset       = UINT32_MAX;
+    g_lastBoundUBOOffset  = UINT32_MAX;
+    g_depthBiasDirty      = true;
+    g_lastBoundVB         = VK_NULL_HANDLE;
+    g_lastBoundVBOff      = UINT64_MAX;
+    g_cbDirty             = true;
+}
+
+static void bindVertexBuffer(VkCommandBuffer cb, VkBuffer buf, VkDeviceSize off)
+{
+    if (buf != g_lastBoundVB || off != g_lastBoundVBOff)
+    {
+        vkCmdBindVertexBuffers(cb, 0, 1, &buf, &off);
+        g_lastBoundVB = buf;
+        g_lastBoundVBOff = off;
+    }
 }
 
 // ============================================================================
@@ -1194,6 +1299,12 @@ static void ensureRenderPass()
 static uint32_t alignUp(uint32_t value, uint32_t alignment)
 {
     return (value + alignment - 1) & ~(alignment - 1);
+}
+
+static void abortCurrentFrameRecording()
+{
+    Vulkan_Shared::setCurrentCommandBuffer(VK_NULL_HANDLE);
+    Vulkan_Shared::setRenderPassActive(false);
 }
 
 static void resetFrameIfNeeded()
@@ -1206,6 +1317,7 @@ static void resetFrameIfNeeded()
         fr.uboOffset = 0;
         fr.dynamicVBOffset = 0;
         fr.descriptorSetIndex = 0;
+        fr.stagingRingOffset = 0;
 
         // Invalidate per-frame state tracking
         g_lastBoundImageView  = VK_NULL_HANDLE;
@@ -1214,6 +1326,17 @@ static void resetFrameIfNeeded()
         g_lastBoundPipeline   = VK_NULL_HANDLE;
         g_viewportDirty       = true;
         g_scissorDirty        = true;
+        g_lastCBDataValid     = false;
+        g_lastUBOOffset       = UINT32_MAX;
+        g_lastBoundUBOOffset  = UINT32_MAX;
+        g_depthBiasDirty      = true;
+        g_lastBoundVB         = VK_NULL_HANDLE;
+        g_lastBoundVBOff      = UINT64_MAX;
+        g_cbDirty             = true;
+        g_lastHasTexCoord     = false;
+        g_lastHasColor        = false;
+        g_lastHasNormal       = false;
+        g_lastBoundUBOOffset  = UINT32_MAX;
 
         // Flush deferred buffer deletions — GPU is done with this frame slot
         auto device = Vulkan_Shared::getDevice();
@@ -1223,74 +1346,135 @@ static void resetFrameIfNeeded()
             vkFreeMemory(device, db.memory, nullptr);
         }
         fr.pendingDeletes.clear();
+
+        // Process global deferred deletions (display list buffers referenced by multiple frames)
+        for (auto it = g_globalDeferredDeletes.begin(); it != g_globalDeferredDeletes.end(); )
+        {
+            if (--it->framesRemaining <= 0)
+            {
+                vkDestroyBuffer(device, it->buffer, nullptr);
+                vkFreeMemory(device, it->memory, nullptr);
+                it = g_globalDeferredDeletes.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
+        for (auto it = g_globalDeferredTextures.begin(); it != g_globalDeferredTextures.end(); )
+        {
+            if (--it->framesRemaining <= 0)
+            {
+                destroyTextureResources(device, it->image, it->memory, it->imageView);
+                it = g_globalDeferredTextures.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
     }
 }
 
-static void flushState(bool hasTexCoord, bool hasColor, bool hasNormal)
+static bool flushState(bool hasTexCoord, bool hasColor, bool hasNormal)
 {
     ensureInit();
     resetFrameIfNeeded();
-    ensureRenderPass();
 
     auto cb = Vulkan_Shared::getCurrentCommandBuffer();
-    if (cb == VK_NULL_HANDLE) return; // Frame acquire failed
+    if (cb == VK_NULL_HANDLE) return false; // Frame acquire failed
+
+    ensureRenderPass();
+
+    cb = Vulkan_Shared::getCurrentCommandBuffer();
+    if (cb == VK_NULL_HANDLE) return false;
     int frame = Vulkan_Shared::getCurrentFrame();
     auto& fr = g_frames[frame];
 
-    // Fill CBData — NO transpose for Vulkan (GLSL uses column-major natively)
-    CBData cbData = {};
+    // Fast path: if CBData hasn't changed AND vertex attribute flags match, reuse previous UBO offset
+    bool attribsChanged = hasTexCoord != g_lastHasTexCoord || hasColor != g_lastHasColor || hasNormal != g_lastHasNormal;
+    uint32_t uboOffset;
 
-    float mvp[16];
-    mat4::multiply(mvp, projStack.current(), mvStack.current());
-    memcpy(cbData.mvp, mvp, 64);
-    memcpy(cbData.mv, mvStack.current(), 64);
-    memcpy(cbData.texMat, texStack.current(), 64);
-
-    cbData.lightingEnabled = state.lighting ? 1 : 0;
-    memcpy(cbData.lightDir0, state.lightDir[0], 16);
-    cbData.lightDir0[3] = state.light0 ? 1.0f : 0.0f;
-    memcpy(cbData.lightDir1, state.lightDir[1], 16);
-    cbData.lightDir1[3] = state.light1 ? 1.0f : 0.0f;
-    memcpy(cbData.lightDiffuse0, state.lightDiffuse[0], 16);
-    memcpy(cbData.lightDiffuse1, state.lightDiffuse[1], 16);
-    memcpy(cbData.globalAmbient, state.globalAmbient, 16);
-
-    memcpy(cbData.currentColor, state.color, 16);
-    cbData.currentNormal[0] = state.normal[0];
-    cbData.currentNormal[1] = state.normal[1];
-    cbData.currentNormal[2] = state.normal[2];
-    cbData.currentNormal[3] = 0.0f;
-
-    cbData.textureEnabled = (state.texture2D && state.boundTexture != 0) ? 1 : 0;
-    cbData.hasVertexColor = hasColor ? 1 : 0;
-    cbData.hasVertexNormal = hasNormal ? 1 : 0;
-    cbData.hasVertexTexCoord = hasTexCoord ? 1 : 0;
-
-    memcpy(cbData.fogColor, state.fogColor, 16);
-    cbData.fogStart = state.fogStart;
-    cbData.fogEnd = state.fogEnd;
-    cbData.fogDensity = state.fogDensity;
-    if (!state.fog)
-        cbData.fogMode = 0;
-    else if (state.fogMode == GL_LINEAR)
-        cbData.fogMode = 1;
-    else
-        cbData.fogMode = 2;
-
-    cbData.alphaRef = state.alphaRef;
-    cbData.alphaTestEnabled = state.alphaTest ? 1 : 0;
-
-    // Sub-allocate UBO
-    uint32_t uboAlignedSize = alignUp((uint32_t)sizeof(CBData), g_uboAlignment);
-    if (fr.uboOffset + uboAlignedSize > UBO_SIZE)
+    if (!g_cbDirty && !attribsChanged && g_lastCBDataValid)
     {
-        std::cerr << "Vulkan: UBO overflow!" << std::endl;
-        return;
+        uboOffset = g_lastUBOOffset;
     }
-    uint32_t uboOffset = fr.uboOffset;
-    fr.uboOffset += uboAlignedSize;
+    else
+    {
+        // Fill CBData — NO transpose for Vulkan (GLSL uses column-major natively)
+        CBData cbData = {};
 
-    memcpy((uint8_t*)fr.uboMapped + uboOffset, &cbData, sizeof(CBData));
+        float mvp[16];
+        mat4::multiply(mvp, projStack.current(), mvStack.current());
+        memcpy(cbData.mvp, mvp, 64);
+        memcpy(cbData.mv, mvStack.current(), 64);
+        memcpy(cbData.texMat, texStack.current(), 64);
+
+        cbData.lightingEnabled = state.lighting ? 1 : 0;
+        memcpy(cbData.lightDir0, state.lightDir[0], 16);
+        cbData.lightDir0[3] = state.light0 ? 1.0f : 0.0f;
+        memcpy(cbData.lightDir1, state.lightDir[1], 16);
+        cbData.lightDir1[3] = state.light1 ? 1.0f : 0.0f;
+        memcpy(cbData.lightDiffuse0, state.lightDiffuse[0], 16);
+        memcpy(cbData.lightDiffuse1, state.lightDiffuse[1], 16);
+        memcpy(cbData.globalAmbient, state.globalAmbient, 16);
+
+        memcpy(cbData.currentColor, state.color, 16);
+        cbData.currentNormal[0] = state.normal[0];
+        cbData.currentNormal[1] = state.normal[1];
+        cbData.currentNormal[2] = state.normal[2];
+        cbData.currentNormal[3] = 0.0f;
+
+        cbData.textureEnabled = (state.texture2D && state.boundTexture != 0) ? 1 : 0;
+        cbData.hasVertexColor = hasColor ? 1 : 0;
+        cbData.hasVertexNormal = hasNormal ? 1 : 0;
+        cbData.hasVertexTexCoord = hasTexCoord ? 1 : 0;
+
+        memcpy(cbData.fogColor, state.fogColor, 16);
+        cbData.fogStart = state.fogStart;
+        cbData.fogEnd = state.fogEnd;
+        cbData.fogDensity = state.fogDensity;
+        if (!state.fog)
+            cbData.fogMode = 0;
+        else if (state.fogMode == GL_LINEAR)
+            cbData.fogMode = 1;
+        else
+            cbData.fogMode = 2;
+
+        cbData.alphaRef = state.alphaRef;
+        cbData.alphaTestEnabled = state.alphaTest ? 1 : 0;
+
+        // UBO dirty tracking: skip sub-allocation and upload if CBData is unchanged
+        if (g_lastCBDataValid && memcmp(&cbData, &g_lastCBData, sizeof(CBData)) == 0)
+        {
+            uboOffset = g_lastUBOOffset;
+        }
+        else
+        {
+            // Sub-allocate UBO
+            uint32_t uboAlignedSize = alignUp((uint32_t)sizeof(CBData), g_uboAlignment);
+            if (fr.uboOffset + uboAlignedSize > UBO_SIZE)
+            {
+                std::cerr << "Vulkan: UBO overflow!" << std::endl;
+                abortCurrentFrameRecording();
+                return false;
+            }
+            uboOffset = fr.uboOffset;
+            fr.uboOffset += uboAlignedSize;
+
+            memcpy((uint8_t*)fr.uboMapped + uboOffset, &cbData, sizeof(CBData));
+
+            g_lastCBData = cbData;
+            g_lastUBOOffset = uboOffset;
+            g_lastCBDataValid = true;
+        }
+
+        g_cbDirty = false;
+        g_lastHasTexCoord = hasTexCoord;
+        g_lastHasColor = hasColor;
+        g_lastHasNormal = hasNormal;
+    }
 
     // Resolve current texture state
     VkImageView curImageView;
@@ -1323,7 +1507,8 @@ static void flushState(bool hasTexCoord, bool hasColor, bool hasNormal)
         if (fr.descriptorSetIndex >= MAX_DESCRIPTOR_SETS)
         {
             std::cerr << "Vulkan: descriptor set overflow!" << std::endl;
-            return;
+            abortCurrentFrameRecording();
+            return false;
         }
 
         VkDescriptorSet ds = fr.descriptorSets[fr.descriptorSetIndex++];
@@ -1358,11 +1543,16 @@ static void flushState(bool hasTexCoord, bool hasColor, bool hasNormal)
         g_lastDescriptorSet   = ds;
         g_lastBoundImageView  = curImageView;
         g_lastBoundSampler    = curSampler;
+        g_lastBoundUBOOffset  = UINT32_MAX;  // Force rebind with new descriptor set
     }
 
-    // Bind descriptor set with dynamic UBO offset (always needed — offset changes per draw)
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipelineLayout,
-                            0, 1, &g_lastDescriptorSet, 1, &uboOffset);
+    // Bind descriptor set with dynamic UBO offset — skip if both set and offset are unchanged
+    if (uboOffset != g_lastBoundUBOOffset)
+    {
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipelineLayout,
+                                0, 1, &g_lastDescriptorSet, 1, &uboOffset);
+        g_lastBoundUBOOffset = uboOffset;
+    }
 
     // Viewport — only set when changed
     if (g_viewportDirty)
@@ -1388,11 +1578,18 @@ static void flushState(bool hasTexCoord, bool hasColor, bool hasNormal)
         g_scissorDirty = false;
     }
 
-    // Depth bias
-    if (state.polyOffsetFill)
-        vkCmdSetDepthBias(cb, state.polyOffsetUnits, 0.0f, state.polyOffsetFactor);
-    else
-        vkCmdSetDepthBias(cb, 0.0f, 0.0f, 0.0f);
+    // Depth bias — skip redundant calls
+    float biasConstant = state.polyOffsetFill ? state.polyOffsetUnits : 0.0f;
+    float biasSlope = state.polyOffsetFill ? state.polyOffsetFactor : 0.0f;
+    if (g_depthBiasDirty || biasConstant != g_lastDepthBiasConstant || biasSlope != g_lastDepthBiasSlope)
+    {
+        vkCmdSetDepthBias(cb, biasConstant, 0.0f, biasSlope);
+        g_lastDepthBiasConstant = biasConstant;
+        g_lastDepthBiasSlope = biasSlope;
+        g_depthBiasDirty = false;
+    }
+
+    return true;
 }
 
 } // anonymous namespace
@@ -1411,6 +1608,7 @@ void glMatrixMode(GLenum mode)
 void glLoadIdentity()
 {
     getActiveStack().loadIdentity();
+    g_cbDirty = true;
 }
 
 void glPushMatrix()
@@ -1423,6 +1621,7 @@ void glPushMatrix()
         return;
     }
     getActiveStack().push();
+    g_cbDirty = true;
 }
 
 void glPopMatrix()
@@ -1435,6 +1634,7 @@ void glPopMatrix()
         return;
     }
     getActiveStack().pop();
+    g_cbDirty = true;
 }
 
 void glTranslatef(GLfloat x, GLfloat y, GLfloat z)
@@ -1448,6 +1648,7 @@ void glTranslatef(GLfloat x, GLfloat y, GLfloat z)
         return;
     }
     mat4::translate(getActiveStack().current(), x, y, z);
+    g_cbDirty = true;
 }
 
 void glRotatef(GLfloat angle, GLfloat x, GLfloat y, GLfloat z)
@@ -1461,6 +1662,7 @@ void glRotatef(GLfloat angle, GLfloat x, GLfloat y, GLfloat z)
         return;
     }
     mat4::rotate(getActiveStack().current(), angle, x, y, z);
+    g_cbDirty = true;
 }
 
 void glScalef(GLfloat x, GLfloat y, GLfloat z)
@@ -1474,6 +1676,7 @@ void glScalef(GLfloat x, GLfloat y, GLfloat z)
         return;
     }
     mat4::scale(getActiveStack().current(), x, y, z);
+    g_cbDirty = true;
 }
 
 void glScaled(GLdouble x, GLdouble y, GLdouble z)
@@ -1494,16 +1697,19 @@ void glMultMatrixf(const GLfloat* m)
     float tmp[16];
     mat4::multiply(tmp, getActiveStack().current(), m);
     mat4::copy(getActiveStack().current(), tmp);
+    g_cbDirty = true;
 }
 
 void glOrtho(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top, GLdouble zNear, GLdouble zFar)
 {
     mat4::ortho(getActiveStack().current(), left, right, bottom, top, zNear, zFar);
+    g_cbDirty = true;
 }
 
 void glFrustum(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top, GLdouble zNear, GLdouble zFar)
 {
     mat4::frustum(getActiveStack().current(), left, right, bottom, top, zNear, zFar);
+    g_cbDirty = true;
 }
 
 // --- Enable/Disable ---
@@ -1512,15 +1718,15 @@ static void setCapability(GLenum cap, bool enabled)
 {
     switch (cap)
     {
-        case GL_TEXTURE_2D: state.texture2D = enabled; break;
+        case GL_TEXTURE_2D: state.texture2D = enabled; g_cbDirty = true; break;
         case GL_BLEND: state.blend = enabled; break;
-        case GL_ALPHA_TEST: state.alphaTest = enabled; break;
+        case GL_ALPHA_TEST: state.alphaTest = enabled; g_cbDirty = true; break;
         case GL_DEPTH_TEST: state.depthTest = enabled; break;
         case GL_CULL_FACE: state.cullFace = enabled; break;
-        case GL_FOG: state.fog = enabled; break;
-        case GL_LIGHTING: state.lighting = enabled; break;
-        case GL_LIGHT0: state.light0 = enabled; break;
-        case GL_LIGHT1: state.light1 = enabled; break;
+        case GL_FOG: state.fog = enabled; g_cbDirty = true; break;
+        case GL_LIGHTING: state.lighting = enabled; g_cbDirty = true; break;
+        case GL_LIGHT0: state.light0 = enabled; g_cbDirty = true; break;
+        case GL_LIGHT1: state.light1 = enabled; g_cbDirty = true; break;
         case GL_COLOR_MATERIAL: state.colorMaterial = enabled; break;
         case GL_POLYGON_OFFSET_FILL: state.polyOffsetFill = enabled; break;
         case GL_COLOR_LOGIC_OP: state.logicOp = enabled; break;
@@ -1583,6 +1789,7 @@ void glColor3f(GLfloat r, GLfloat g, GLfloat b)
     state.color[0] = r;
     state.color[1] = g;
     state.color[2] = b;
+    g_cbDirty = true;
 }
 
 void glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a)
@@ -1599,6 +1806,7 @@ void glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a)
     state.color[1] = g;
     state.color[2] = b;
     state.color[3] = a;
+    g_cbDirty = true;
 }
 
 // --- Depth ---
@@ -1624,6 +1832,7 @@ void glAlphaFunc(GLenum func, GLclampf ref)
 {
     state.alphaFunc = func;
     state.alphaRef = ref;
+    g_cbDirty = true;
 }
 
 // --- Fog ---
@@ -1636,12 +1845,14 @@ void glFogf(GLenum pname, GLfloat param)
         case GL_FOG_START: state.fogStart = param; break;
         case GL_FOG_END: state.fogEnd = param; break;
     }
+    g_cbDirty = true;
 }
 
 void glFogfv(GLenum pname, const GLfloat* params)
 {
     if (pname == GL_FOG_COLOR)
         memcpy(state.fogColor, params, 16);
+    g_cbDirty = true;
 }
 
 void glFogi(GLenum pname, GLint param)
@@ -1651,6 +1862,7 @@ void glFogi(GLenum pname, GLint param)
         case GL_FOG_MODE: state.fogMode = param; break;
         default: break;
     }
+    g_cbDirty = true;
 }
 
 // --- Lighting ---
@@ -1686,12 +1898,14 @@ void glLightfv(GLenum light, GLenum pname, const GLfloat* params)
         case GL_SPECULAR:
             break;
     }
+    g_cbDirty = true;
 }
 
 void glLightModelfv(GLenum pname, const GLfloat* params)
 {
     if (pname == GL_LIGHT_MODEL_AMBIENT)
         memcpy(state.globalAmbient, params, 16);
+    g_cbDirty = true;
 }
 
 void glColorMaterial(GLenum face, GLenum mode)
@@ -1713,6 +1927,7 @@ void glNormal3f(GLfloat nx, GLfloat ny, GLfloat nz)
     state.normal[0] = nx;
     state.normal[1] = ny;
     state.normal[2] = nz;
+    g_cbDirty = true;
 }
 
 void glShadeModel(GLenum mode)
@@ -1789,19 +2004,19 @@ void glGenTextures(GLsizei n, GLuint* textures)
 
 void glDeleteTextures(GLsizei n, const GLuint* textures)
 {
-    auto device = Vulkan_Shared::getDevice();
     for (int i = 0; i < n; i++)
     {
         auto it = g_textures().find(textures[i]);
         if (it != g_textures().end())
         {
-            if (it->second.imageView != VK_NULL_HANDLE)
-                vkDestroyImageView(device, it->second.imageView, nullptr);
-            if (it->second.image != VK_NULL_HANDLE)
-                vkDestroyImage(device, it->second.image, nullptr);
-            if (it->second.memory != VK_NULL_HANDLE)
-                vkFreeMemory(device, it->second.memory, nullptr);
+            deferTextureResources(it->second);
             g_textures().erase(it);
+        }
+
+        if (state.boundTexture == textures[i])
+        {
+            state.boundTexture = 0;
+            g_cbDirty = true;
         }
     }
 }
@@ -1817,6 +2032,7 @@ void glBindTexture(GLenum target, GLuint texture)
         g_recordingList->commands.push_back(cmd);
     }
     state.boundTexture = texture;
+    g_cbDirty = true;
 }
 
 void glTexParameteri(GLenum target, GLenum pname, GLint param)
@@ -1845,21 +2061,7 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei widt
     auto device = Vulkan_Shared::getDevice();
 
     // Release old
-    if (it->second.imageView != VK_NULL_HANDLE)
-    {
-        vkDestroyImageView(device, it->second.imageView, nullptr);
-        it->second.imageView = VK_NULL_HANDLE;
-    }
-    if (it->second.image != VK_NULL_HANDLE)
-    {
-        vkDestroyImage(device, it->second.image, nullptr);
-        it->second.image = VK_NULL_HANDLE;
-    }
-    if (it->second.memory != VK_NULL_HANDLE)
-    {
-        vkFreeMemory(device, it->second.memory, nullptr);
-        it->second.memory = VK_NULL_HANDLE;
-    }
+    deferTextureResources(it->second);
 
     // Create image
     VkImageCreateInfo imageCI = {};
@@ -1950,26 +2152,84 @@ void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
     if (it == g_textures().end() || it->second.image == VK_NULL_HANDLE || !pixels) return;
 
     auto device = Vulkan_Shared::getDevice();
+    auto cb = Vulkan_Shared::getCurrentCommandBuffer();
+
+    // Fallback to one-shot if no frame command buffer is active (e.g. during init)
+    if (cb == VK_NULL_HANDLE)
+    {
+        VkDeviceSize imageSize = width * height * 4;
+        VkBuffer stagingBuf;
+        VkDeviceMemory stagingMem;
+        createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     stagingBuf, stagingMem);
+        void* data;
+        vkMapMemory(device, stagingMem, 0, imageSize, 0, &data);
+        memcpy(data, pixels, imageSize);
+        vkUnmapMemory(device, stagingMem);
+
+        VkCommandBuffer onceCb = beginOneShotCommands();
+        recordImageBarrier(onceCb, it->second.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkBufferImageCopy region = {};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = {xoffset, yoffset, 0};
+        region.imageExtent = {(uint32_t)width, (uint32_t)height, 1};
+        vkCmdCopyBufferToImage(onceCb, stagingBuf, it->second.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        recordImageBarrier(onceCb, it->second.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        endOneShotCommands(onceCb);
+
+        vkDestroyBuffer(device, stagingBuf, nullptr);
+        vkFreeMemory(device, stagingMem, nullptr);
+        return;
+    }
+
+    // End render pass if active — transfer commands can't be recorded inside a render pass
+    if (Vulkan_Shared::isRenderPassActive())
+    {
+        vkCmdEndRenderPass(cb);
+        Vulkan_Shared::setRenderPassActive(false);
+    }
 
     VkDeviceSize imageSize = width * height * 4;
+    int frame = Vulkan_Shared::getCurrentFrame();
+    auto& fr = g_frames[frame];
 
+    // Try to sub-allocate from the per-frame staging ring buffer
+    size_t alignedOffset = (fr.stagingRingOffset + 3) & ~(size_t)3;
     VkBuffer stagingBuf;
-    VkDeviceMemory stagingMem;
-    createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                 stagingBuf, stagingMem);
+    VkDeviceSize stagingOffset;
+    bool usedRing = false;
 
-    void* data;
-    vkMapMemory(device, stagingMem, 0, imageSize, 0, &data);
-    memcpy(data, pixels, imageSize);
-    vkUnmapMemory(device, stagingMem);
+    if (alignedOffset + imageSize <= STAGING_RING_SIZE)
+    {
+        // Fast path: sub-allocate from ring buffer
+        memcpy((uint8_t*)fr.stagingRingMapped + alignedOffset, pixels, imageSize);
+        fr.stagingRingOffset = alignedOffset + imageSize;
+        stagingBuf = fr.stagingRing;
+        stagingOffset = (VkDeviceSize)alignedOffset;
+        usedRing = true;
+    }
+    else
+    {
+        // Fallback: individual allocation for oversized uploads
+        VkDeviceMemory stagingMem;
+        createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     stagingBuf, stagingMem);
+        void* data;
+        vkMapMemory(device, stagingMem, 0, imageSize, 0, &data);
+        memcpy(data, pixels, imageSize);
+        vkUnmapMemory(device, stagingMem);
+        stagingOffset = 0;
+        fr.pendingDeletes.push_back({stagingBuf, stagingMem});
+    }
 
-    // Batch transition+copy+transition into one submit
-    VkCommandBuffer cb = beginOneShotCommands();
-
+    // Record into the frame's main command buffer — no GPU stall
     recordImageBarrier(cb, it->second.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
     VkBufferImageCopy region = {};
+    region.bufferOffset = stagingOffset;
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.layerCount = 1;
     region.imageOffset = {xoffset, yoffset, 0};
@@ -1977,11 +2237,6 @@ void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
     vkCmdCopyBufferToImage(cb, stagingBuf, it->second.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     recordImageBarrier(cb, it->second.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-    endOneShotCommands(cb);
-
-    vkDestroyBuffer(device, stagingBuf, nullptr);
-    vkFreeMemory(device, stagingMem, nullptr);
 }
 
 void glPixelStorei(GLenum pname, GLint param)
@@ -2001,21 +2256,13 @@ GLuint glGenLists(GLsizei range)
 
 void glDeleteLists(GLuint list, GLsizei range)
 {
-    auto device = Vulkan_Shared::getDevice();
     for (GLsizei i = 0; i < range; i++)
     {
         auto it = g_displayLists().find(list + i);
         if (it != g_displayLists().end())
         {
-            for (auto& cmd : it->second.commands)
-            {
-                if (cmd.type == DLCmd::Draw && cmd.draw.vbo != VK_NULL_HANDLE)
-                {
-                    vkDestroyBuffer(device, cmd.draw.vbo, nullptr);
-                    if (cmd.draw.vboMemory != VK_NULL_HANDLE)
-                        vkFreeMemory(device, cmd.draw.vboMemory, nullptr);
-                }
-            }
+            if (it->second.consolidatedBuffer != VK_NULL_HANDLE)
+                g_globalDeferredDeletes.push_back({it->second.consolidatedBuffer, it->second.consolidatedMemory, MAX_FRAMES});
             g_displayLists().erase(it);
         }
     }
@@ -2027,28 +2274,34 @@ void glNewList(GLuint list, GLenum mode)
     g_recording = true;
     g_recordingListId = list;
 
-    auto device = Vulkan_Shared::getDevice();
     auto it = g_displayLists().find(list);
     if (it != g_displayLists().end())
     {
-        for (auto& cmd : it->second.commands)
-        {
-            if (cmd.type == DLCmd::Draw && cmd.draw.vbo != VK_NULL_HANDLE)
-            {
-                vkDestroyBuffer(device, cmd.draw.vbo, nullptr);
-                if (cmd.draw.vboMemory != VK_NULL_HANDLE)
-                    vkFreeMemory(device, cmd.draw.vboMemory, nullptr);
-            }
-        }
+        if (it->second.consolidatedBuffer != VK_NULL_HANDLE)
+            g_globalDeferredDeletes.push_back({it->second.consolidatedBuffer, it->second.consolidatedMemory, MAX_FRAMES});
     }
 
     g_displayLists()[list] = DisplayList();
     g_recordingList = &g_displayLists()[list];
     g_recordingList->valid = true;
+    g_vertexAccumulator.clear();
 }
 
 void glEndList()
 {
+    if (g_recordingList && !g_vertexAccumulator.empty())
+    {
+        VkDeviceSize totalSize = g_vertexAccumulator.size();
+        createBuffer(totalSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     g_recordingList->consolidatedBuffer, g_recordingList->consolidatedMemory);
+
+        void* mapped;
+        vkMapMemory(Vulkan_Shared::getDevice(), g_recordingList->consolidatedMemory, 0, totalSize, 0, &mapped);
+        memcpy(mapped, g_vertexAccumulator.data(), totalSize);
+        vkUnmapMemory(Vulkan_Shared::getDevice(), g_recordingList->consolidatedMemory);
+    }
+    g_vertexAccumulator.clear();
     g_recording = false;
     g_recordingList = nullptr;
 }
@@ -2066,9 +2319,12 @@ void glCallList(GLuint list)
             case DLCmd::Draw:
             {
                 auto cb = Vulkan_Shared::getCurrentCommandBuffer();
-                if (!cb || cmd.draw.vbo == VK_NULL_HANDLE) break;
+                if (!cb || it->second.consolidatedBuffer == VK_NULL_HANDLE) break;
 
-                flushState(cmd.draw.hasTexture, cmd.draw.hasColor, cmd.draw.hasNormal);
+                if (!flushState(cmd.draw.hasTexture, cmd.draw.hasColor, cmd.draw.hasNormal)) break;
+
+                cb = Vulkan_Shared::getCurrentCommandBuffer();
+                if (!cb) break;
 
                 VkPipeline pipeline = getOrCreatePipeline(mapPrimitive(cmd.draw.mode));
                 if (pipeline == VK_NULL_HANDLE) break;
@@ -2078,50 +2334,60 @@ void glCallList(GLuint list)
                     g_lastBoundPipeline = pipeline;
                 }
 
-                VkDeviceSize offset = 0;
-                vkCmdBindVertexBuffers(cb, 0, 1, &cmd.draw.vbo, &offset);
+                VkDeviceSize offset = cmd.draw.vboOffset;
+                bindVertexBuffer(cb, it->second.consolidatedBuffer, offset);
                 vkCmdDraw(cb, cmd.draw.count, 1, cmd.draw.first, 0);
                 break;
             }
             case DLCmd::PushMatrix:
                 getActiveStack().push();
+                g_cbDirty = true;
                 break;
             case DLCmd::PopMatrix:
                 getActiveStack().pop();
+                g_cbDirty = true;
                 break;
             case DLCmd::Translate:
                 mat4::translate(getActiveStack().current(), cmd.translate.x, cmd.translate.y, cmd.translate.z);
+                g_cbDirty = true;
                 break;
             case DLCmd::Scale:
                 mat4::scale(getActiveStack().current(), cmd.scaleData.x, cmd.scaleData.y, cmd.scaleData.z);
+                g_cbDirty = true;
                 break;
             case DLCmd::Rotate:
                 mat4::rotate(getActiveStack().current(), cmd.rotateData.angle, cmd.rotateData.x, cmd.rotateData.y, cmd.rotateData.z);
+                g_cbDirty = true;
                 break;
             case DLCmd::Color3f:
                 state.color[0] = cmd.color.r;
                 state.color[1] = cmd.color.g;
                 state.color[2] = cmd.color.b;
+                g_cbDirty = true;
                 break;
             case DLCmd::Color4f:
                 state.color[0] = cmd.color.r;
                 state.color[1] = cmd.color.g;
                 state.color[2] = cmd.color.b;
                 state.color[3] = cmd.color.a;
+                g_cbDirty = true;
                 break;
             case DLCmd::Normal3f:
                 state.normal[0] = cmd.normalData.x;
                 state.normal[1] = cmd.normalData.y;
                 state.normal[2] = cmd.normalData.z;
+                g_cbDirty = true;
                 break;
             case DLCmd::LoadIdentity:
                 getActiveStack().loadIdentity();
+                g_cbDirty = true;
                 break;
             case DLCmd::MultMatrix:
             {
                 float tmp[16];
                 mat4::multiply(tmp, getActiveStack().current(), cmd.matrix);
                 mat4::copy(getActiveStack().current(), tmp);
+                g_cbDirty = true;
                 break;
             }
             case DLCmd::Enable:
@@ -2132,6 +2398,7 @@ void glCallList(GLuint list)
                 break;
             case DLCmd::BindTexture:
                 state.boundTexture = cmd.textureId;
+                g_cbDirty = true;
                 break;
             default:
                 break;
@@ -2193,76 +2460,43 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count)
 
     if (g_recording)
     {
-        auto device = Vulkan_Shared::getDevice();
+        const void* srcData = nullptr;
 
         if (state.boundVBO != 0)
         {
             auto vboIt = g_vbos().find(state.boundVBO);
             if (vboIt == g_vbos().end() || vboIt->second.buffer == VK_NULL_HANDLE) return;
-
-            // Copy data from VBO to immutable buffer for display list (CPU-side, no GPU stall)
-            VkBuffer immBuf;
-            VkDeviceMemory immMem;
-            createBuffer(dataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                         immBuf, immMem);
-
-            if (vboIt->second.mapped)
-            {
-                void* mapped;
-                vkMapMemory(device, immMem, 0, dataSize, 0, &mapped);
-                memcpy(mapped, vboIt->second.mapped, dataSize);
-                vkUnmapMemory(device, immMem);
-            }
-
-            DLCommand cmd;
-            cmd.type = DLCmd::Draw;
-            cmd.draw.vbo = immBuf;
-            cmd.draw.vboMemory = immMem;
-            cmd.draw.mode = mode;
-            cmd.draw.first = first;
-            cmd.draw.count = count;
-            cmd.draw.hasTexture = hasTexCoord;
-            cmd.draw.hasColor = hasColor;
-            cmd.draw.hasNormal = hasNormal;
-            cmd.draw.stride = stride;
-            g_recordingList->commands.push_back(cmd);
+            srcData = vboIt->second.mapped;
         }
         else
         {
-            const void* basePtr = state.vp.ptr;
-            if (!basePtr) return;
-
-            VkBuffer immBuf;
-            VkDeviceMemory immMem;
-            createBuffer(dataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                         immBuf, immMem);
-
-            void* mapped;
-            vkMapMemory(device, immMem, 0, dataSize, 0, &mapped);
-            memcpy(mapped, basePtr, dataSize);
-            vkUnmapMemory(device, immMem);
-
-            DLCommand cmd;
-            cmd.type = DLCmd::Draw;
-            cmd.draw.vbo = immBuf;
-            cmd.draw.vboMemory = immMem;
-            cmd.draw.mode = mode;
-            cmd.draw.first = first;
-            cmd.draw.count = count;
-            cmd.draw.hasTexture = hasTexCoord;
-            cmd.draw.hasColor = hasColor;
-            cmd.draw.hasNormal = hasNormal;
-            cmd.draw.stride = stride;
-            g_recordingList->commands.push_back(cmd);
+            srcData = state.vp.ptr;
         }
+        if (!srcData) return;
+
+        // Sub-allocate from vertex accumulator (align to 32 bytes for vertex stride)
+        size_t alignedOffset = (g_vertexAccumulator.size() + 31) & ~(size_t)31;
+        g_vertexAccumulator.resize(alignedOffset + dataSize);
+        memcpy(g_vertexAccumulator.data() + alignedOffset, srcData, dataSize);
+
+        DLCommand cmd;
+        cmd.type = DLCmd::Draw;
+        cmd.draw.vboOffset = (VkDeviceSize)alignedOffset;
+        cmd.draw.mode = mode;
+        cmd.draw.first = first;
+        cmd.draw.count = count;
+        cmd.draw.hasTexture = hasTexCoord;
+        cmd.draw.hasColor = hasColor;
+        cmd.draw.hasNormal = hasNormal;
+        cmd.draw.stride = stride;
+        g_recordingList->commands.push_back(cmd);
         return;
     }
 
-    flushState(hasTexCoord, hasColor, hasNormal);
+    if (!flushState(hasTexCoord, hasColor, hasNormal)) return;
 
     auto cb = Vulkan_Shared::getCurrentCommandBuffer();
+    if (cb == VK_NULL_HANDLE) return;
 
     VkPipeline pipeline = getOrCreatePipeline(mapPrimitive(mode));
     if (pipeline == VK_NULL_HANDLE) return;
@@ -2290,13 +2524,14 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count)
             if (fr.dynamicVBOffset + dataSize > DYNAMIC_VB_SIZE)
             {
                 std::cerr << "Vulkan: dynamic VB overflow!" << std::endl;
+                abortCurrentFrameRecording();
                 return;
             }
 
             memcpy((uint8_t*)fr.dynamicVBMapped + fr.dynamicVBOffset, vertexData, dataSize);
 
             VkDeviceSize offset = fr.dynamicVBOffset;
-            vkCmdBindVertexBuffers(cb, 0, 1, &fr.dynamicVB, &offset);
+            bindVertexBuffer(cb, fr.dynamicVB, offset);
 
             fr.dynamicVBOffset += dataSize;
             fr.dynamicVBOffset = (fr.dynamicVBOffset + 31) & ~31;
@@ -2306,7 +2541,7 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count)
             // Static VBO (GL_STATIC_DRAW, chunk meshes) — bind directly.
             // Data is HOST_COHERENT so the GPU sees it immediately after memcpy.
             VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(cb, 0, 1, &vboIt->second.buffer, &offset);
+            bindVertexBuffer(cb, vboIt->second.buffer, offset);
         }
     }
     else
@@ -2321,13 +2556,14 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count)
         if (fr.dynamicVBOffset + dataSize > DYNAMIC_VB_SIZE)
         {
             std::cerr << "Vulkan: dynamic VB overflow!" << std::endl;
+            abortCurrentFrameRecording();
             return;
         }
 
         memcpy((uint8_t*)fr.dynamicVBMapped + fr.dynamicVBOffset, vertexData, dataSize);
 
         VkDeviceSize offset = fr.dynamicVBOffset;
-        vkCmdBindVertexBuffers(cb, 0, 1, &fr.dynamicVB, &offset);
+        bindVertexBuffer(cb, fr.dynamicVB, offset);
 
         fr.dynamicVBOffset += dataSize;
         // Align to 32 bytes (vertex stride)
@@ -2357,9 +2593,7 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers)
         {
             if (it->second.buffer != VK_NULL_HANDLE)
             {
-                // Defer destruction — buffer may still be referenced by in-flight command buffers
-                int nextFrame = (Vulkan_Shared::getCurrentFrame() + 1) % MAX_FRAMES;
-                g_frames[nextFrame].pendingDeletes.push_back({it->second.buffer, it->second.memory});
+                g_globalDeferredDeletes.push_back({it->second.buffer, it->second.memory, MAX_FRAMES});
             }
             g_vbos().erase(it);
         }
@@ -2392,10 +2626,7 @@ void glBufferData(GLenum target, GLsizeiptr size, const void* data, GLenum usage
     // Recreate buffer if size changed
     if (it->second.buffer != VK_NULL_HANDLE && it->second.size < (size_t)size)
     {
-        // Defer destruction — old buffer may still be in use by the other frame's command buffer.
-        // Push to the NEXT frame slot; its fence wait guarantees the GPU is done with the old buffer.
-        int nextFrame = (Vulkan_Shared::getCurrentFrame() + 1) % MAX_FRAMES;
-        g_frames[nextFrame].pendingDeletes.push_back({it->second.buffer, it->second.memory});
+        g_globalDeferredDeletes.push_back({it->second.buffer, it->second.memory, MAX_FRAMES});
         it->second.buffer = VK_NULL_HANDLE;
         it->second.memory = VK_NULL_HANDLE;
         it->second.mapped = nullptr;

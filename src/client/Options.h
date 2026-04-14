@@ -74,7 +74,7 @@ public:
 	int_t viewDistance = 0;
 	bool bobView = true;
 	bool anaglyph3d = false;
-	bool limitFramerate = false;
+	float limitFramerate = 0.0f;
 	bool fancyGraphics = true;
 	float fovSetting = 0.0f;
 	int_t guiScale = 0;
@@ -127,6 +127,7 @@ public:
 	void load();
 
 private:
+	void updateFramerateLimit();
 	float readFloat(const std::string &s);
 
 public:

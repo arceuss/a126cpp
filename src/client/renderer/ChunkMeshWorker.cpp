@@ -63,13 +63,18 @@ void ChunkMeshWorker::workerLoop()
 	}
 }
 
-void ChunkMeshWorker::submitTask(std::unique_ptr<ChunkBuildTask> task)
+bool ChunkMeshWorker::submitTask(std::unique_ptr<ChunkBuildTask> task)
 {
 	{
 		std::lock_guard<std::mutex> lock(queueMutex);
+		if (queuedTaskCount.load() >= MAX_QUEUED_TASKS)
+			return false;
+
 		pendingTasks.push_back(std::move(task));
+		queuedTaskCount.fetch_add(1);
 	}
 	queueCV.notify_one();
+	return true;
 }
 
 int_t ChunkMeshWorker::drainCompleted(int_t maxUploads)
@@ -91,11 +96,13 @@ int_t ChunkMeshWorker::drainCompleted(int_t maxUploads)
 		if (task->chunk->dirty)
 		{
 			task->chunk->inFlight = false;
+			queuedTaskCount.fetch_sub(1);
 			continue;
 		}
 
 		// Upload to GPU (main thread only)
 		task->chunk->uploadMesh(task->result);
+		queuedTaskCount.fetch_sub(1);
 		uploaded++;
 	}
 
@@ -108,17 +115,19 @@ void ChunkMeshWorker::clearAll()
 		std::lock_guard<std::mutex> lock(queueMutex);
 		for (auto &task : pendingTasks)
 			task->chunk->inFlight = false;
+		queuedTaskCount.fetch_sub(pendingTasks.size());
 		pendingTasks.clear();
 	}
 	{
 		std::lock_guard<std::mutex> lock(resultMutex);
 		for (auto &task : completedTasks)
 			task->chunk->inFlight = false;
+		queuedTaskCount.fetch_sub(completedTasks.size());
 		completedTasks.clear();
 	}
 }
 
 bool ChunkMeshWorker::hasPendingWork() const
 {
-	return !pendingTasks.empty() || !completedTasks.empty();
+	return queuedTaskCount.load() != 0;
 }

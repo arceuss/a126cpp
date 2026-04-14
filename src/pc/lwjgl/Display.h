@@ -77,6 +77,8 @@ void setFullscreen(bool fullscreen);
 bool isCloseRequested();
 bool isVisible();
 bool isActive();
+void setVSyncEnabled(bool enabled);
+void sync(int_t fps);
 
 void processMessages();
 

@@ -159,6 +159,8 @@ public:
 	void generateFlyby();
 
 	void run();
+	int_t getLimitFramerate() const;
+	bool isFramerateLimitBelowMax() const;
 
 	void renderFpsMeter(long tickNanos);
 

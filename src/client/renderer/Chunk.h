@@ -127,4 +127,5 @@ public:
 
 private:
 	void deleteVBOs();
+	void invalidateVBOs();
 };

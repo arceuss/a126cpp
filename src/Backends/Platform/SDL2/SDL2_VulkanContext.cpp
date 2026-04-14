@@ -10,6 +10,10 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdlib>
+#include <cctype>
 #include <cstring>
 #include <set>
 
@@ -27,7 +31,9 @@
 #define IDI_ICON1 1
 #endif
 
-static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+static constexpr int MAX_FRAMES_IN_FLIGHT = 3;
+static bool s_vsyncEnabled = false;
+static bool s_pendingVsyncApply = false;
 
 // ============================================================================
 // Vulkan_Shared storage
@@ -43,6 +49,7 @@ namespace Vulkan_Shared
 
     static VkSwapchainKHR s_swapchain = VK_NULL_HANDLE;
     static VkRenderPass s_renderPass = VK_NULL_HANDLE;
+    static VkRenderPass s_renderPassLoad = VK_NULL_HANDLE;  // LOAD_OP_LOAD variant for mid-frame restart
     static VkCommandPool s_commandPool = VK_NULL_HANDLE;
 
     static VkFormat s_swapchainFormat = VK_FORMAT_B8G8R8A8_UNORM;
@@ -62,6 +69,7 @@ namespace Vulkan_Shared
     static uint32_t s_currentImageIndex = 0;
     static int s_currentFrame = 0;
     static bool s_renderPassActive = false;
+    static bool s_renderPassBegunThisFrame = false;  // true after first render pass begin this frame
     static uint32_t s_currentAcquireSemaphoreIndex = 0;
 
     VkInstance getInstance() { return s_instance; }
@@ -72,6 +80,7 @@ namespace Vulkan_Shared
 
     VkSwapchainKHR getSwapchain() { return s_swapchain; }
     VkRenderPass getRenderPass() { return s_renderPass; }
+    VkRenderPass getRenderPassLoad() { return s_renderPassLoad; }
     VkCommandPool getCommandPool() { return s_commandPool; }
 
     VkFormat getSwapchainFormat() { return s_swapchainFormat; }
@@ -91,14 +100,21 @@ namespace Vulkan_Shared
     int getCurrentFrame() { return s_currentFrame; }
     bool isRenderPassActive() { return s_renderPassActive; }
     void setRenderPassActive(bool active) { s_renderPassActive = active; }
+    bool hasRenderPassBegunThisFrame() { return s_renderPassBegunThisFrame; }
+    void setRenderPassBegunThisFrame(bool begun) { s_renderPassBegunThisFrame = begun; }
 
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
     {
-        VkPhysicalDeviceMemoryProperties memProps;
-        vkGetPhysicalDeviceMemoryProperties(s_physicalDevice, &memProps);
-        for (uint32_t i = 0; i < memProps.memoryTypeCount; i++)
+        static VkPhysicalDeviceMemoryProperties cachedMemProps = {};
+        static bool memPropsCached = false;
+        if (!memPropsCached)
         {
-            if ((typeFilter & (1 << i)) && (memProps.memoryTypes[i].propertyFlags & properties) == properties)
+            vkGetPhysicalDeviceMemoryProperties(s_physicalDevice, &cachedMemProps);
+            memPropsCached = true;
+        }
+        for (uint32_t i = 0; i < cachedMemProps.memoryTypeCount; i++)
+        {
+            if ((typeFilter & (1 << i)) && (cachedMemProps.memoryTypes[i].propertyFlags & properties) == properties)
                 return i;
         }
         throw std::runtime_error("Failed to find suitable memory type");
@@ -111,6 +127,7 @@ namespace Vulkan_Shared
     void setGraphicsQueueFamily(uint32_t family) { s_graphicsQueueFamily = family; }
     void setSwapchain(VkSwapchainKHR swapchain) { s_swapchain = swapchain; }
     void setRenderPass(VkRenderPass renderPass) { s_renderPass = renderPass; }
+    void setRenderPassLoad(VkRenderPass renderPass) { s_renderPassLoad = renderPass; }
     void setCommandPool(VkCommandPool commandPool) { s_commandPool = commandPool; }
     void setSwapchainFormat(VkFormat format) { s_swapchainFormat = format; }
     void setSwapchainExtent(VkExtent2D extent) { s_swapchainExtent = extent; }
@@ -150,6 +167,231 @@ static std::vector<VkFence> s_inFlightFences;
 static std::vector<VkSemaphore> s_imageAvailableSemaphores; // per swapchain image
 static std::vector<VkSemaphore> s_renderFinishedSemaphores; // one per swapchain image, indexed by image index
 static uint32_t s_acquireSemaphoreIndex = 0; // rotating index into s_imageAvailableSemaphores
+static constexpr uint64_t FRAME_FENCE_TIMEOUT_NS = 1000000000ull;
+static bool s_validationRequested = false;
+static bool s_validationEnabled = false;
+static bool s_syncValidationEnabled = false;
+static bool s_debugUtilsAvailable = false;
+static VkDebugUtilsMessengerEXT s_debugMessenger = VK_NULL_HANDLE;
+
+static bool envFlagEnabled(const char* name)
+{
+    const char* value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0')
+        return false;
+
+    std::string normalized(value);
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch)
+    {
+        return static_cast<char>(std::tolower(ch));
+    });
+
+    return normalized != "0" && normalized != "false" && normalized != "off" && normalized != "no";
+}
+
+static bool hasInstanceLayer(const char* layerName)
+{
+    uint32_t layerCount = 0;
+    vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+    std::vector<VkLayerProperties> layers(layerCount);
+    vkEnumerateInstanceLayerProperties(&layerCount, layers.data());
+
+    return std::any_of(layers.begin(), layers.end(), [layerName](const VkLayerProperties& layer)
+    {
+        return std::strcmp(layer.layerName, layerName) == 0;
+    });
+}
+
+static bool hasInstanceExtension(const char* extensionName)
+{
+    uint32_t extensionCount = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
+    std::vector<VkExtensionProperties> extensions(extensionCount);
+    vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data());
+
+    return std::any_of(extensions.begin(), extensions.end(), [extensionName](const VkExtensionProperties& extension)
+    {
+        return std::strcmp(extension.extensionName, extensionName) == 0;
+    });
+}
+
+static VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsCallback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+    VkDebugUtilsMessageTypeFlagsEXT messageTypes,
+    const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
+    void* userData)
+{
+    (void)userData;
+
+    const char* severity = "INFO";
+    if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+        severity = "ERROR";
+    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+        severity = "WARN";
+    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT)
+        severity = "VERBOSE";
+
+    std::cerr << "[VKVALIDATION][" << severity << "]";
+    if (messageTypes & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT)
+        std::cerr << "[VALIDATION]";
+    if (messageTypes & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT)
+        std::cerr << "[PERF]";
+    if (messageTypes & VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT)
+        std::cerr << "[GENERAL]";
+    if (callbackData != nullptr)
+    {
+        if (callbackData->pMessageIdName != nullptr)
+            std::cerr << " " << callbackData->pMessageIdName;
+        if (callbackData->pMessage != nullptr)
+            std::cerr << ": " << callbackData->pMessage;
+    }
+    std::cerr << std::endl;
+
+    return VK_FALSE;
+}
+
+static VkDebugUtilsMessengerCreateInfoEXT makeDebugUtilsMessengerCreateInfo()
+{
+    VkDebugUtilsMessengerCreateInfoEXT createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                             VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                             VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+    createInfo.pfnUserCallback = debugUtilsCallback;
+    return createInfo;
+}
+
+static void createDebugMessenger()
+{
+    if (!s_validationEnabled || !s_debugUtilsAvailable || Vulkan_Shared::s_instance == VK_NULL_HANDLE)
+        return;
+
+    PFN_vkCreateDebugUtilsMessengerEXT createFn = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+        vkGetInstanceProcAddr(Vulkan_Shared::s_instance, "vkCreateDebugUtilsMessengerEXT"));
+    if (createFn == nullptr)
+        return;
+
+    VkDebugUtilsMessengerCreateInfoEXT createInfo = makeDebugUtilsMessengerCreateInfo();
+    VkResult result = createFn(Vulkan_Shared::s_instance, &createInfo, nullptr, &s_debugMessenger);
+    if (result != VK_SUCCESS)
+        std::cerr << "Vulkan: failed to create debug messenger (" << result << ")" << std::endl;
+}
+
+struct FrameTimingSample
+{
+    uint64_t waitFenceNs = 0;
+    uint64_t acquireNs = 0;
+    uint64_t resetFenceNs = 0;
+    uint64_t resetCommandBufferNs = 0;
+    uint64_t beginCommandBufferNs = 0;
+    uint64_t endCommandBufferNs = 0;
+    uint64_t submitNs = 0;
+    uint64_t presentNs = 0;
+};
+
+using TimingClock = std::chrono::steady_clock;
+
+static std::array<FrameTimingSample, MAX_FRAMES_IN_FLIGHT> s_frameTimingSamples = {};
+static FrameTimingSample s_timingTotals = {};
+static uint64_t s_timingAccumulatedFrames = 0;
+static TimingClock::time_point s_lastTimingPrint = {};
+static bool s_timingInitialized = false;
+
+static uint64_t elapsedNanos(TimingClock::time_point start)
+{
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(TimingClock::now() - start).count());
+}
+
+static void clearFrameTimingSample(int frame)
+{
+    if (frame < 0 || frame >= MAX_FRAMES_IN_FLIGHT)
+        return;
+
+    s_frameTimingSamples[frame] = {};
+}
+
+static void publishFrameTimingSample(int frame)
+{
+    if (frame < 0 || frame >= MAX_FRAMES_IN_FLIGHT)
+        return;
+
+    const FrameTimingSample& sample = s_frameTimingSamples[frame];
+    s_timingTotals.waitFenceNs += sample.waitFenceNs;
+    s_timingTotals.acquireNs += sample.acquireNs;
+    s_timingTotals.resetFenceNs += sample.resetFenceNs;
+    s_timingTotals.resetCommandBufferNs += sample.resetCommandBufferNs;
+    s_timingTotals.beginCommandBufferNs += sample.beginCommandBufferNs;
+    s_timingTotals.endCommandBufferNs += sample.endCommandBufferNs;
+    s_timingTotals.submitNs += sample.submitNs;
+    s_timingTotals.presentNs += sample.presentNs;
+    s_timingAccumulatedFrames++;
+
+    s_frameTimingSamples[frame] = {};
+
+    TimingClock::time_point now = TimingClock::now();
+    if (!s_timingInitialized)
+    {
+        s_lastTimingPrint = now;
+        s_timingInitialized = true;
+        return;
+    }
+
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastTimingPrint).count() < 1000 || s_timingAccumulatedFrames == 0)
+        return;
+
+    double invFrames = 1.0 / static_cast<double>(s_timingAccumulatedFrames);
+    auto toUs = [invFrames](uint64_t totalNs) -> double
+    {
+        return (static_cast<double>(totalNs) * invFrames) / 1000.0;
+    };
+
+    double frameStartUs = toUs(s_timingTotals.waitFenceNs + s_timingTotals.acquireNs + s_timingTotals.resetFenceNs + s_timingTotals.resetCommandBufferNs + s_timingTotals.beginCommandBufferNs);
+    double frameEndUs = toUs(s_timingTotals.endCommandBufferNs + s_timingTotals.submitNs + s_timingTotals.presentNs);
+
+    std::cout << "[VK] " << s_timingAccumulatedFrames << " frames | per-frame avg: "
+              << "start " << static_cast<int>(frameStartUs) << "us ("
+              << "waitFence " << static_cast<int>(toUs(s_timingTotals.waitFenceNs)) << "us, "
+              << "acquire " << static_cast<int>(toUs(s_timingTotals.acquireNs)) << "us, "
+              << "resetFence " << static_cast<int>(toUs(s_timingTotals.resetFenceNs)) << "us, "
+              << "resetCb " << static_cast<int>(toUs(s_timingTotals.resetCommandBufferNs)) << "us, "
+              << "beginCb " << static_cast<int>(toUs(s_timingTotals.beginCommandBufferNs)) << "us), "
+              << "end " << static_cast<int>(frameEndUs) << "us ("
+              << "endCb " << static_cast<int>(toUs(s_timingTotals.endCommandBufferNs)) << "us, "
+              << "submit " << static_cast<int>(toUs(s_timingTotals.submitNs)) << "us, "
+              << "present " << static_cast<int>(toUs(s_timingTotals.presentNs)) << "us)"
+              << std::endl;
+
+    s_timingTotals = {};
+    s_timingAccumulatedFrames = 0;
+    s_lastTimingPrint = now;
+}
+
+static void invalidateCurrentFrameState()
+{
+    Vulkan_Shared::s_currentCommandBuffer = VK_NULL_HANDLE;
+    Vulkan_Shared::s_renderPassActive = false;
+    Vulkan_Shared::s_renderPassBegunThisFrame = false;
+}
+
+static void recreateInFlightFence(int frame)
+{
+    if (frame < 0 || frame >= (int)s_inFlightFences.size())
+        return;
+
+    if (s_inFlightFences[frame] != VK_NULL_HANDLE)
+    {
+        vkDestroyFence(Vulkan_Shared::s_device, s_inFlightFences[frame], nullptr);
+        s_inFlightFences[frame] = VK_NULL_HANDLE;
+    }
+
+    VkFenceCreateInfo fenceCI = {};
+    fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceCI.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    if (vkCreateFence(Vulkan_Shared::s_device, &fenceCI, nullptr, &s_inFlightFences[frame]) != VK_SUCCESS)
+        std::cerr << "Vulkan: failed to recreate in-flight fence for frame " << frame << std::endl;
+}
 
 static VkFormat findDepthFormat()
 {
@@ -266,6 +508,21 @@ static void createRenderPass()
 
     if (vkCreateRenderPass(Vulkan_Shared::s_device, &renderPassCI, nullptr, &Vulkan_Shared::s_renderPass) != VK_SUCCESS)
         throw std::runtime_error("Failed to create render pass");
+
+    // Create a second render pass with LOAD_OP_LOAD for mid-frame restarts
+    // (e.g. after glTexSubImage2D ends the render pass for transfer commands).
+    // This preserves previously drawn content instead of clearing the framebuffer.
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentDescription attachmentsLoad[] = { colorAttachment, depthAttachment };
+    renderPassCI.pAttachments = attachmentsLoad;
+
+    if (vkCreateRenderPass(Vulkan_Shared::s_device, &renderPassCI, nullptr, &Vulkan_Shared::s_renderPassLoad) != VK_SUCCESS)
+        throw std::runtime_error("Failed to create load render pass");
 }
 
 static void createSwapchain(int width, int height)
@@ -304,6 +561,26 @@ static void createSwapchain(int width, int height)
     if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount)
         imageCount = caps.maxImageCount;
 
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    if (!s_vsyncEnabled)
+    {
+        uint32_t modeCount = 0;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(Vulkan_Shared::s_physicalDevice, s_surface, &modeCount, nullptr);
+        std::vector<VkPresentModeKHR> modes(modeCount);
+        vkGetPhysicalDeviceSurfacePresentModesKHR(Vulkan_Shared::s_physicalDevice, s_surface, &modeCount, modes.data());
+
+        for (auto m : modes)
+        {
+            if (m == VK_PRESENT_MODE_IMMEDIATE_KHR)
+            {
+                presentMode = m;
+                break;
+            }
+            if (m == VK_PRESENT_MODE_MAILBOX_KHR)
+                presentMode = m;
+        }
+    }
+
     VkSwapchainCreateInfoKHR swapCI = {};
     swapCI.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     swapCI.surface = s_surface;
@@ -316,7 +593,7 @@ static void createSwapchain(int width, int height)
     swapCI.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     swapCI.preTransform = caps.currentTransform;
     swapCI.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    swapCI.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    swapCI.presentMode = presentMode;
     swapCI.clipped = VK_TRUE;
     swapCI.oldSwapchain = Vulkan_Shared::s_swapchain;
 
@@ -543,10 +820,34 @@ public:
 
         // Create Vulkan instance
         {
+            s_validationRequested = envFlagEnabled("A126CPP_VK_VALIDATION");
+            s_syncValidationEnabled = envFlagEnabled("A126CPP_VK_SYNC_VALIDATION");
+            s_validationEnabled = false;
+            s_debugUtilsAvailable = false;
+
             unsigned int sdlExtCount = 0;
             SDL_Vulkan_GetInstanceExtensions(window, &sdlExtCount, nullptr);
             std::vector<const char*> extensions(sdlExtCount);
             SDL_Vulkan_GetInstanceExtensions(window, &sdlExtCount, extensions.data());
+
+            if (s_validationRequested)
+            {
+                if (hasInstanceLayer("VK_LAYER_KHRONOS_validation"))
+                {
+                    s_validationEnabled = true;
+                }
+                else
+                {
+                    std::cerr << "Vulkan: validation requested but VK_LAYER_KHRONOS_validation is not available" << std::endl;
+                }
+
+                s_debugUtilsAvailable = hasInstanceExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+                if (s_validationEnabled && s_debugUtilsAvailable && std::find(extensions.begin(), extensions.end(), VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == extensions.end())
+                    extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+
+                if (s_validationEnabled && !s_debugUtilsAvailable)
+                    std::cerr << "Vulkan: validation requested but VK_EXT_debug_utils is not available; messages may be limited" << std::endl;
+            }
 
             VkApplicationInfo appInfo = {};
             appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -562,14 +863,38 @@ public:
             createInfo.enabledExtensionCount = (uint32_t)extensions.size();
             createInfo.ppEnabledExtensionNames = extensions.data();
 
-#ifdef MC_DEBUG_VK
             const char* validationLayers[] = { "VK_LAYER_KHRONOS_validation" };
-            createInfo.enabledLayerCount = 1;
-            createInfo.ppEnabledLayerNames = validationLayers;
-#endif
+            VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo = {};
+            VkValidationFeatureEnableEXT validationFeatureEnables[] = {
+                VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT
+            };
+            VkValidationFeaturesEXT validationFeatures = {};
+
+            if (s_validationEnabled)
+            {
+                createInfo.enabledLayerCount = 1;
+                createInfo.ppEnabledLayerNames = validationLayers;
+
+                if (s_debugUtilsAvailable)
+                {
+                    debugCreateInfo = makeDebugUtilsMessengerCreateInfo();
+                    createInfo.pNext = &debugCreateInfo;
+                }
+
+                if (s_syncValidationEnabled)
+                {
+                    validationFeatures.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
+                    validationFeatures.enabledValidationFeatureCount = 1;
+                    validationFeatures.pEnabledValidationFeatures = validationFeatureEnables;
+                    validationFeatures.pNext = createInfo.pNext;
+                    createInfo.pNext = &validationFeatures;
+                }
+            }
 
             if (vkCreateInstance(&createInfo, nullptr, &Vulkan_Shared::s_instance) != VK_SUCCESS)
                 throw std::runtime_error("Failed to create Vulkan instance");
+
+            createDebugMessenger();
         }
 
         // Create surface
@@ -749,17 +1074,33 @@ public:
     SDL_Window* getWindow() const { return window; }
     const GLCapabilities& getCapabilities() const { return capabilities; }
 
-    void beginFrame()
+    bool beginFrame()
     {
         int frame = Vulkan_Shared::s_currentFrame;
 
-        vkWaitForFences(Vulkan_Shared::s_device, 1, &s_inFlightFences[frame], VK_TRUE, UINT64_MAX);
+        invalidateCurrentFrameState();
+        clearFrameTimingSample(frame);
+
+        TimingClock::time_point stageStart = TimingClock::now();
+        VkResult waitResult = vkWaitForFences(Vulkan_Shared::s_device, 1, &s_inFlightFences[frame], VK_TRUE, FRAME_FENCE_TIMEOUT_NS);
+        s_frameTimingSamples[frame].waitFenceNs = elapsedNanos(stageStart);
+        if (waitResult == VK_TIMEOUT)
+        {
+            std::cerr << "Vulkan: vkWaitForFences timed out for frame " << frame << std::endl;
+            return false;
+        }
+        if (waitResult != VK_SUCCESS)
+        {
+            std::cerr << "Vulkan: vkWaitForFences failed (" << waitResult << ")" << std::endl;
+            return false;
+        }
 
         // Use a separate rotating index for acquire semaphores to avoid reusing one
         // that's still referenced by a presented-but-not-re-acquired swapchain image.
         uint32_t semIdx = s_acquireSemaphoreIndex;
         s_acquireSemaphoreIndex = (s_acquireSemaphoreIndex + 1) % (uint32_t)s_imageAvailableSemaphores.size();
 
+        stageStart = TimingClock::now();
         VkResult result = vkAcquireNextImageKHR(Vulkan_Shared::s_device, Vulkan_Shared::s_swapchain,
             UINT64_MAX, s_imageAvailableSemaphores[semIdx], VK_NULL_HANDLE, &Vulkan_Shared::s_currentImageIndex);
 
@@ -769,39 +1110,66 @@ public:
             result = vkAcquireNextImageKHR(Vulkan_Shared::s_device, Vulkan_Shared::s_swapchain,
                 UINT64_MAX, s_imageAvailableSemaphores[semIdx], VK_NULL_HANDLE, &Vulkan_Shared::s_currentImageIndex);
         }
+        s_frameTimingSamples[frame].acquireNs = elapsedNanos(stageStart);
 
         if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
         {
-            Vulkan_Shared::s_currentCommandBuffer = VK_NULL_HANDLE;
-            Vulkan_Shared::s_renderPassActive = false;
-            return;
+            std::cerr << "Vulkan: vkAcquireNextImageKHR failed (" << result << ")" << std::endl;
+            return false;
         }
 
         // Store which acquire semaphore was used for this frame, so swapBuffers can wait on it
         Vulkan_Shared::s_currentAcquireSemaphoreIndex = semIdx;
 
-        vkResetFences(Vulkan_Shared::s_device, 1, &s_inFlightFences[frame]);
+        stageStart = TimingClock::now();
+        VkResult resetFenceResult = vkResetFences(Vulkan_Shared::s_device, 1, &s_inFlightFences[frame]);
+        s_frameTimingSamples[frame].resetFenceNs = elapsedNanos(stageStart);
+        if (resetFenceResult != VK_SUCCESS)
+        {
+            std::cerr << "Vulkan: vkResetFences failed (" << resetFenceResult << ")" << std::endl;
+            recreateInFlightFence(frame);
+            return false;
+        }
 
         VkCommandBuffer cb = s_commandBuffers[frame];
-        vkResetCommandBuffer(cb, 0);
+        stageStart = TimingClock::now();
+        VkResult resetCbResult = vkResetCommandBuffer(cb, 0);
+        s_frameTimingSamples[frame].resetCommandBufferNs = elapsedNanos(stageStart);
+        if (resetCbResult != VK_SUCCESS)
+        {
+            std::cerr << "Vulkan: vkResetCommandBuffer failed (" << resetCbResult << ")" << std::endl;
+            recreateInFlightFence(frame);
+            return false;
+        }
 
         VkCommandBufferBeginInfo beginInfo = {};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(cb, &beginInfo);
+        stageStart = TimingClock::now();
+        VkResult beginResult = vkBeginCommandBuffer(cb, &beginInfo);
+        s_frameTimingSamples[frame].beginCommandBufferNs = elapsedNanos(stageStart);
+        if (beginResult != VK_SUCCESS)
+        {
+            std::cerr << "Vulkan: vkBeginCommandBuffer failed (" << beginResult << ")" << std::endl;
+            recreateInFlightFence(frame);
+            return false;
+        }
 
         Vulkan_Shared::s_currentCommandBuffer = cb;
         Vulkan_Shared::s_renderPassActive = false;
+        Vulkan_Shared::s_renderPassBegunThisFrame = false;
+        return true;
     }
 
     void swapBuffers()
     {
         int frame = Vulkan_Shared::s_currentFrame;
-        VkCommandBuffer cb = s_commandBuffers[frame];
+        VkCommandBuffer cb = Vulkan_Shared::s_currentCommandBuffer;
 
         // If beginFrame failed to acquire an image, skip submit/present
-        if (Vulkan_Shared::s_currentCommandBuffer == VK_NULL_HANDLE)
+        if (cb == VK_NULL_HANDLE)
         {
+            clearFrameTimingSample(frame);
             Vulkan_Shared::s_currentFrame = (frame + 1) % MAX_FRAMES_IN_FLIGHT;
             beginFrame();
             return;
@@ -809,14 +1177,18 @@ public:
 
         // If no render pass was started this frame, begin one to transition the
         // swapchain image from UNDEFINED to PRESENT_SRC_KHR via the render pass.
+        // Use LOAD render pass if one was already started and ended mid-frame
+        // (e.g. by glTexSubImage2D), to preserve drawn content.
         if (!Vulkan_Shared::s_renderPassActive)
         {
+            bool midFrame = Vulkan_Shared::s_renderPassBegunThisFrame;
+
             VkClearValue clearValues[2] = {};
             clearValues[1].depthStencil = {1.0f, 0};
 
             VkRenderPassBeginInfo rpBI = {};
             rpBI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            rpBI.renderPass = Vulkan_Shared::s_renderPass;
+            rpBI.renderPass = midFrame ? Vulkan_Shared::s_renderPassLoad : Vulkan_Shared::s_renderPass;
             rpBI.framebuffer = Vulkan_Shared::getSwapchainFramebuffers()[Vulkan_Shared::s_currentImageIndex];
             rpBI.renderArea.extent = Vulkan_Shared::getSwapchainExtent();
             rpBI.clearValueCount = 2;
@@ -828,7 +1200,17 @@ public:
         vkCmdEndRenderPass(cb);
         Vulkan_Shared::s_renderPassActive = false;
 
-        vkEndCommandBuffer(cb);
+        TimingClock::time_point stageStart = TimingClock::now();
+        VkResult endResult = vkEndCommandBuffer(cb);
+        s_frameTimingSamples[frame].endCommandBufferNs = elapsedNanos(stageStart);
+        if (endResult != VK_SUCCESS)
+        {
+            std::cerr << "Vulkan: vkEndCommandBuffer failed (" << endResult << ")" << std::endl;
+            recreateInFlightFence(frame);
+            clearFrameTimingSample(frame);
+            invalidateCurrentFrameState();
+            return;
+        }
 
         // Submit
         // Use the swapchain image index for render-finished semaphore.  Each image
@@ -850,14 +1232,15 @@ public:
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;
 
+        stageStart = TimingClock::now();
         VkResult submitResult = vkQueueSubmit(Vulkan_Shared::s_graphicsQueue, 1, &submitInfo, s_inFlightFences[frame]);
+        s_frameTimingSamples[frame].submitNs = elapsedNanos(stageStart);
         if (submitResult != VK_SUCCESS)
         {
-            // Submit failed — fence was not enqueued, so it will never signal.
-            // Re-signal the fence manually so the next beginFrame doesn't hang.
             std::cerr << "Vulkan: vkQueueSubmit failed (" << submitResult << ")" << std::endl;
-            Vulkan_Shared::s_currentFrame = (frame + 1) % MAX_FRAMES_IN_FLIGHT;
-            beginFrame();
+            recreateInFlightFence(frame);
+            clearFrameTimingSample(frame);
+            invalidateCurrentFrameState();
             return;
         }
 
@@ -870,7 +1253,9 @@ public:
         presentInfo.pSwapchains = &Vulkan_Shared::s_swapchain;
         presentInfo.pImageIndices = &Vulkan_Shared::s_currentImageIndex;
 
+        stageStart = TimingClock::now();
         VkResult result = vkQueuePresentKHR(Vulkan_Shared::s_graphicsQueue, &presentInfo);
+        s_frameTimingSamples[frame].presentNs = elapsedNanos(stageStart);
 
         // Check for resize
         int w, h;
@@ -879,6 +1264,21 @@ public:
         {
             lastWidth = w;
             lastHeight = h;
+            recreateSwapchain();
+        }
+        else if (result != VK_SUCCESS)
+        {
+            std::cerr << "Vulkan: vkQueuePresentKHR failed (" << result << ")" << std::endl;
+            clearFrameTimingSample(frame);
+            invalidateCurrentFrameState();
+            return;
+        }
+
+        publishFrameTimingSample(frame);
+
+        if (s_pendingVsyncApply)
+        {
+            s_pendingVsyncApply = false;
             recreateSwapchain();
         }
 
@@ -909,6 +1309,16 @@ SDL_GLContext getGLContext()
 void swapBuffers()
 {
     getContext().swapBuffers();
+}
+
+void setVSyncEnabled(bool enabled)
+{
+    if (s_vsyncEnabled == enabled)
+        return;
+
+    s_vsyncEnabled = enabled;
+    if (Vulkan_Shared::s_device != VK_NULL_HANDLE)
+        s_pendingVsyncApply = true;
 }
 
 } // namespace detail

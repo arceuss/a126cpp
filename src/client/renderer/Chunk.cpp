@@ -1,6 +1,7 @@
 #include "client/renderer/Chunk.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 #include "client/renderer/Tesselator.h"
 #include "client/renderer/ChunkSnapshot.h"
@@ -32,6 +33,16 @@ Chunk::Chunk(Level &level, std::vector<std::shared_ptr<TileEntity>> &globalRende
 Chunk::~Chunk()
 {
 	deleteVBOs();
+}
+
+void Chunk::invalidateVBOs()
+{
+	for (int_t i = 0; i < 2; i++)
+	{
+		vboEntries[i].vertexCount = 0;
+		vboEntries[i].empty = true;
+	}
+	useVBO = false;
 }
 
 void Chunk::deleteVBOs()
@@ -90,9 +101,13 @@ void Chunk::removeRenderableTileEntitiesFromGlobal()
 		return;
 	}
 
-	globalRenderableTileEntities.erase(std::remove_if(globalRenderableTileEntities.begin(), globalRenderableTileEntities.end(), [this](const std::shared_ptr<TileEntity> &tileEntity)
+	std::unordered_set<TileEntity *> toRemove;
+	for (const auto &te : renderableTileEntities)
+		toRemove.insert(te.get());
+
+	globalRenderableTileEntities.erase(std::remove_if(globalRenderableTileEntities.begin(), globalRenderableTileEntities.end(), [&toRemove](const std::shared_ptr<TileEntity> &tileEntity)
 	{
-		return std::find(renderableTileEntities.begin(), renderableTileEntities.end(), tileEntity) != renderableTileEntities.end();
+		return toRemove.count(tileEntity.get()) != 0;
 	}), globalRenderableTileEntities.end());
 
 	renderableTileEntities.clear();
@@ -100,9 +115,16 @@ void Chunk::removeRenderableTileEntitiesFromGlobal()
 
 void Chunk::addRenderableTileEntitiesToGlobal()
 {
+	if (renderableTileEntities.empty())
+		return;
+
+	std::unordered_set<TileEntity *> existing;
+	for (const auto &te : globalRenderableTileEntities)
+		existing.insert(te.get());
+
 	for (const auto &tileEntity : renderableTileEntities)
 	{
-		if (std::find(globalRenderableTileEntities.begin(), globalRenderableTileEntities.end(), tileEntity) == globalRenderableTileEntities.end())
+		if (existing.count(tileEntity.get()) == 0)
 		{
 			globalRenderableTileEntities.push_back(tileEntity);
 		}
@@ -114,6 +136,7 @@ void Chunk::rebuild()
 {
 	if (!dirty) return;
 	updates++;
+	deleteVBOs();
 
 	// Get the thread-local Tesselator (LCE _LARGE_WORLDS pattern)
 	Tesselator &t = Tesselator::getInstance();
@@ -371,7 +394,7 @@ float Chunk::squishedDistanceToSqr(Entity &player)
 void Chunk::reset()
 {
 	removeRenderableTileEntitiesFromGlobal();
-	deleteVBOs();
+	invalidateVBOs();
 	empty.fill(true);
 	visible = false;
 	compiled = false;
@@ -381,6 +404,7 @@ void Chunk::reset()
 void Chunk::remove()
 {
 	reset();
+	deleteVBOs();
 }
 
 int_t Chunk::getList(int_t layer)

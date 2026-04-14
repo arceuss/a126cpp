@@ -3,7 +3,10 @@
 #include "client/Minecraft.h"
 #include "client/locale/Language.h"
 
+#include <algorithm>
+
 #include "lwjgl/Keyboard.h"
+#include "lwjgl/Display.h"
 
 constexpr Options::Option::Element *Options::Option::values[];
 
@@ -14,7 +17,7 @@ Options::Option::Element Options::Option::SENSITIVITY = { true, false, u"options
 Options::Option::Element Options::Option::RENDER_DISTANCE = { false, false, u"options.renderDistance" };
 Options::Option::Element Options::Option::VIEW_BOBBING = { false, true, u"options.viewBobbing" };
 Options::Option::Element Options::Option::ANAGLYPH = { false, true, u"options.anaglyph" };
-Options::Option::Element Options::Option::LIMIT_FRAMERATE = { false, true, u"options.limitFramerate" };
+Options::Option::Element Options::Option::LIMIT_FRAMERATE = { true, false, u"options.limitFramerate" };
 Options::Option::Element Options::Option::DIFFICULTY = { false, false, u"options.difficulty" };
 Options::Option::Element Options::Option::GRAPHICS = { false, false, u"options.graphics" };
 Options::Option::Element Options::Option::FOV = { true, false, u"options.fov" };
@@ -42,6 +45,7 @@ void Options::open(File *optionsFile)
 {
 	this->optionsFile.reset(File::open(*optionsFile, u"options.txt"));
 	load();
+	updateFramerateLimit();
 	save();
 }
 
@@ -70,6 +74,11 @@ void Options::set(Option::Element &option, float value)
 		sound = value;
 	else if (&option == &Option::SENSITIVITY)
 		mouseSensitivity = value;
+	else if (&option == &Option::LIMIT_FRAMERATE)
+	{
+		limitFramerate = std::clamp(value, 0.0f, 1.0f);
+		updateFramerateLimit();
+	}
 	else if (&option == &Option::FOV)
 		fovSetting = value;
 }
@@ -87,8 +96,6 @@ void Options::toggle(Option::Element &option, int_t add)
 		anaglyph3d = !anaglyph3d;
 		minecraft.textures.reloadAll();
 	}
-	else if (&option == &Option::LIMIT_FRAMERATE)
-		limitFramerate = !limitFramerate;
 	else if (&option == &Option::DIFFICULTY)
 		difficulty = (difficulty + add) & 3;
 	else if (&option == &Option::GRAPHICS)
@@ -110,6 +117,8 @@ float Options::getProgressValue(Option::Element &option)
 		return sound;
 	else if (&option == &Option::SENSITIVITY)
 		return mouseSensitivity;
+	else if (&option == &Option::LIMIT_FRAMERATE)
+		return limitFramerate;
 	else if (&option == &Option::FOV)
 		return fovSetting;
 	return 0.0f;
@@ -123,8 +132,6 @@ bool Options::getBooleanValue(Option::Element &option)
 		return bobView;
 	else if (&option == &Option::ANAGLYPH)
 		return anaglyph3d;
-	else if (&option == &Option::LIMIT_FRAMERATE)
-		return limitFramerate;
 	return false;
 }
 
@@ -144,6 +151,18 @@ jstring Options::getMessage(Option::Element &option)
 			int_t fovValue = static_cast<int_t>(70.0f + fovSetting * 40.0f);
 			return u"FOV: " + String::fromUTF8(std::to_string(fovValue));
 		}
+	}
+
+	if (&option == &Option::LIMIT_FRAMERATE)
+	{
+		jstring result = l.getElement(option.captionId) + u": ";
+		if (limitFramerate <= 0.0f)
+			return result + u"VSync";
+		if (limitFramerate >= 1.0f)
+			return result + u"Unlimited";
+
+		int_t fps = static_cast<int_t>(limitFramerate * 260.0f);
+		return result + String::fromUTF8(std::to_string(fps)) + u" fps";
 	}
 	
 	jstring result = l.getElement(option.captionId) + u": ";
@@ -237,7 +256,7 @@ void Options::load()
 		if (key == "anaglyph3d")
 			anaglyph3d = value == "true";
 		if (key == "limitFramerate")
-			limitFramerate = value == "true";
+			limitFramerate = std::clamp(readFloat(value), 0.0f, 1.0f);
 		if (key == "difficulty")
 			difficulty = std::stoi(value);
 		if (key == "fancyGraphics")
@@ -260,6 +279,13 @@ void Options::load()
 				keyMappings[i]->key = std::stoi(value);
 		}
 	}
+
+	updateFramerateLimit();
+}
+
+void Options::updateFramerateLimit()
+{
+	lwjgl::Display::setVSyncEnabled(limitFramerate <= 0.0f);
 }
 
 float Options::readFloat(const std::string &s)

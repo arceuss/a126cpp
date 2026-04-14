@@ -26,6 +26,7 @@ class ChunkMeshWorker
 {
 private:
 	std::thread workerThread;
+	static constexpr size_t MAX_QUEUED_TASKS = 24;
 
 	std::mutex queueMutex;
 	std::condition_variable queueCV;
@@ -35,6 +36,7 @@ private:
 	std::deque<std::unique_ptr<ChunkBuildTask>> completedTasks;
 
 	std::atomic<bool> running{false};
+	std::atomic<size_t> queuedTaskCount{0};
 
 	// Thread-local offline tesselator (~2MB buffer, no GL calls)
 	static constexpr int_t WORKER_TESS_SIZE = 0x80000; // 512K floats = 2MB
@@ -49,7 +51,7 @@ public:
 	void stop();
 
 	// Main thread: submit a chunk for async meshing
-	void submitTask(std::unique_ptr<ChunkBuildTask> task);
+	bool submitTask(std::unique_ptr<ChunkBuildTask> task);
 
 	// Main thread: upload completed meshes to GPU (up to maxUploads)
 	int_t drainCompleted(int_t maxUploads);

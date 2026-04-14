@@ -78,6 +78,8 @@ message(STATUS "Build configuration: ${BUILD_CONFIG}")
 
 configure_and_build_backend("OpenGL2")
 
+configure_and_build_backend("Vulkan")
+
 if(CMAKE_HOST_WIN32)
 	configure_and_build_backend("D3D11")
 else()

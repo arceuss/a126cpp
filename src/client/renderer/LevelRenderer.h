@@ -31,6 +31,7 @@ public:
 	static constexpr int_t CHUNK_SIZE = 16;
 	static constexpr int_t MAX_VISIBLE_REBUILDS_PER_FRAME = 3;
 	static constexpr int_t MAX_INVISIBLE_REBUILDS_PER_FRAME = 1;
+	static constexpr int_t MAX_ASYNC_UPLOADS_PER_FRAME = 12;
 
 	std::vector<std::shared_ptr<TileEntity>> renderableTileEntities;
 

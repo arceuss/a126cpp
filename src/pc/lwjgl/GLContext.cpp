@@ -3,6 +3,9 @@
 #include <iostream>
 #include <stdexcept>
 #include <csignal>
+#include <string>
+
+#include <glad/glad.h>
 
 #include "external/SDLException.h"
 
@@ -132,6 +135,8 @@ static void setContextAttributes(int major, int minor)
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, minor);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
 }
+
+static bool s_vsyncEnabled = false;
 
 // Context singleton
 class GLContext
@@ -321,6 +326,17 @@ SDL_Window *getWindow()
 SDL_GLContext getGLContext()
 {
 	return getContext().getGLContext();
+}
+
+void swapBuffers()
+{
+	SDL_GL_SwapWindow(getContext().getWindow());
+}
+
+void setVSyncEnabled(bool enabled)
+{
+	s_vsyncEnabled = enabled;
+	SDL_GL_SetSwapInterval(enabled ? 1 : 0);
 }
 
 }

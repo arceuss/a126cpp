@@ -36,15 +36,16 @@ to build:
 3. run cmake: `cmake ..` (or `cmake -G "Visual Studio 17 2022" ..` for visual studio)
 4. build it: `cmake --build .` (or just open the .sln in visual studio)
 
-if you want a specific renderer backend, pass `-DBACKEND_RENDERER=OpenGL2` or `-DBACKEND_RENDERER=D3D11` when you configure.
+if you want a specific renderer backend, pass `-DBACKEND_RENDERER=OpenGL2`, `-DBACKEND_RENDERER=D3D11`, or `-DBACKEND_RENDERER=Vulkan` when you configure.
 
 the executable now goes into a backend-specific folder so the builds do not overwrite each other:
 - `bin/opengl2/`
 - `bin/d3d11/`
+- `bin/vulkan/`
 
 visual studio and other multi-config generators will put `Debug` or `Release` under those folders.
 
-if you want both backends built in one go, run:
+if you want all supported backends built in one go, run:
 
 ```bash
 cmake -P cmake/BuildBackends.cmake

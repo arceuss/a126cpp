@@ -92,11 +92,12 @@ void main()
             lit += lightDiffuse1.rgb * ndl;
         }
 
-        // GL_COLOR_MATERIAL: vertex color is material ambient+diffuse
+        // Fixed-function lighting clamps the primary color before texturing.
+        // Without this, upward-facing surfaces can exceed 1.0 and wash out.
         vertColor.rgb *= lit;
     }
 
-    fragColor = vertColor;
+    fragColor = clamp(vertColor, vec4(0.0), vec4(1.0));
 
     // Fog distance (eye-space)
     vec4 eyePos = modelViewMatrix * vec4(inPos, 1.0);

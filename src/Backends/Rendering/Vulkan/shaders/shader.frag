@@ -73,5 +73,5 @@ void main()
         color.rgb = mix(fogColor.rgb, color.rgb, f);
     }
 
-    outColor = color;
+    outColor = clamp(color, vec4(0.0), vec4(1.0));
 }

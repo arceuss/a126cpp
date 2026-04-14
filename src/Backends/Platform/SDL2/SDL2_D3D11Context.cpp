@@ -80,6 +80,8 @@ namespace SDL2_Shared
 namespace
 {
 
+static bool s_vsyncEnabled = false;
+
 static void createRenderTargetView()
 {
     ID3D11Texture2D* backBuffer = nullptr;
@@ -296,7 +298,7 @@ public:
 
     void swapBuffers()
     {
-        D3D11_Shared::s_swapChain->Present(0, 0);
+		D3D11_Shared::s_swapChain->Present(s_vsyncEnabled ? 1 : 0, 0);
 
         // Check for window resize
         int w, h;
@@ -342,6 +344,11 @@ SDL_GLContext getGLContext()
 void swapBuffers()
 {
     getContext().swapBuffers();
+}
+
+void setVSyncEnabled(bool enabled)
+{
+	s_vsyncEnabled = enabled;
 }
 
 } // namespace detail

@@ -39,6 +39,7 @@ public:
 SDL_Window *getWindow();
 SDL_GLContext getGLContext();
 void swapBuffers();
+void setVSyncEnabled(bool enabled);
 
 }
 

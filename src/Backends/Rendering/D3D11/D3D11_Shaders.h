@@ -109,11 +109,12 @@ VSOutput main(VSInput input)
             lit += lightDiffuse1.rgb * ndl;
         }
 
-        // GL_COLOR_MATERIAL: vertex color is material ambient+diffuse
+        // Fixed-function lighting clamps the primary color before texturing.
+        // Without this, upward-facing surfaces can exceed 1.0 and wash out.
         vertColor.rgb *= lit;
     }
 
-    output.color = vertColor;
+    output.color = saturate(vertColor);
 
     // Fog distance (eye-space)
     float4 eyePos = mul(float4(input.pos, 1.0), modelViewMatrix);
@@ -195,6 +196,6 @@ float4 main(PSInput input) : SV_TARGET
         color.rgb = lerp(fogColor.rgb, color.rgb, f);
     }
 
-    return color;
+    return saturate(color);
 }
 )HLSL";

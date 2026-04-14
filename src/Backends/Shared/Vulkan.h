@@ -17,6 +17,7 @@ namespace Vulkan_Shared
 
     VkSwapchainKHR getSwapchain();
     VkRenderPass getRenderPass();
+    VkRenderPass getRenderPassLoad();
     VkCommandPool getCommandPool();
 
     VkFormat getSwapchainFormat();
@@ -37,6 +38,8 @@ namespace Vulkan_Shared
     int getCurrentFrame();
     bool isRenderPassActive();
     void setRenderPassActive(bool active);
+    bool hasRenderPassBegunThisFrame();
+    void setRenderPassBegunThisFrame(bool begun);
 
     // Memory helper (used by both context and renderer)
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);

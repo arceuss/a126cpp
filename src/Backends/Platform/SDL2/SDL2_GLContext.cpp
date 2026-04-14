@@ -153,6 +153,8 @@ static void setContextAttributes(int major, int minor)
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
 }
 
+static bool s_vsyncEnabled = false;
+
 // Context singleton
 class GLContext
 {
@@ -349,6 +351,12 @@ SDL_GLContext getGLContext()
 void swapBuffers()
 {
 	SDL_GL_SwapWindow(getContext().getWindow());
+}
+
+void setVSyncEnabled(bool enabled)
+{
+	s_vsyncEnabled = enabled;
+	SDL_GL_SetSwapInterval(enabled ? 1 : 0);
 }
 
 }

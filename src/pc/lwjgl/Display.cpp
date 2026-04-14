@@ -1,7 +1,9 @@
 #include "lwjgl/Display.h"
 
+#include <chrono>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 
 #include "lwjgl/GLContext.h"
 #include "lwjgl/Mouse.h"
@@ -89,6 +91,45 @@ bool isActive()
 	return (flags & SDL_WINDOW_INPUT_FOCUS) != 0;
 }
 
+void setVSyncEnabled(bool enabled)
+{
+	GLContext::detail::setVSyncEnabled(enabled);
+}
+
+void sync(int_t fps)
+{
+	if (fps <= 0)
+		return;
+
+	using clock = std::chrono::steady_clock;
+	static clock::time_point nextFrameTime = clock::now();
+	static int_t lastFps = 0;
+
+	auto frameDuration = std::chrono::nanoseconds(1000000000LL / fps);
+	auto now = clock::now();
+	if (fps != lastFps)
+	{
+		nextFrameTime = now;
+		lastFps = fps;
+	}
+	if (nextFrameTime < now - frameDuration)
+		nextFrameTime = now;
+
+	nextFrameTime += frameDuration;
+	while (true)
+	{
+		now = clock::now();
+		if (now >= nextFrameTime)
+			break;
+
+		auto remaining = nextFrameTime - now;
+		if (remaining > std::chrono::milliseconds(2))
+			std::this_thread::sleep_for(remaining - std::chrono::milliseconds(1));
+		else
+			std::this_thread::yield();
+	}
+}
+
 void processMessages()
 {
 	SDL_Event e;
@@ -124,7 +165,7 @@ void processMessages()
 
 void swapBuffers()
 {
-	SDL_GL_SwapWindow(GLContext::detail::getWindow());
+	GLContext::detail::swapBuffers();
 }
 
 void update(bool doProcessMessages)

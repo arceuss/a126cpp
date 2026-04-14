@@ -955,7 +955,7 @@ bool LevelRenderer::updateDirtyChunks(Player &player, bool force)
 {
 	// Always drain completed async mesh tasks first (upload VBOs on main thread)
 	if (meshWorker)
-		meshWorker->drainCompleted(8);
+		meshWorker->drainCompleted(MAX_ASYNC_UPLOADS_PER_FRAME);
 
 	// Force mode = synchronous rebuild (initial world load, prepareLevel)
 	if (force)
@@ -1032,9 +1032,15 @@ bool LevelRenderer::updateDirtyChunks(Player &player, bool force)
 					level ? *level : chunk->level,
 					chunk->x - r, chunk->y - r, chunk->z - r,
 					chunk->x + chunk->xs + r, chunk->y + chunk->ys + r, chunk->z + chunk->zs + r);
-				chunk->dirty = false;
-				chunk->inFlight = true;
-				meshWorker->submitTask(std::move(task));
+				if (meshWorker->submitTask(std::move(task)))
+				{
+					chunk->dirty = false;
+					chunk->inFlight = true;
+				}
+				else
+				{
+					dirtyChunks.push_back(chunk);
+				}
 			}
 		}
 	}
@@ -1061,9 +1067,16 @@ bool LevelRenderer::updateDirtyChunks(Player &player, bool force)
 					level ? *level : chunk->level,
 					chunk->x - r, chunk->y - r, chunk->z - r,
 					chunk->x + chunk->xs + r, chunk->y + chunk->ys + r, chunk->z + chunk->zs + r);
-				chunk->dirty = false;
-				chunk->inFlight = true;
-				meshWorker->submitTask(std::move(task));
+				if (meshWorker->submitTask(std::move(task)))
+				{
+					chunk->dirty = false;
+					chunk->inFlight = true;
+				}
+				else
+				{
+					toAdd[j] = nullptr;
+					continue;
+				}
 			}
 			secondaryRemoved++;
 		}

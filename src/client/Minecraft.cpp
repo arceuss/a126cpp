@@ -494,7 +494,7 @@ void Minecraft::run()
 			long_t tickNanos = System::nanoTime() - tickNano;
 
 		checkGlError("Pre render");
-		
+
 		// Beta: Update sound engine every frame (Minecraft.java:588)
 		if (player != nullptr)
 			soundEngine.update(player.get(), timer.a);
@@ -505,9 +505,6 @@ void Minecraft::run()
 			// Update lights once per frame (was being called twice before)
 			if (level != nullptr)
 				level->updateLights();
-
-			if (options.limitFramerate)
-				std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
 			if (!lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_F7))
 				lwjgl::Display::update();
@@ -567,6 +564,9 @@ void Minecraft::run()
 				fpsMs += 1000;
 				fpsFrames = 0;
 			}
+
+			if (isFramerateLimitBelowMax())
+				lwjgl::Display::sync(getLimitFramerate());
 		}
 #ifdef NDEBUG
 	}
@@ -576,6 +576,19 @@ void Minecraft::run()
 		return;
 	}
 #endif
+}
+
+int_t Minecraft::getLimitFramerate() const
+{
+	if (level == nullptr && screen != nullptr)
+		return 30;
+
+	return static_cast<int_t>(options.limitFramerate * 260.0f);
+}
+
+bool Minecraft::isFramerateLimitBelowMax() const
+{
+	return options.limitFramerate < 1.0f;
 }
 
 void Minecraft::renderFpsMeter(long tickNanos)
