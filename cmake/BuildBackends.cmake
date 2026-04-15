@@ -35,6 +35,9 @@ function(run_checked)
 endfunction()
 
 function(configure_and_build_backend backend)
+	set(options OPTIONAL)
+	cmake_parse_arguments(ARG "${options}" "" "" ${ARGN})
+
 	string(TOLOWER "${backend}" backend_dir)
 	set(build_dir "${SOURCE_DIR}/build-${backend_dir}")
 
@@ -58,7 +61,17 @@ function(configure_and_build_backend backend)
 		list(APPEND configure_command "-T" "${TOOLSET}")
 	endif()
 
-	run_checked(${configure_command})
+	string(JOIN " " pretty_cfg ${configure_command})
+	message(STATUS "Running: ${pretty_cfg}")
+	execute_process(COMMAND ${configure_command} RESULT_VARIABLE cfg_result)
+	if(NOT cfg_result EQUAL 0)
+		if(ARG_OPTIONAL)
+			message(STATUS "Skipping ${backend} backend (configure failed — SDK may not be installed)")
+			return()
+		else()
+			message(FATAL_ERROR "Configure failed for ${backend} with exit code ${cfg_result}")
+		endif()
+	endif()
 
 	set(build_command
 		"${CMAKE_COMMAND}"
@@ -121,12 +134,7 @@ message(STATUS "Build configuration: ${BUILD_CONFIG}")
 
 configure_and_build_backend("OpenGL2")
 
-find_package(Vulkan QUIET)
-if(Vulkan_FOUND)
-	configure_and_build_backend("Vulkan")
-else()
-	message(STATUS "Skipping Vulkan build because Vulkan SDK was not found.")
-endif()
+configure_and_build_backend("Vulkan" OPTIONAL)
 
 if(CMAKE_HOST_WIN32)
 	configure_and_build_backend("D3D11")
