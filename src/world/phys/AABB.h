@@ -15,8 +15,8 @@ class HitResult;
 class AABB
 {
 private:
-	static std::vector<std::unique_ptr<AABB>> pool;
-	static int_t poolPointer;
+	static thread_local std::vector<std::unique_ptr<AABB>> pool;
+	static thread_local int_t poolPointer;
 
 public:
 	double x0, y0, z0;

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <AppxPackageSigningEnabled>true</AppxPackageSigningEnabled>
+    <PackageCertificateThumbprint>236AD20B3E4E3A15B71EA6C252BCDB178779735A</PackageCertificateThumbprint>
+  </PropertyGroup>
+</Project>

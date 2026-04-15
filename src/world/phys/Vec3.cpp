@@ -2,8 +2,8 @@
 
 #include "util/Mth.h"
 
-std::vector<std::unique_ptr<Vec3>> Vec3::pool;
-int_t Vec3::poolPointer = 0;
+thread_local std::vector<std::unique_ptr<Vec3>> Vec3::pool;
+thread_local int_t Vec3::poolPointer = 0;
 
 Vec3 *Vec3::newPermanent(double x, double y, double z)
 {

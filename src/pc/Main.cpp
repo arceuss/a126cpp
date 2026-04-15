@@ -1,4 +1,8 @@
+// SDL2 WinRT sets up the CoreApplication entry point; suppress SDL_MAIN_HANDLED
+// so SDL2's WinRT stub runs the game loop correctly under UWP.
+#ifndef MC_UWP
 #define SDL_MAIN_HANDLED
+#endif
 #include "SDL.h"
 
 #include <cstring>

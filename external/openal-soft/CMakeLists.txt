@@ -717,6 +717,18 @@ IF(ALSOFT_REQUIRE_OPENSL AND NOT HAVE_OPENSL)
     MESSAGE(FATAL_ERROR "Failed to enabled required OpenSL backend")
 ENDIF()
 
+
+# Check for UWP WASAPI backend
+IF(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+    ENABLE_LANGUAGE(CXX)
+    SET(HAVE_UWP_WASAPI 1)
+    SET(ALC_OBJS ${ALC_OBJS} Alc/backends/uwp_wasapi.cpp)
+    SET(BACKENDS "${BACKENDS} UWP-WASAPI,")
+    SET_SOURCE_FILES_PROPERTIES(Alc/backends/uwp_wasapi.cpp PROPERTIES
+        LANGUAGE CXX
+        COMPILE_FLAGS "/DNTDDI_VERSION=NTDDI_WIN10_RS3 /D_WIN32_WINNT=0x0A00"
+    )
+ENDIF()
 # Optionally enable the Wave Writer backend
 IF(ALSOFT_BACKEND_WAVE)
     SET(HAVE_WAVE 1)
@@ -792,7 +804,7 @@ MESSAGE(STATUS "Building with support for CPU extensions:")
 MESSAGE(STATUS "    ${CPU_EXTS}")
 MESSAGE(STATUS "")
 
-IF(WIN32)
+IF(WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
     IF(NOT HAVE_DSOUND)
         MESSAGE(STATUS "WARNING: Building the Windows version without DirectSound output")
         MESSAGE(STATUS "         This is probably NOT what you want!")

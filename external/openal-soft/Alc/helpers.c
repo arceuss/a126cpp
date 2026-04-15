@@ -111,16 +111,24 @@ void FillCPUCaps(ALuint capfilter)
         }
     }
 #elif defined(HAVE_WINDOWS_H)
-    HMODULE k32 = GetModuleHandleA("kernel32.dll");
-    BOOL (WINAPI*IsProcessorFeaturePresent)(DWORD ProcessorFeature);
-    IsProcessorFeaturePresent = (BOOL(WINAPI*)(DWORD))GetProcAddress(k32, "IsProcessorFeaturePresent");
-    if(!IsProcessorFeaturePresent)
-        ERR("IsProcessorFeaturePresent not available; CPU caps not detected\n");
-    else
+#if defined(WINAPI_FAMILY) && (WINAPI_FAMILY != WINAPI_FAMILY_DESKTOP_APP)
+    /* UWP: IsProcessorFeaturePresent is available directly */
+    if(IsProcessorFeaturePresent(PF_XMMI_INSTRUCTIONS_AVAILABLE))
+        caps |= CPU_CAP_SSE;
+#else
     {
-        if(IsProcessorFeaturePresent(PF_XMMI_INSTRUCTIONS_AVAILABLE))
-            caps |= CPU_CAP_SSE;
+        HMODULE k32 = GetModuleHandleA("kernel32.dll");
+        BOOL (WINAPI*IsProcessorFeaturePresent)(DWORD ProcessorFeature);
+        IsProcessorFeaturePresent = (BOOL(WINAPI*)(DWORD))GetProcAddress(k32, "IsProcessorFeaturePresent");
+        if(!IsProcessorFeaturePresent)
+            ERR("IsProcessorFeaturePresent not available; CPU caps not detected\n");
+        else
+        {
+            if(IsProcessorFeaturePresent(PF_XMMI_INSTRUCTIONS_AVAILABLE))
+                caps |= CPU_CAP_SSE;
+        }
     }
+#endif
 #endif
 #ifdef HAVE_NEON
     /* Assume Neon support if compiled with it */
@@ -294,7 +302,14 @@ int pthread_setspecific(pthread_key_t key, void *val)
 
 
 void *LoadLib(const char *name)
-{ return LoadLibraryA(name); }
+{
+#if defined(WINAPI_FAMILY) && (WINAPI_FAMILY != WINAPI_FAMILY_DESKTOP_APP)
+    (void)name;
+    return NULL; /* Dynamic loading not used on UWP */
+#else
+    return LoadLibraryA(name);
+#endif
+}
 void CloseLib(void *handle)
 { FreeLibrary((HANDLE)handle); }
 void *GetSymbol(void *handle, const char *name)

@@ -9,8 +9,8 @@
 class Vec3
 {
 private:
-	static std::vector<std::unique_ptr<Vec3>> pool;
-	static int_t poolPointer;
+	static thread_local std::vector<std::unique_ptr<Vec3>> pool;
+	static thread_local int_t poolPointer;
 
 public:
 	double x, y, z;

@@ -3,8 +3,8 @@
 #include "world/phys/HitResult.h"
 #include "world/phys/Vec3.h"
 
-std::vector<std::unique_ptr<AABB>> AABB::pool;
-int_t AABB::poolPointer = 0;
+thread_local std::vector<std::unique_ptr<AABB>> AABB::pool;
+thread_local int_t AABB::poolPointer = 0;
 
 AABB *AABB::newPermanent(double x0, double y0, double z0, double x1, double y1, double z1)
 {

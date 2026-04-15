@@ -16,6 +16,11 @@
 
 #include "SDL.h"
 
+#ifdef MC_UWP
+#include <SDL_syswm.h>
+#include <windows.ui.core.h>
+#endif
+
 namespace lwjgl
 {
 namespace Display
@@ -156,6 +161,36 @@ void processMessages()
 				break;
 		}
 	}
+
+#ifdef MC_UWP
+	// UWP: cursor is hidden via PointerCursor=nullptr when grabbed, but
+	// it still drifts to other monitors where it becomes visible again.
+	// Recenter it each frame.  Relative mouse deltas come from
+	// MouseDevice::MouseMoved (not PointerMoved), so this is safe.
+	if (Mouse::isGrabbed()) {
+		SDL_SysWMinfo wmInfo;
+		SDL_VERSION(&wmInfo.version);
+		if (SDL_GetWindowWMInfo(GLContext::detail::getWindow(), &wmInfo)) {
+			IInspectable *insp = reinterpret_cast<IInspectable *>(wmInfo.info.winrt.window);
+			ABI::Windows::UI::Core::ICoreWindow *cw = nullptr;
+			ABI::Windows::UI::Core::ICoreWindow2 *cw2 = nullptr;
+			if (SUCCEEDED(insp->QueryInterface(__uuidof(ABI::Windows::UI::Core::ICoreWindow),
+				reinterpret_cast<void **>(&cw)))) {
+				ABI::Windows::Foundation::Rect bounds;
+				cw->get_Bounds(&bounds);
+				if (SUCCEEDED(insp->QueryInterface(__uuidof(ABI::Windows::UI::Core::ICoreWindow2),
+					reinterpret_cast<void **>(&cw2)))) {
+					ABI::Windows::Foundation::Point center;
+					center.X = bounds.X + bounds.Width / 2.0f;
+					center.Y = bounds.Y + bounds.Height / 2.0f;
+					cw2->put_PointerPosition(center);
+					cw2->Release();
+				}
+				cw->Release();
+			}
+		}
+	}
+#endif
 
 	// Update display mode
 	if (!current_display_mode.isFullscreen())

@@ -35,7 +35,7 @@
 
 #include "alMain.h"
 
-#ifdef _WIN32_IE
+#if defined(_WIN32_IE) && (!defined(WINAPI_FAMILY) || WINAPI_FAMILY == WINAPI_FAMILY_DESKTOP_APP)
 #include <shlobj.h>
 #endif
 
@@ -214,7 +214,7 @@ void ReadALConfig(void)
     cfgBlocks->name = strdup("general");
     cfgCount = 1;
 
-#ifdef _WIN32
+#if defined(_WIN32) && (!defined(WINAPI_FAMILY) || WINAPI_FAMILY == WINAPI_FAMILY_DESKTOP_APP)
     if(SHGetSpecialFolderPathA(NULL, buffer, CSIDL_APPDATA, FALSE) != FALSE)
     {
         size_t p = strlen(buffer);

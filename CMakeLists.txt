@@ -942,10 +942,20 @@ set(BACKEND_PLATFORM "SDL2" CACHE STRING "Platform backend: SDL2")
 set_property(CACHE BACKEND_RENDERER PROPERTY STRINGS OpenGL2 D3D11 Vulkan)
 set_property(CACHE BACKEND_PLATFORM PROPERTY STRINGS SDL2)
 
+# UWP builds require D3D11 and get a distinct output directory
+if(WINDOWS_STORE)
+	if(NOT BACKEND_RENDERER STREQUAL "D3D11")
+		message(FATAL_ERROR "UWP builds require BACKEND_RENDERER=D3D11")
+	endif()
+	set(ALPHA126CPP_RENDERER_OUTPUT_DIR "d3d11-uwp")
+endif()
+
 if(BACKEND_RENDERER STREQUAL "OpenGL2")
 	set(ALPHA126CPP_RENDERER_OUTPUT_DIR "opengl2")
 elseif(BACKEND_RENDERER STREQUAL "D3D11")
-	set(ALPHA126CPP_RENDERER_OUTPUT_DIR "d3d11")
+	if(NOT WINDOWS_STORE)
+		set(ALPHA126CPP_RENDERER_OUTPUT_DIR "d3d11")
+	endif()
 elseif(BACKEND_RENDERER STREQUAL "Vulkan")
 	set(ALPHA126CPP_RENDERER_OUTPUT_DIR "vulkan")
 else()
@@ -1010,7 +1020,7 @@ endif()
 target_include_directories(Alpha126Cpp PRIVATE "external/openal-soft/include")
 
 # Compile platform specific code
-if(WIN32)
+if(WIN32 AND NOT WINDOWS_STORE)
 	target_sources(Alpha126Cpp PRIVATE
 		"src/pc/win32/java/File.cpp"
 		"src/pc/win32/java/Resource.cpp"
@@ -1024,6 +1034,69 @@ if(WIN32)
 	)
 
 	target_compile_definitions(Alpha126Cpp PRIVATE MC_WIN32)
+elseif(WINDOWS_STORE)
+	target_sources(Alpha126Cpp PRIVATE
+		"src/pc/winrt/java/File.cpp"
+		"src/pc/win32/java/Resource.cpp"
+		"src/pc/winrt/java/Runtime.cpp"
+	)
+
+	# SDL2 skips building SDL2main for WINDOWS_STORE, so compile the WinRT
+	# entry point stub directly into the game executable.
+	target_sources(Alpha126Cpp PRIVATE
+		"external/SDL2/src/main/winrt/SDL_WinRT_main_NonXAML.cpp"
+	)
+	set_source_files_properties(
+		"external/SDL2/src/main/winrt/SDL_WinRT_main_NonXAML.cpp"
+		PROPERTIES COMPILE_FLAGS "/ZW"
+	)
+
+	target_compile_definitions(Alpha126Cpp PRIVATE MC_WIN32 MC_UWP AL_LIBTYPE_STATIC)
+
+	# AppxManifest and visual assets for UWP packaging
+	target_sources(Alpha126Cpp PRIVATE "${CMAKE_SOURCE_DIR}/package/Package.appxmanifest")
+	set_source_files_properties("${CMAKE_SOURCE_DIR}/package/Package.appxmanifest" PROPERTIES
+		VS_DEPLOYMENT_CONTENT 0
+	)
+
+	file(GLOB UWP_ASSETS "${CMAKE_SOURCE_DIR}/package/Assets/*.png")
+	target_sources(Alpha126Cpp PRIVATE ${UWP_ASSETS})
+	foreach(ASSET ${UWP_ASSETS})
+		set_source_files_properties(${ASSET} PROPERTIES VS_DEPLOYMENT_CONTENT 1 VS_DEPLOYMENT_LOCATION "Assets")
+	endforeach()
+
+	# Deploy the desktop-style resource tree into the app package so early static
+	# initializers (for example SharedConstants reading /font.txt) can resolve
+	# resources relative to the packaged executable.
+	file(GLOB_RECURSE UWP_RESOURCES RELATIVE "${CMAKE_SOURCE_DIR}/resource" LIST_DIRECTORIES false "${CMAKE_SOURCE_DIR}/resource/*")
+	foreach(RESOURCE_REL ${UWP_RESOURCES})
+		set(RESOURCE_PATH "${CMAKE_SOURCE_DIR}/resource/${RESOURCE_REL}")
+		get_filename_component(RESOURCE_DIR "${RESOURCE_REL}" DIRECTORY)
+		if(RESOURCE_DIR STREQUAL "")
+			set(RESOURCE_DEPLOYMENT_LOCATION "resource")
+		else()
+			set(RESOURCE_DEPLOYMENT_LOCATION "resource/${RESOURCE_DIR}")
+		endif()
+		target_sources(Alpha126Cpp PRIVATE "${RESOURCE_PATH}")
+		set_source_files_properties("${RESOURCE_PATH}" PROPERTIES VS_DEPLOYMENT_CONTENT 1 VS_DEPLOYMENT_LOCATION "${RESOURCE_DEPLOYMENT_LOCATION}")
+	endforeach()
+
+	set_target_properties(Alpha126Cpp PROPERTIES
+		VS_WINDOWS_TARGET_PLATFORM_VERSION "10.0"
+		VS_USER_PROPS "${CMAKE_SOURCE_DIR}/package/UWP_Signing.props"
+	)
+
+	# Suppress deprecation warnings treated as errors under UWP's /sdl flag
+	target_compile_definitions(Alpha126Cpp PRIVATE
+		_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
+		_WINSOCK_DEPRECATED_NO_WARNINGS
+		_CRT_SECURE_NO_WARNINGS
+	)
+	# Disable C4146 (unary minus on unsigned) and C4297 (noexcept throw) as
+	# errors for legacy Java port code under UWP's strict /sdl flag
+	target_compile_options(Alpha126Cpp PRIVATE /wd4146 /wd4297)
+	# SDL2 WinRT uses WinMain, not the C++/CX main signature expected by vccorlib.
+	target_link_options(Alpha126Cpp PRIVATE /ENTRY:WinMainCRTStartup)
 elseif(APPLE)
 	#message(FATAL_ERROR "MacOS is not supported yet.")
 	target_sources(Alpha126Cpp PRIVATE
@@ -1110,6 +1183,16 @@ target_include_directories(Alpha126Cpp PRIVATE "external/cpp-httplib")
 
 target_include_directories(Alpha126Cpp PRIVATE "external/miniaudio")
 
+# UWP: disable desktop-only OpenAL backends, force static linkage.
+# The UWP WASAPI backend is enabled automatically inside openal-soft's
+# CMakeLists.txt when CMAKE_SYSTEM_NAME is WindowsStore.
+if(WINDOWS_STORE)
+	set(ALSOFT_BACKEND_DSOUND  OFF CACHE BOOL "" FORCE)
+	set(ALSOFT_BACKEND_WINMM   OFF CACHE BOOL "" FORCE)
+	set(ALSOFT_BACKEND_MMDEVAPI OFF CACHE BOOL "" FORCE)
+	set(LIBTYPE STATIC CACHE STRING "" FORCE)
+endif()
+
 # OpenAL-Soft library - build from source
 # On Windows, the target is "OpenAL32", on other platforms it's "openal"
 add_subdirectory("external/openal-soft" EXCLUDE_FROM_ALL)
@@ -1117,20 +1200,22 @@ add_subdirectory("external/openal-soft" EXCLUDE_FROM_ALL)
 # Link against the built OpenAL library
 # OpenAL-Soft's CMakeLists.txt creates a target named ${LIBNAME}
 # which is "OpenAL32" on Windows and "openal" on other platforms
-	if(WIN32)
+if(WIN32)
 	if(TARGET OpenAL32)
 		target_link_libraries(Alpha126Cpp PRIVATE OpenAL32)
-		
-		# Copy DLL to output directory for runtime (Windows only)
+
+		if(NOT WINDOWS_STORE)
+			# Copy DLL to output directory for runtime (desktop Windows only)
 			add_custom_command(TARGET Alpha126Cpp POST_BUILD
 				COMMAND ${CMAKE_COMMAND} -E copy_if_different
-			"$<TARGET_FILE:OpenAL32>"
-				"$<TARGET_FILE_DIR:Alpha126Cpp>/OpenAL32.dll"
+				"$<TARGET_FILE:OpenAL32>"
+					"$<TARGET_FILE_DIR:Alpha126Cpp>/OpenAL32.dll"
 				COMMENT "Copying OpenAL32.dll to output directory"
 			)
+		endif()
 	else()
 		message(WARNING "OpenAL32 target not found. Please check OpenAL-Soft CMakeLists.txt")
-		endif()
+	endif()
 else()
 	if(TARGET openal)
 		target_link_libraries(Alpha126Cpp PRIVATE openal)

@@ -41,6 +41,7 @@ if you want a specific renderer backend, pass `-DBACKEND_RENDERER=OpenGL2`, `-DB
 the executable now goes into a backend-specific folder so the builds do not overwrite each other:
 - `bin/opengl2/`
 - `bin/d3d11/`
+- `bin/d3d11-uwp/` (uwp)
 - `bin/vulkan/`
 
 visual studio and other multi-config generators will put `Debug` or `Release` under those folders.
@@ -56,6 +57,20 @@ you can override the config or generator too, for example:
 ```bash
 cmake -DBUILD_CONFIG=Debug -DGENERATOR="Visual Studio 17 2022" -DARCHITECTURE=x64 -P cmake/BuildBackends.cmake
 ```
+
+### uwp
+
+there is also a uwp build for windows 10 1809+.
+it is d3d11-only and expects visual studio 2022 plus the windows sdk.
+
+configure and build it like this:
+```bash
+cmake -S . -B build-d3d11-uwp -G "Visual Studio 17 2022" -A x64 -DBACKEND_RENDERER=D3D11 -DCMAKE_TOOLCHAIN_FILE=cmake/uwp.cmake
+cmake --build build-d3d11-uwp --config Debug
+```
+
+the generated package ends up under `build-d3d11-uwp/AppPackages/Alpha126Cpp/` and the deployed debug layout ends up under `bin/d3d11-uwp/Debug/AppX/`.
+the `.msix` is in the `AppPackages` folder, and you can either install that package or deploy/run it from visual studio.
 
 ## resources
 

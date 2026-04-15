@@ -65,6 +65,9 @@ static struct BackendInfo BackendList[] = {
 #ifdef HAVE_QSA
     { "qsa", alc_qsa_init, alc_qsa_deinit, alc_qsa_probe, EmptyFuncs },
 #endif
+#ifdef HAVE_UWP_WASAPI
+    { "uwp-wasapi", alcUwpWasapiInit, alcUwpWasapiDeinit, alcUwpWasapiProbe, EmptyFuncs },
+#endif
 #ifdef HAVE_MMDEVAPI
     { "mmdevapi", alcMMDevApiInit, alcMMDevApiDeinit, alcMMDevApiProbe, EmptyFuncs },
 #endif

@@ -73,6 +73,49 @@ function(configure_and_build_backend backend)
 	run_checked(${build_command})
 endfunction()
 
+function(configure_and_build_backend_uwp)
+	set(build_dir "${SOURCE_DIR}/build-d3d11-uwp")
+
+	set(configure_command
+		"${CMAKE_COMMAND}"
+		"-S" "${SOURCE_DIR}"
+		"-B" "${build_dir}"
+		"-DBACKEND_RENDERER=D3D11"
+		"-DCMAKE_TOOLCHAIN_FILE=${SOURCE_DIR}/cmake/uwp.cmake"
+		"-DCMAKE_BUILD_TYPE=${BUILD_CONFIG}"
+	)
+
+	if(NOT GENERATOR STREQUAL "")
+		list(APPEND configure_command "-G" "${GENERATOR}")
+	else()
+		list(APPEND configure_command "-G" "Visual Studio 17 2022")
+	endif()
+
+	if(NOT ARCHITECTURE STREQUAL "")
+		list(APPEND configure_command "-A" "${ARCHITECTURE}")
+	else()
+		list(APPEND configure_command "-A" "x64")
+	endif()
+
+	if(NOT TOOLSET STREQUAL "")
+		list(APPEND configure_command "-T" "${TOOLSET}")
+	endif()
+
+	run_checked(${configure_command})
+
+	set(build_command
+		"${CMAKE_COMMAND}"
+		"--build" "${build_dir}"
+		"--config" "${BUILD_CONFIG}"
+	)
+
+	if(NOT PARALLEL_LEVEL STREQUAL "")
+		list(APPEND build_command "--parallel" "${PARALLEL_LEVEL}")
+	endif()
+
+	run_checked(${build_command})
+endfunction()
+
 message(STATUS "Source directory: ${SOURCE_DIR}")
 message(STATUS "Build configuration: ${BUILD_CONFIG}")
 
@@ -82,8 +125,9 @@ configure_and_build_backend("Vulkan")
 
 if(CMAKE_HOST_WIN32)
 	configure_and_build_backend("D3D11")
+	configure_and_build_backend_uwp()
 else()
-	message(STATUS "Skipping D3D11 build because that backend is only supported on Windows hosts.")
+	message(STATUS "Skipping D3D11/UWP builds because those backends are only supported on Windows hosts.")
 endif()
 
 message(STATUS "Finished building backends. Artifacts are written under ${SOURCE_DIR}/bin/<backend>/")

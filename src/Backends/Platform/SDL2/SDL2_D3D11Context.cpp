@@ -19,9 +19,15 @@
 #include "SDL_syswm.h"
 
 #ifdef _WIN32
+#ifndef MC_UWP
 #include <windows.h>
 #include <commdlg.h>
 #define IDI_ICON1 1
+#else
+#include <windows.h>
+#include <dxgi1_2.h>
+#define IDI_ICON1 1
+#endif
 #endif
 
 // D3D11_Shared storage
@@ -147,8 +153,8 @@ public:
         if (window == nullptr)
             throw SDLException();
 
-        // Load and set window icon (same as GL path)
-#ifdef _WIN32
+        // Load and set window icon (Win32 desktop only, not UWP)
+#if defined(_WIN32) && !defined(MC_UWP)
         {
             HICON hIcon = NULL;
             bool fromResource = false;
@@ -220,8 +226,70 @@ public:
                 }
             }
         }
+#endif  // !MC_UWP
+
+#ifdef MC_UWP
+        // ── UWP path ──────────────────────────────────────────────────────
+        // CoreWindow is exposed through SDL2's WinRT SysWM info.
+        SDL_SysWMinfo wmInfo;
+        SDL_VERSION(&wmInfo.version);
+        if (!SDL_GetWindowWMInfo(window, &wmInfo))
+            throw std::runtime_error("SDL_GetWindowWMInfo failed: " + std::string(SDL_GetError()));
+        IUnknown* coreWindow = wmInfo.info.winrt.window;
+
+        ID3D11Device* device   = nullptr;
+        ID3D11DeviceContext* context = nullptr;
+        D3D_FEATURE_LEVEL featureLevel;
+        D3D_FEATURE_LEVEL requestedFeatureLevel = D3D_FEATURE_LEVEL_11_0;
+
+        UINT createFlags = 0;
+#ifdef MC_DEBUG_D3D11
+        createFlags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
 
+        HRESULT hr = D3D11CreateDevice(
+            nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+            createFlags, &requestedFeatureLevel, 1,
+            D3D11_SDK_VERSION, &device, &featureLevel, &context);
+        if (FAILED(hr))
+            throw std::runtime_error("D3D11CreateDevice failed");
+
+        // Retrieve IDXGIFactory2 through the device's adapter.
+        IDXGIDevice*   dxgiDevice  = nullptr;
+        IDXGIAdapter*  dxgiAdapter = nullptr;
+        IDXGIFactory2* dxgiFactory = nullptr;
+        device->QueryInterface(__uuidof(IDXGIDevice),  (void**)&dxgiDevice);
+        dxgiDevice->GetAdapter(&dxgiAdapter);
+        dxgiAdapter->GetParent(__uuidof(IDXGIFactory2), (void**)&dxgiFactory);
+        dxgiDevice->Release();
+        dxgiAdapter->Release();
+
+        // Flip model required on UWP; BufferCount >= 2.
+        DXGI_SWAP_CHAIN_DESC1 scDesc1 = {};
+        scDesc1.Width             = 0;  // 0 = use CoreWindow dimensions
+        scDesc1.Height            = 0;
+        scDesc1.Format            = DXGI_FORMAT_R8G8B8A8_UNORM;
+        scDesc1.Stereo            = FALSE;
+        scDesc1.SampleDesc.Count  = 1;
+        scDesc1.SampleDesc.Quality= 0;
+        scDesc1.BufferUsage       = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        scDesc1.BufferCount       = 2;
+        scDesc1.Scaling           = DXGI_SCALING_NONE;
+        scDesc1.SwapEffect        = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        scDesc1.AlphaMode         = DXGI_ALPHA_MODE_UNSPECIFIED;
+
+        IDXGISwapChain1* swapChain1 = nullptr;
+        hr = dxgiFactory->CreateSwapChainForCoreWindow(
+            device, coreWindow, &scDesc1, nullptr, &swapChain1);
+        dxgiFactory->Release();
+        if (FAILED(hr))
+            throw std::runtime_error("CreateSwapChainForCoreWindow failed");
+
+        IDXGISwapChain* swapChain = nullptr;
+        swapChain1->QueryInterface(__uuidof(IDXGISwapChain), (void**)&swapChain);
+        swapChain1->Release();
+#else
+        // ── Desktop Win32 path ────────────────────────────────────────────
         // Extract HWND from SDL window
         SDL_SysWMinfo wmInfo;
         SDL_VERSION(&wmInfo.version);
@@ -273,6 +341,7 @@ public:
 
         if (FAILED(hr))
             throw std::runtime_error("D3D11CreateDeviceAndSwapChain failed");
+#endif  // MC_UWP
 
         // Store in shared state
         D3D11_Shared::s_device = device;
