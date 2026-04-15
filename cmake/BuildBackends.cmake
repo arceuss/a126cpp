@@ -121,7 +121,12 @@ message(STATUS "Build configuration: ${BUILD_CONFIG}")
 
 configure_and_build_backend("OpenGL2")
 
-configure_and_build_backend("Vulkan")
+find_package(Vulkan QUIET)
+if(Vulkan_FOUND)
+	configure_and_build_backend("Vulkan")
+else()
+	message(STATUS "Skipping Vulkan build because Vulkan SDK was not found.")
+endif()
 
 if(CMAKE_HOST_WIN32)
 	configure_and_build_backend("D3D11")
