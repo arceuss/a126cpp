@@ -326,6 +326,7 @@ public:
 	const std::vector<std::shared_ptr<Entity>> &getEntities(Entity *ignore, AABB &aabb);
 	const std::vector<std::shared_ptr<Entity>> &getEntitiesOfCondition(bool (*condition)(Entity&), AABB &aabb);
 	const std::unordered_set<std::shared_ptr<Entity>> &getAllEntities();
+	std::shared_ptr<Entity> getEntityRef(Entity &entity);
 
 	void tileEntityChanged(int_t x, int_t y, int_t z, std::shared_ptr<TileEntity> tileEntity);
 

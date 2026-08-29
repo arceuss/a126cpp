@@ -1,59 +1,41 @@
 #pragma once
 
 #include "world/entity/Entity.h"
-#include "nbt/CompoundTag.h"
-#include "world/entity/Mob.h"
 
-class Level;
+class Mob;
 
-// Alpha 1.2.6 Fireball
-// Reference: newb12/net/minecraft/world/entity/projectile/Fireball.java
+// Beta port's complete EntityFireball implementation, adapted only to the
+// a126cpp class name. This is the projectile used by AlphaPlace's Beta-derived
+// multiplayer protocol.
 class Fireball : public Entity
 {
 private:
 	int_t xTile = -1;
 	int_t yTile = -1;
 	int_t zTile = -1;
-	int_t lastTile = 0;
+	int_t inTile = 0;
 	bool inGround = false;
-	int_t life = 0;
-	int_t flightTime = 0;
+	int_t ticksAlive = 0;
+	int_t ticksInAir = 0;
 
 public:
 	int_t shakeTime = 0;
-	double xPower = 0.0;
-	double yPower = 0.0;
-	double zPower = 0.0;
+	std::weak_ptr<Entity> owner;
+	double accelX = 0.0;
+	double accelY = 0.0;
+	double accelZ = 0.0;
 
-private:
-	Mob *owner = nullptr;
-
-public:
 	Fireball(Level &level);
-	Fireball(Level &level, Mob &owner, double x, double y, double z);
+	Fireball(Level &level, double x, double y, double z,
+		double xPower, double yPower, double zPower);
+	Fireball(Level &level, Mob &owner, double xPower, double yPower, double zPower);
+	bool shouldRenderAtSqrDistance(double distance) override;
+	void tick() override;
+	bool isPickable() override;
+	float getPickRadius() override;
+	bool hurt(Entity *source, int_t dmg) override;
 
 protected:
-	virtual void defineSynchedData();
-
-public:
-	virtual bool shouldRenderAtSqrDistance(double distance) override;
-
-public:
-	virtual void tick() override;
-
-public:
-	virtual void addAdditionalSaveData(CompoundTag &tag) override;
-	virtual void readAdditionalSaveData(CompoundTag &tag) override;
-
-public:
-	virtual bool isPickable() override;
-
-public:
-	virtual float getPickRadius() override;
-
-public:
-	virtual bool hurt(Entity *source, int_t dmg) override;
-
-public:
-	virtual float getShadowHeightOffs();
+	void addAdditionalSaveData(CompoundTag &tag) override;
+	void readAdditionalSaveData(CompoundTag &tag) override;
 };

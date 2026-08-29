@@ -43,6 +43,11 @@ void Gui::render(float a, bool inScreen, int_t xm, int_t ym)
 	minecraft.gameRenderer.setupGuiScreen();
 
 	glEnable(GL_BLEND);
+	// Alpha's vignette pass restores standard alpha blending before the hotbar
+	// (GuiIngame.java:224-247). That pass is not implemented here, so establish
+	// the same state explicitly instead of inheriting the world-hit overlay's
+	// additive GL_SRC_ALPHA, GL_ONE function.
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	// if (minecraft.options.fancyGraphics)
 	// 	renderVignette(minecraft.player->getBrightness(a), width, height);

@@ -43,6 +43,13 @@
 #include "world/level/tile/TreeTile.h"
 #include "world/level/tile/entity/MobSpawnerTileEntity.h"
 #include "world/level/tile/TntTile.h"
+
+class RendererDerivedPlayer : public Player
+{
+public:
+	explicit RendererDerivedPlayer(Level &level) : Player(level) {}
+};
+
 static void loadSandTestChunks(Level &level)
 {
 	// Sand at block (8,8) schedules with Alpha's eight-block existence radius,
@@ -509,42 +516,55 @@ HEADLESS_TEST(gameplay, nether_entities_have_their_alpha_render_data)
 		"ghast fireballs use RenderFireball rather than the player fallback");
 }
 
-HEADLESS_TEST(gameplay, reflected_fireball_can_hit_its_ghast)
+HEADLESS_TEST(gameplay, derived_players_use_the_player_renderer)
 {
 	headless::initGameRegistries();
-	Level level(u"gameplay-returned-fireball", Dimension::Id_Normal, 5015LL);
+	Level level(u"gameplay-derived-player-renderer", Dimension::Id_Normal, 5016LL);
+	RendererDerivedPlayer derivedPlayer(level);
+
+	EntityRenderer *baseRenderer =
+		EntityRenderDispatcher::instance.getRenderer(std::type_index(typeid(Player)));
+	EntityRenderer *derivedRenderer =
+		EntityRenderDispatcher::instance.getRenderer(derivedPlayer);
+	ctx.check(baseRenderer != nullptr, "PlayerRenderer is registered");
+	ctx.check(derivedRenderer == baseRenderer,
+		"a derived Player resolves through the Player superclass");
+}
+
+HEADLESS_TEST(gameplay, beta_fireball_constructor_and_reflection_parity)
+{
+	headless::initGameRegistries();
+	Level level(u"gameplay-beta-fireball-parity", Dimension::Id_Normal, 5015LL);
 	level.getChunk(0, 0);
-	for (int_t z = 4; z <= 8; ++z)
-		ctx.checkEqual(level.getTile(8, 100, z), 0,
-			"the reflection test path is clear");
+
+	// Packet 23 supplies acceleration, not initial motion
+	// (beta1.7.3cpp NetClientHandler.cpp:407-411).
+	Fireball networkFireball(level, 8.0, 100.0, 4.0, 0.0, 0.0, 2.0);
+	ctx.checkEqualBits(networkFireball.zd, 0.0,
+		"network fireball starts with zero motion");
+	ctx.checkEqualBits(networkFireball.accelZ, 0.1,
+		"network fireball stores normalized acceleration");
 
 	std::shared_ptr<Ghast> ghast = std::make_shared<Ghast>(level);
 	ghast->moveTo(8.0, 100.0, 8.0, 0.0f, 0.0f);
 	level.addEntity(ghast);
 
-	Player deflector(level);
-	deflector.moveTo(8.0, 100.0, 1.0, 0.0f, 0.0f);
+	Fireball reflected(level, *ghast, 0.0, 0.0, 1.0);
+	ctx.check(reflected.owner.lock().get() == ghast.get(),
+		"spawned fireball weakly owns its Ghast shooter");
 
-	Fireball fireball(level, *ghast, 0.0, 0.0, 1.0);
-	fireball.moveTo(8.0, 100.0, 4.0, 0.0f, 0.0f);
-	ctx.check(fireball.hurt(&deflector, 1), "the player reflects the fireball");
-	ctx.check(fireball.zd > 0.99, "reflection points back toward the Ghast");
-	AABB *searchBox = fireball.bb.expand(0.0, 0.0, 4.0)->grow(1.0, 1.0, 1.0);
-	const std::vector<std::shared_ptr<Entity>> &nearby =
-		level.getEntities(&fireball, *searchBox);
-	ctx.check(!nearby.empty(), "the Ghast is present in the projectile query");
-	Vec3 *from = Vec3::newTemp(fireball.x, fireball.y, fireball.z);
-	Vec3 *to = Vec3::newTemp(fireball.x, fireball.y, fireball.z + 4.0);
-	HitResult directHit = ghast->bb.grow(0.3, 0.3, 0.3)->clip(*from, *to);
-	ctx.check(directHit.type != HitResult::Type::NONE,
-		"the reflected segment intersects the Ghast");
-	// Cross the Ghast's whole collision box in one tick. With the stale Ghast
-	// owner, the 25-tick immunity still skips this otherwise-certain hit.
-	fireball.zd = 4.0;
-	fireball.tick();
+	std::shared_ptr<Player> deflector = std::make_shared<Player>(level);
+	deflector->moveTo(8.0, 100.0, 1.0, 0.0f, 0.0f);
+	level.addEntity(deflector);
+	reflected.moveTo(8.0, 100.0, 4.0, 0.0f, 0.0f);
+	ctx.check(reflected.hurt(deflector.get(), 1), "the player reflects the fireball");
+	ctx.check(reflected.owner.lock().get() == deflector.get(),
+		"reflection transfers weak ownership to the player");
 
-	ctx.check(fireball.removed,
-		"the reflected fireball collides with its former Ghast owner immediately");
+	reflected.zd = 4.0;
+	reflected.tick();
+	ctx.check(reflected.removed,
+		"the returned fireball collides with its former Ghast owner immediately");
 }
 
 HEADLESS_TEST(gameplay, dungeon_spawner_activates_near_player)

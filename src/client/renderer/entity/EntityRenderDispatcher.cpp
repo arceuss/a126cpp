@@ -239,11 +239,18 @@ EntityRenderer* EntityRenderDispatcher::getRenderer(const std::type_index &type)
 	return nullptr;
 }
 
-// newb12: EntityRenderDispatcher.getRenderer(Entity) - gets renderer for entity instance
-// Reference: newb12/net/minecraft/client/renderer/entity/EntityRenderDispatcher.java:112-114
+// Java walks the runtime class's superclasses until it finds a registered
+// renderer (RenderManager.java:137-149). C++ RTTI cannot enumerate that chain,
+// but Player is the required polymorphic case: LocalPlayer,
+// EntityClientPlayerMP and EntityOtherPlayerMP all use PlayerRenderer.
 EntityRenderer* EntityRenderDispatcher::getRenderer(Entity &entity)
 {
-	return getRenderer(std::type_index(typeid(entity)));
+	EntityRenderer *renderer = getRenderer(std::type_index(typeid(entity)));
+	if (renderer != nullptr)
+		return renderer;
+	if (dynamic_cast<Player *>(&entity) != nullptr)
+		return &playerRenderer;
+	return nullptr;
 }
 
 // Register a renderer for an entity type

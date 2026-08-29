@@ -1942,6 +1942,23 @@ const std::unordered_set<std::shared_ptr<Entity>> &Level::getAllEntities()
 	return entities;
 }
 
+// Beta port helper: recover the owning shared_ptr used by projectile weak
+// owners without manufacturing a second control block.
+std::shared_ptr<Entity> Level::getEntityRef(Entity &entity)
+{
+	for (const std::shared_ptr<Entity> &candidate : entities)
+	{
+		if (candidate.get() == &entity)
+			return candidate;
+	}
+	for (const std::shared_ptr<Player> &player : players)
+	{
+		if (player.get() == &entity)
+			return std::static_pointer_cast<Entity>(player);
+	}
+	return nullptr;
+}
+
 void Level::tileEntityChanged(int_t x, int_t y, int_t z, std::shared_ptr<TileEntity> tileEntity)
 {
 	if (hasChunkAt(x, y, z))

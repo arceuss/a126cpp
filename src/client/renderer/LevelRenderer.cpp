@@ -1155,6 +1155,12 @@ void LevelRenderer::renderHit(Player &player, HitResult &h, int_t mode, ItemInst
 			glPopMatrix();
 		}
 	}
+
+	// Alpha restores both states for every hit type, including entities
+	// (RenderGlobal.java:874-875). renderHitOutline() only runs its cleanup for
+	// tile hits, so omitting this left blending enabled while looking at mobs.
+	glDisable(GL_BLEND);
+	glDisable(GL_ALPHA_TEST);
 }
 
 void LevelRenderer::renderHitOutline(Player &player, HitResult &h, int_t mode, ItemInstance *inventoryItem, float a)

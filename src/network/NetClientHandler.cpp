@@ -349,15 +349,11 @@ void NetClientHandler::handleVehicleSpawn(Packet23VehicleSpawn* var1)
 		break;
 	case 63:  // Fireball
 	{
-		double vx = static_cast<double>(var1->field_28047_e) / 8000.0;
-		double vy = static_cast<double>(var1->field_28046_f) / 8000.0;
-		double vz = static_cast<double>(var1->field_28045_g) / 8000.0;
-		// Fireball constructor: Fireball(Level &level, Mob &owner, double x, double y, double z)
-		// But we don't have owner, so use default constructor then set velocity
-		entity = Util::make_shared<Fireball>(*worldClient);
-		entity->moveTo(x, y, z, 0.0f, 0.0f);
-		entity->lerpMotion(vx, vy, vz);
-		var1->field_28044_i = 0;  // Java sets this to 0 for Fireball
+		entity = Util::make_shared<Fireball>(*worldClient, x, y, z,
+			static_cast<double>(var1->field_28047_e) / 8000.0,
+			static_cast<double>(var1->field_28046_f) / 8000.0,
+			static_cast<double>(var1->field_28045_g) / 8000.0);
+		var1->field_28044_i = 0;
 		break;
 	}
 	case 70:  // FallingTile (Sand)
