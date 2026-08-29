@@ -1,5 +1,6 @@
 #include "network/Packet25EntityPainting.h"
 #include "network/NetHandler.h"
+#include "world/entity/Painting.h"
 
 Packet25EntityPainting::Packet25EntityPainting()
 	: entityId(0)
@@ -8,6 +9,16 @@ Packet25EntityPainting::Packet25EntityPainting()
 	, yPosition(0)
 	, zPosition(0)
 	, direction(0)
+{
+}
+
+Packet25EntityPainting::Packet25EntityPainting(Painting &painting)
+	: entityId(painting.entityId)
+	, title(Painting::getMotiveData(painting.motive).name)
+	, xPosition(painting.xTile)
+	, yPosition(painting.yTile)
+	, zPosition(painting.zTile)
+	, direction(painting.dir)
 {
 }
 
@@ -64,11 +75,7 @@ void Packet25EntityPainting::processPacket(NetHandler* handler)
 
 int Packet25EntityPainting::getPacketSize()
 {
-	// Java: variable size - 24 bytes + string length
-	// int (4) + string (2 + title.length()*2) + int (4) + int (4) + int (4) + int (4)
-	// = 22 + title.length()*2
-	// Approximate - actual depends on string length
-	return 24 + static_cast<int>(title.length() * 2);
+	return 24;
 }
 
 int Packet25EntityPainting::getPacketId() const

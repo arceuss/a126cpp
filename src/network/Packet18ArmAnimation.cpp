@@ -20,7 +20,7 @@ void Packet18ArmAnimation::readPacketData(SocketInputStream& in)
 	this->entityId = in.readInt();
 	
 	// this.animate = var1.readByte();
-	this->animate = static_cast<int_t>(in.read() & 0xFF);
+	this->animate = in.readByte();
 }
 
 void Packet18ArmAnimation::writePacketData(SocketOutputStream& out)

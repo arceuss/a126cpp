@@ -9,6 +9,7 @@
 
 // Item registry (Item.java:7) - initialized to nullptrs
 std::array<Item *, 32000> Item::itemsList = {};
+Random Item::itemRand;
 
 Item::Item(int_t id)
 {

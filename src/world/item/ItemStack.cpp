@@ -86,6 +86,14 @@ void ItemStack::hitEntity(Mob &entity)
 		item->hitEntity(*this, entity);
 }
 
+void ItemStack::interactEnemy(Mob &entity)
+{
+	// Direct Alpha transliteration: ItemStack.java:135-137.
+	Item *item = getItem();
+	if (item != nullptr)
+		item->interactEnemy(*this, entity);
+}
+
 void ItemStack::hitBlock(int_t blockID, int_t x, int_t y, int_t z)
 {
 	// Alpha: hitBlock calls item.hitBlock (ItemStack.java:114-116, PlayerControllerSP.java:29)
@@ -126,6 +134,15 @@ bool ItemStack::isStackable() const
 	// Beta: ItemInstance.isStackable() - returns true if item can stack (ItemInstance.java:93-95)
 	// Beta: getMaxStackSize() > 1 && (!isDamageableItem() || !isDamaged())
 	return getMaxStackSize() > 1 && (!isItemStackDamageable() || !isItemDamaged());
+}
+
+bool ItemStack::getHasSubtypes() const
+{
+	// Alpha: return Item.itemsList[this.itemID].getHasSubtypes() (ItemStack.java:175-177)
+	Item *item = getItem();
+	if (item == nullptr)
+		return false;
+	return item->getHasSubtypes();
 }
 
 int_t ItemStack::getIcon() const

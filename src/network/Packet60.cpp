@@ -1,5 +1,40 @@
 #include "network/Packet60.h"
 #include "network/NetHandler.h"
+#include <cmath>
+#include <limits>
+
+namespace
+{
+int_t javaDoubleToInt(double value)
+{
+	if (std::isnan(value))
+		return 0;
+	if (value >= static_cast<double>((std::numeric_limits<int_t>::max)()))
+		return (std::numeric_limits<int_t>::max)();
+	if (value <= static_cast<double>((std::numeric_limits<int_t>::min)()))
+		return (std::numeric_limits<int_t>::min)();
+	return static_cast<int_t>(value);
+}
+int_t javaIntFromBits(uint_t bits)
+{
+	if (bits <= static_cast<uint_t>((std::numeric_limits<int_t>::max)()))
+		return static_cast<int_t>(bits);
+	return (std::numeric_limits<int_t>::min)()
+		+ static_cast<int_t>(bits - 0x80000000U);
+}
+
+int_t javaIntAdd(int_t left, int_t right)
+{
+	return javaIntFromBits(static_cast<uint_t>(left) + static_cast<uint_t>(right));
+}
+
+int_t javaIntSubtract(int_t left, int_t right)
+{
+	return javaIntFromBits(static_cast<uint_t>(left) - static_cast<uint_t>(right));
+}
+
+}
+
 
 Packet60::Packet60()
 	: field_12236_a(0.0)
@@ -33,9 +68,9 @@ void Packet60::readPacketData(SocketInputStream& in)
 	// int var3 = (int)this.field_12236_a;
 	// int var4 = (int)this.field_12235_b;
 	// int var5 = (int)this.field_12239_c;
-	int_t baseX = static_cast<int_t>(this->field_12236_a);
-	int_t baseY = static_cast<int_t>(this->field_12235_b);
-	int_t baseZ = static_cast<int_t>(this->field_12239_c);
+	int_t baseX = javaDoubleToInt(this->field_12236_a);
+	int_t baseY = javaDoubleToInt(this->field_12235_b);
+	int_t baseZ = javaDoubleToInt(this->field_12239_c);
 	
 	// for(int var6 = 0; var6 < var2; ++var6) {
 	//     int var7 = var1.readByte() + var3;
@@ -56,9 +91,9 @@ void Packet60::readPacketData(SocketInputStream& in)
 		int_t offsetY = static_cast<int_t>(static_cast<int8_t>(byteY));
 		int_t offsetZ = static_cast<int_t>(static_cast<int8_t>(byteZ));
 		
-		int_t x = baseX + offsetX;
-		int_t y = baseY + offsetY;
-		int_t z = baseZ + offsetZ;
+		int_t x = javaIntAdd(baseX, offsetX);
+		int_t y = javaIntAdd(baseY, offsetY);
+		int_t z = javaIntAdd(baseZ, offsetZ);
 		
 		this->field_12237_e.insert(ChunkCoordinates(x, y, z));
 	}
@@ -85,9 +120,9 @@ void Packet60::writePacketData(SocketOutputStream& out)
 	// int var2 = (int)this.field_12236_a;
 	// int var3 = (int)this.field_12235_b;
 	// int var4 = (int)this.field_12239_c;
-	int_t baseX = static_cast<int_t>(this->field_12236_a);
-	int_t baseY = static_cast<int_t>(this->field_12235_b);
-	int_t baseZ = static_cast<int_t>(this->field_12239_c);
+	int_t baseX = javaDoubleToInt(this->field_12236_a);
+	int_t baseY = javaDoubleToInt(this->field_12235_b);
+	int_t baseZ = javaDoubleToInt(this->field_12239_c);
 	
 	// Iterator var5 = this.field_12237_e.iterator();
 	// while(var5.hasNext()) {
@@ -101,9 +136,9 @@ void Packet60::writePacketData(SocketOutputStream& out)
 	// }
 	for (const auto& pos : this->field_12237_e)
 	{
-		int_t offsetX = pos.x - baseX;
-		int_t offsetY = pos.y - baseY;
-		int_t offsetZ = pos.z - baseZ;
+		int_t offsetX = javaIntSubtract(pos.x, baseX);
+		int_t offsetY = javaIntSubtract(pos.y, baseY);
+		int_t offsetZ = javaIntSubtract(pos.z, baseZ);
 		
 		out.writeByte(static_cast<byte_t>(offsetX));
 		out.writeByte(static_cast<byte_t>(offsetY));

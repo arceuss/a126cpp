@@ -135,6 +135,29 @@ void Cube::render(float scale)
 	}
 }
 
+void Cube::renderImmediate(float scale)
+{
+	if (neverRender) return;
+	if (!visible) return;
+
+	bool transformed = xRot != 0.0f || yRot != 0.0f || zRot != 0.0f ||
+		x != 0.0f || y != 0.0f || z != 0.0f;
+	if (transformed)
+	{
+		glPushMatrix();
+		glTranslatef(x * scale, y * scale, z * scale);
+		if (zRot != 0.0f) glRotatef(zRot * c, 0.0f, 0.0f, 1.0f);
+		if (yRot != 0.0f) glRotatef(yRot * c, 0.0f, 1.0f, 0.0f);
+		if (xRot != 0.0f) glRotatef(xRot * c, 1.0f, 0.0f, 0.0f);
+	}
+
+	for (auto &p : polygons)
+		p.renderImmediate(scale);
+
+	if (transformed)
+		glPopMatrix();
+}
+
 void Cube::translateTo(float scale)
 {
 	if (neverRender) return;

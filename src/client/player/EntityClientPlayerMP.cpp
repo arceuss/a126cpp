@@ -59,7 +59,7 @@ void EntityClientPlayerMP::tick()
 {
 	// Beta 1.2: MultiplayerLocalPlayer.tick() - matches newb12 MultiplayerLocalPlayer.java:47-52 exactly
 	// Beta: if (this.level.hasChunkAt(Mth.floor(this.x), 64, Mth.floor(this.z))) { ... } (MultiplayerLocalPlayer.java:48)
-	if (level.hasChunkAt(Mth::floor(static_cast<float>(x)), 64, Mth::floor(static_cast<float>(z))))
+	if (level->hasChunkAt(Mth::floor(static_cast<float>(x)), 64, Mth::floor(static_cast<float>(z))))
 	{
 		LocalPlayer::tick();  // Beta: super.tick() (MultiplayerLocalPlayer.java:49)
 		func_4056_N();  // Beta: this.sendPosition() (MultiplayerLocalPlayer.java:50)

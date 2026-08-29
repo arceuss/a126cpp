@@ -32,14 +32,17 @@ bool File::mkdirs() const
 	jstring current = path;
 	while (!current.empty())
 	{
-		auto fp = File::open(current);
+		std::unique_ptr<File> fp(File::open(current));
 		if (fp->isDirectory())
 			break;
+
+		// A relative top-level path has no separator. It still has to be queued
+		// for creation before the parent walk terminates.
+		back.emplace(std::move(fp));
 
 		size_t npos = current.find_last_of(u"/\\");
 		if (npos == std::string::npos)
 			break;
-		back.emplace(std::move(fp));
 		current = current.substr(0, npos);
 	}
 

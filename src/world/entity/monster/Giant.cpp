@@ -14,5 +14,5 @@ Giant::Giant(Level &level) : Monster(level)
 
 float Giant::getWalkTargetValue(int_t x, int_t y, int_t z)
 {
-	return level.getBrightness(x, y, z) - 0.5f;
+	return level->getBrightness(x, y, z) - 0.5f;
 }

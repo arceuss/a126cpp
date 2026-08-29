@@ -26,13 +26,13 @@ void Packet17Sleep::readPacketData(SocketInputStream& in)
 	this->field_22045_a = in.readInt();
 	
 	// this.field_22046_e = var1.readByte();
-	this->field_22046_e = static_cast<int_t>(in.read() & 0xFF);
+	this->field_22046_e = in.readByte();
 	
 	// this.field_22044_b = var1.readInt();
 	this->field_22044_b = in.readInt();
 	
 	// this.field_22048_c = var1.readByte();
-	this->field_22048_c = static_cast<int_t>(in.read() & 0xFF);
+	this->field_22048_c = in.readByte();
 	
 	// this.field_22047_d = var1.readInt();
 	this->field_22047_d = in.readInt();

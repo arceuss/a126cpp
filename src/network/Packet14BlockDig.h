@@ -6,10 +6,10 @@
 class Packet14BlockDig : public Packet {
 public:
 	int_t xPosition;
-	byte_t yPosition;  // Note: Java uses int but reads/writes as byte
+	int_t yPosition;
 	int_t zPosition;
-	byte_t face;  // Note: Java uses int but reads/writes as byte
-	byte_t status;  // Note: Java uses int but reads/writes as byte
+	int_t face;
+	int_t status;
 	
 	Packet14BlockDig();
 	Packet14BlockDig(int_t status, int_t x, int_t y, int_t z, int_t face);

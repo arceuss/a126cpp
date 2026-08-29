@@ -50,29 +50,13 @@ void Packet52MultiBlockChange::readPacketData(SocketInputStream& in)
 
 void Packet52MultiBlockChange::writePacketData(SocketOutputStream& out)
 {
-	// Java: EXACT ORDER
-	// var1.writeInt(this.xPosition);
-	out.writeInt(this->xPosition);
-	
-	// var1.writeInt(this.zPosition);
-	out.writeInt(this->zPosition);
-	
-	// var1.writeShort((short)this.size);
-	out.writeShort(static_cast<short_t>(this->size));
-	
-	// for(int var2 = 0; var2 < this.size; ++var2) {
-	//     var1.writeShort(this.coordinateArray[var2]);
-	// }
-	for (int_t i = 0; i < this->size; ++i)
-	{
-		out.writeShort(this->coordinateArray[i]);
-	}
-	
-	// var1.write(this.typeArray);
-	out.write(this->typeArray.data(), this->size);
-	
-	// var1.write(this.metadataArray);
-	out.write(this->metadataArray.data(), this->size);
+	out.writeInt(xPosition);
+	out.writeInt(zPosition);
+	out.writeShort(static_cast<short_t>(size));
+	for (int_t i = 0; i < size; ++i)
+		out.writeShort(coordinateArray[i]);
+	out.write(typeArray.data(), typeArray.size());
+	out.write(metadataArray.data(), metadataArray.size());
 }
 
 void Packet52MultiBlockChange::processPacket(NetHandler* handler)

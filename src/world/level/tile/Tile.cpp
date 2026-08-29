@@ -655,6 +655,12 @@ bool Tile::mayPlace(Level &level, int_t x, int_t y, int_t z)
 	return tile->material.isLiquid();
 }
 
+// Alpha: Block.canBlockStay() (Block.java:521-523)
+bool Tile::canBlockStay(Level &level, int_t x, int_t y, int_t z)
+{
+	return true;
+}
+
 void Tile::tick(Level &level, int_t x, int_t y, int_t z, Random &random)
 {
 
@@ -673,6 +679,10 @@ void Tile::destroy(Level &level, int_t x, int_t y, int_t z, int_t data)
 void Tile::neighborChanged(Level &level, int_t x, int_t y, int_t z, int_t tile)
 {
 
+}
+
+void Tile::wasExploded(Level &level, int_t x, int_t y, int_t z)
+{
 }
 
 void Tile::addLights(Level &level, int_t x, int_t y, int_t z)

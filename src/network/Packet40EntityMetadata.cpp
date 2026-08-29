@@ -10,130 +10,104 @@ Packet40EntityMetadata::Packet40EntityMetadata()
 
 std::vector<std::shared_ptr<WatchableObject>> Packet40EntityMetadata::readWatchableObjectsFromSocket(SocketInputStream& in)
 {
-	// Matches DataWatcher.readWatchableObjects logic but for SocketInputStream
-	// Java: DataWatcher.readWatchableObjects(var1)
 	std::vector<std::shared_ptr<WatchableObject>> result;
-	
-	byte_t var2 = in.readByte();
-	while (var2 != 127)  // 0x7F is the terminator
+	byte_t header = in.readByte();
+	while (header != 127)
 	{
-		int var3 = (static_cast<unsigned char>(var2) & 0xE0) >> 5;  // Type (0-6)
-		int var4 = static_cast<unsigned char>(var2) & 0x1F;  // ID (0-31)
-		
-		std::shared_ptr<WatchableObject> var5 = nullptr;
-		
-		switch (var3)
+		const int objectType = (static_cast<ubyte_t>(header) & 0xE0) >> 5;
+		const int dataValueId = static_cast<ubyte_t>(header) & 0x1F;
+		std::shared_ptr<WatchableObject> object;
+		switch (objectType)
 		{
-		case 0:  // Byte
-			var5 = std::make_shared<WatchableObject>(var3, var4, in.readByte());
+		case 0:
+			object = std::make_shared<WatchableObject>(objectType, dataValueId, in.readByte());
 			break;
-		case 1:  // Short
-			var5 = std::make_shared<WatchableObject>(var3, var4, in.readShort());
+		case 1:
+			object = std::make_shared<WatchableObject>(objectType, dataValueId, in.readShort());
 			break;
-		case 2:  // Int
-			var5 = std::make_shared<WatchableObject>(var3, var4, in.readInt());
+		case 2:
+			object = std::make_shared<WatchableObject>(objectType, dataValueId, in.readInt());
 			break;
-		case 3:  // Float
-			var5 = std::make_shared<WatchableObject>(var3, var4, in.readFloat());
+		case 3:
+			object = std::make_shared<WatchableObject>(objectType, dataValueId, in.readFloat());
 			break;
-		case 4:  // String
-			// Java: Packet.readString(var1, 64)
-			var5 = std::make_shared<WatchableObject>(var3, var4, Packet::readString(in, 64));
+		case 4:
+			object = std::make_shared<WatchableObject>(objectType, dataValueId, Packet::readString(in, 64));
 			break;
-		case 5:  // ItemStack
+		case 5:
 		{
-			short_t var6 = in.readShort();
-			byte_t var7 = in.readByte();
-			short_t var8 = in.readShort();
-			ItemStack stack(static_cast<int_t>(var6), static_cast<int_t>(var7), static_cast<int_t>(var8));
-			var5 = std::make_shared<WatchableObject>(var3, var4, stack);
+			const short_t shiftedIndex = in.readShort();
+			const byte_t stackSize = in.readByte();
+			const short_t itemDamage = in.readShort();
+			object = std::make_shared<WatchableObject>(objectType, dataValueId,
+				ItemStack(shiftedIndex, stackSize, itemDamage));
 			break;
 		}
-		case 6:  // ChunkCoordinates
+		case 6:
 		{
-			int_t var9 = in.readInt();
-			int_t var10 = in.readInt();
-			int_t var11 = in.readInt();
-			ChunkCoordinates coords(var9, var10, var11);
-			var5 = std::make_shared<WatchableObject>(var3, var4, coords);
+			const int_t x = in.readInt();
+			const int_t y = in.readInt();
+			const int_t z = in.readInt();
+			object = std::make_shared<WatchableObject>(objectType, dataValueId,
+				ChunkCoordinates(x, y, z));
 			break;
 		}
 		}
-		
-		if (var5 != nullptr)
-		{
-			result.push_back(var5);
-		}
-		
-		// Read next byte
-		var2 = in.readByte();
+		result.push_back(object);
+		header = in.readByte();
 	}
-	
 	return result;
 }
 
 void Packet40EntityMetadata::readPacketData(SocketInputStream& in)
 {
-	// Java: EXACT ORDER
-	// this.entityId = var1.readInt();
 	this->entityId = in.readInt();
-	
-	// this.field_21048_b = DataWatcher.readWatchableObjects(var1);
 	this->field_21048_b = readWatchableObjectsFromSocket(in);
 }
 
 void Packet40EntityMetadata::writePacketData(SocketOutputStream& out)
 {
-	// Java: EXACT ORDER
-	// var1.writeInt(this.entityId);
 	out.writeInt(this->entityId);
-	
-	// DataWatcher.writeObjectsInListToStream(this.field_21048_b, var1);
-	// Write metadata from field_21048_b list
-	for (const auto& obj : field_21048_b)
+	for (const auto& object : this->field_21048_b)
 	{
-		// Write header byte: (objectType << 5) | (dataValueId & 31)
-		int header = (obj->getObjectType() << 5) | (obj->getDataValueId() & 31);
-		out.writeByte(static_cast<byte_t>(header & 0xFF));
-		
-		// Write object value based on type
-		switch (obj->getObjectType())
+		const int header = (object->getObjectType() << 5 | object->getDataValueId() & 31) & 255;
+		out.writeByte(static_cast<byte_t>(header));
+		switch (object->getObjectType())
 		{
-		case 0:  // Byte
-			out.writeByte(obj->getByte());
+		case 0:
+			out.writeByte(object->getByte());
 			break;
-		case 1:  // Short
-			out.writeShort(obj->getShort());
+		case 1:
+			out.writeShort(object->getShort());
 			break;
-		case 2:  // Int
-			out.writeInt(obj->getInt());
+		case 2:
+			out.writeInt(object->getInt());
 			break;
-		case 3:  // Float
-			out.writeFloat(obj->getFloat());
+		case 3:
+			out.writeFloat(object->getFloat());
 			break;
-		case 4:  // String
-			Packet::writeString(obj->getString(), out);
+		case 4:
+			Packet::writeString(object->getString(), out);
 			break;
-		case 5:  // ItemStack
+		case 5:
 		{
-			ItemStack stack = obj->getItemStack();
+			const ItemStack stack = object->getItemStack();
 			out.writeShort(static_cast<short_t>(stack.itemID));
 			out.writeByte(static_cast<byte_t>(stack.stackSize));
 			out.writeShort(static_cast<short_t>(stack.itemDamage));
 			break;
 		}
-		case 6:  // ChunkCoordinates
+		case 6:
 		{
-			ChunkCoordinates coords = obj->getChunkCoordinates();
-			out.writeInt(coords.x);
-			out.writeInt(coords.y);
-			out.writeInt(coords.z);
+			const ChunkCoordinates coordinates = object->getChunkCoordinates();
+			out.writeInt(coordinates.x);
+			out.writeInt(coordinates.y);
+			out.writeInt(coordinates.z);
 			break;
 		}
 		}
 	}
-	// Write terminator
-	out.writeByte(127);  // 0x7F
+	out.writeByte(127);
 }
 
 void Packet40EntityMetadata::processPacket(NetHandler* handler)
@@ -144,13 +118,15 @@ void Packet40EntityMetadata::processPacket(NetHandler* handler)
 
 int Packet40EntityMetadata::getPacketSize()
 {
-	// Java: variable size - 5 bytes + metadata
-	// int (4) + metadata (variable, at least 1 byte for terminator 0x7F)
-	// For now, return a minimum size
-	return 5 + static_cast<int>(field_21048_b.size() * 2);  // Approximate
+	return 5;
 }
 
 int Packet40EntityMetadata::getPacketId() const
 {
 	return 40;
+}
+
+std::vector<std::shared_ptr<WatchableObject>>& Packet40EntityMetadata::func_21047_b()
+{
+	return this->field_21048_b;
 }

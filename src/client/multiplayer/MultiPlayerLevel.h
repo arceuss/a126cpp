@@ -93,6 +93,7 @@ public:
 	
 	void disconnect();
 	void markInvalid();  // Mark as invalid without sending disconnect packet (for dimension switching)
+	bool isValidClientView() const { return isValid; }
 	
 	// Decode and set chunk data from packet
 	void setChunkData(int_t x, int_t y, int_t z, int_t xSize, int_t ySize, int_t zSize, const byte_t* data);

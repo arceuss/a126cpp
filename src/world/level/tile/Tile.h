@@ -319,10 +319,15 @@ public:
 	// Beta: Tile.mayPlace() - checks if block can be placed (Tile.java:618-621)
 	virtual bool mayPlace(Level &level, int_t x, int_t y, int_t z);
 
+	// Alpha: Block.canBlockStay() is the polymorphic "may this block remain
+	// here" test; the base answers yes (Block.java:521-523).
+	virtual bool canBlockStay(Level &level, int_t x, int_t y, int_t z);
+
 	virtual void tick(Level &level, int_t x, int_t y, int_t z, Random &random);
 	virtual void animateTick(Level &level, int_t x, int_t y, int_t z, Random &random);
 	virtual void destroy(Level &level, int_t x, int_t y, int_t z, int_t data);
 	virtual void neighborChanged(Level &level, int_t x, int_t y, int_t z, int_t tile);
+	virtual void wasExploded(Level &level, int_t x, int_t y, int_t z);
 	virtual void addLights(Level &level, int_t x, int_t y, int_t z);
 	
 	virtual int_t getTickDelay();

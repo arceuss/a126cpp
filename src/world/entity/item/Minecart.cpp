@@ -18,16 +18,6 @@
 #define M_PI  3.14159265358979323846
 #endif
 
-// Simple Gaussian approximation using Box-Muller transform
-static float nextGaussian(Random &random)
-{
-	// Box-Muller transform
-	float u1 = random.nextFloat();
-	float u2 = random.nextFloat();
-	if (u1 == 0.0f) u1 = 0.0001f; // Avoid log(0)
-	return sqrt(-2.0f * log(u1)) * cos(2.0f * M_PI * u2);
-}
-
 Minecart::Minecart(Level &level) : Entity(level), items(36, nullptr)
 {
 	blocksBuilding = true;
@@ -74,7 +64,7 @@ double Minecart::getRideHeight()
 
 bool Minecart::hurt(Entity *var1, int_t var2)
 {
-	if (!level.isOnline && !removed)
+	if (!level->isOnline && !removed)
 	{
 		hurtDir = -hurtDir;
 		hurtTime = 10;
@@ -137,12 +127,13 @@ void Minecart::remove()
 
 				var2->stackSize -= var6;
 				ItemStack stack(var2->itemID, var6, var2->getAuxValue());
-				EntityItem *var7 = new EntityItem(level, x + var3, y + var4, z + var5, stack);
+				EntityItem *var7 = new EntityItem(*level, x + var3, y + var4, z + var5, stack);
 				float var8 = 0.05f;
-				var7->xd = nextGaussian(random) * var8;
-				var7->yd = nextGaussian(random) * var8 + 0.2f;
-				var7->zd = nextGaussian(random) * var8;
-				level.addEntity(std::shared_ptr<Entity>(var7));
+				// Java narrows each Gaussian to float before scaling (EntityMinecart.java:139-141).
+				var7->xd = static_cast<float>(random.nextGaussian()) * var8;
+				var7->yd = static_cast<float>(random.nextGaussian()) * var8 + 0.2f;
+				var7->zd = static_cast<float>(random.nextGaussian()) * var8;
+				level->addEntity(std::shared_ptr<Entity>(var7));
 			}
 		}
 	}
@@ -162,7 +153,7 @@ void Minecart::tick()
 		damage--;
 	}
 
-	if (level.isOnline && lSteps > 0)
+	if (level->isOnline && lSteps > 0)
 	{
 		if (lSteps > 0)
 		{
@@ -202,7 +193,7 @@ void Minecart::tick()
 		int_t var1 = Mth::floor(x);
 		int_t var2 = Mth::floor(y);
 		int_t var3 = Mth::floor(z);
-		if (level.getTile(var1, var2 - 1, var3) == 66)  // Tile.rail.id = 66
+		if (level->getTile(var1, var2 - 1, var3) == 66)  // Tile.rail.id = 66
 		{
 			var2--;
 		}
@@ -210,10 +201,10 @@ void Minecart::tick()
 		double var4 = 0.4;
 		bool var6 = false;
 		double var7 = 0.0078125;
-		if (level.getTile(var1, var2, var3) == 66)  // Tile.rail.id = 66
+		if (level->getTile(var1, var2, var3) == 66)  // Tile.rail.id = 66
 		{
 			Vec3 *var9 = getPos(x, y, z);
-			int_t var10 = level.getData(var1, var2, var3);
+			int_t var10 = level->getData(var1, var2, var3);
 			y = var2;
 			if (var10 >= 2 && var10 <= 5)
 			{
@@ -475,7 +466,7 @@ void Minecart::tick()
 
 		setRot(yRot, xRot);
 		AABB expanded = *bb.grow(0.2f, 0.0, 0.2f);
-		std::vector<std::shared_ptr<Entity>> var15 = level.getEntities(this, expanded);
+		std::vector<std::shared_ptr<Entity>> var15 = level->getEntities(this, expanded);
 		if (var15.size() > 0)
 		{
 			for (size_t var48 = 0; var48 < var15.size(); var48++)
@@ -501,7 +492,7 @@ void Minecart::tick()
 				xPush = zPush = 0.0;
 			}
 
-			level.addParticle(u"largesmoke", x, y + 0.8, z, 0.0, 0.0, 0.0);
+			level->addParticle(u"largesmoke", x, y + 0.8, z, 0.0, 0.0, 0.0);
 		}
 	}
 }
@@ -511,14 +502,14 @@ Vec3 *Minecart::getPosOffs(double var1, double var3, double var5, double var7)
 	int_t var9 = Mth::floor(var1);
 	int_t var10 = Mth::floor(var3);
 	int_t var11 = Mth::floor(var5);
-	if (level.getTile(var9, var10 - 1, var11) == 66)  // Tile.rail.id = 66
+	if (level->getTile(var9, var10 - 1, var11) == 66)  // Tile.rail.id = 66
 	{
 		var10--;
 	}
 
-	if (level.getTile(var9, var10, var11) == 66)  // Tile.rail.id = 66
+	if (level->getTile(var9, var10, var11) == 66)  // Tile.rail.id = 66
 	{
-		int_t var12 = level.getData(var9, var10, var11);
+		int_t var12 = level->getData(var9, var10, var11);
 		var3 = var10;
 		if (var12 >= 2 && var12 <= 5)
 		{
@@ -555,14 +546,14 @@ Vec3 *Minecart::getPos(double var1, double var3, double var5)
 	int_t var7 = Mth::floor(var1);
 	int_t var8 = Mth::floor(var3);
 	int_t var9 = Mth::floor(var5);
-	if (level.getTile(var7, var8 - 1, var9) == 66)  // Tile.rail.id = 66
+	if (level->getTile(var7, var8 - 1, var9) == 66)  // Tile.rail.id = 66
 	{
 		var8--;
 	}
 
-	if (level.getTile(var7, var8, var9) == 66)  // Tile.rail.id = 66
+	if (level->getTile(var7, var8, var9) == 66)  // Tile.rail.id = 66
 	{
-		int_t var10 = level.getData(var7, var8, var9);
+		int_t var10 = level->getData(var7, var8, var9);
 		var3 = var8;
 		if (var10 >= 2 && var10 <= 5)
 		{
@@ -681,7 +672,7 @@ float Minecart::getShadowHeightOffs()
 
 void Minecart::push(Entity &var1)
 {
-	if (!level.isOnline)
+	if (!level->isOnline)
 	{
 		if (rider == nullptr || rider.get() != &var1)
 		{
@@ -690,7 +681,7 @@ void Minecart::push(Entity &var1)
 			{
 				// Find this minecart in the level's entities to get a shared_ptr
 				std::shared_ptr<Entity> minecartPtr = nullptr;
-				for (const auto &e : level.getAllEntities())
+				for (const auto &e : level->getAllEntities())
 				{
 					if (e.get() == this)
 					{
@@ -846,11 +837,11 @@ bool Minecart::interact(Player &var1)
 		}
 
 		// Beta: if (!this.level.isOnline) { var1.ride(this); }
-		if (!level.isOnline)
+		if (!level->isOnline)
 		{
 			// Find this minecart in the level's entities to get a shared_ptr for ride()
 			std::shared_ptr<Entity> minecartPtr = nullptr;
-			for (const auto &e : level.getAllEntities())
+			for (const auto &e : level->getAllEntities())
 			{
 				if (e.get() == this)
 				{
@@ -867,7 +858,7 @@ bool Minecart::interact(Player &var1)
 	else if (type == 1)
 	{
 		// Beta: if (!this.level.isOnline) { var1.openContainer(this); }
-		if (!level.isOnline)
+		if (!level->isOnline)
 		{
 			// TODO: Implement openContainer for Minecart (chest minecart)
 			// This would need to open a container screen for the minecart's inventory

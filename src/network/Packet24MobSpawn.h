@@ -5,6 +5,9 @@
 #include <vector>
 #include <memory>
 
+class DataWatcher;
+class Mob;
+
 // Packet24MobSpawn - matches Java Packet24MobSpawn.java exactly
 // Mob Spawn packet - server to client
 class Packet24MobSpawn : public Packet {
@@ -19,14 +22,17 @@ public:
 	std::vector<std::shared_ptr<WatchableObject>> receivedMetadata;  // Stores metadata read from packet
 	
 	Packet24MobSpawn();
+	Packet24MobSpawn(Mob &mob);
 	
 	void readPacketData(SocketInputStream& in) override;
 	void writePacketData(SocketOutputStream& out) override;
 	void processPacket(NetHandler* handler) override;
 	int getPacketSize() override;
 	int getPacketId() const override;
+	const std::vector<std::shared_ptr<WatchableObject>> &getMetadata() const;
 	
 private:
+	DataWatcher *metaData;
 	// Helper to read metadata from SocketInputStream (matches DataWatcher logic)
 	std::vector<std::shared_ptr<WatchableObject>> readWatchableObjectsFromSocket(SocketInputStream& in);
 };

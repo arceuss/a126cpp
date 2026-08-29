@@ -13,7 +13,7 @@ Animal::Animal(Level &level) : PathfinderMob(level)
 
 float Animal::getWalkTargetValue(int_t x, int_t y, int_t z)
 {
-	return level.getTile(x, y - 1, z) == Tile::grass.id ? 10.0f : level.getBrightness(x, y, z) - 0.5f;
+	return level->getTile(x, y - 1, z) == Tile::grass.id ? 10.0f : level->getBrightness(x, y, z) - 0.5f;
 }
 
 void Animal::addAdditionalSaveData(CompoundTag &tag)
@@ -31,8 +31,8 @@ bool Animal::canSpawn()
 	int_t var1 = Mth::floor(this->x);
 	int_t var2 = Mth::floor(bb.y0);
 	int_t var3 = Mth::floor(this->z);
-	int_t tileBelow = level.getTile(var1, var2 - 1, var3);
-	int_t brightness = level.getRawBrightness(var1, var2, var3);
+	int_t tileBelow = level->getTile(var1, var2 - 1, var3);
+	int_t brightness = level->getRawBrightness(var1, var2, var3);
 	bool grassCheck = tileBelow == Tile::grass.id;
 	bool brightnessCheck = brightness > 8;
 	bool pathfinderCheck = PathfinderMob::canSpawn();

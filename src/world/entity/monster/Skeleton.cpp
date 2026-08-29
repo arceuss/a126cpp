@@ -39,11 +39,11 @@ jstring Skeleton::getDeathSound()
 
 void Skeleton::aiStep()
 {
-	if (level.isDay())
+	if (level->isDay())
 	{
 		float var1 = getBrightness(1.0f);
 		if (var1 > 0.5f
-			&& level.canSeeSky(Mth::floor(x), Mth::floor(y), Mth::floor(z))
+			&& level->canSeeSky(Mth::floor(x), Mth::floor(y), Mth::floor(z))
 			&& random.nextFloat() * 30.0f < (var1 - 0.4f) * 2.0f)
 		{
 			onFire = 300;
@@ -61,12 +61,12 @@ void Skeleton::checkHurtTarget(Entity &target, float distance)
 		double var5 = target.z - z;
 		if (attackTime == 0)
 		{
-			Arrow *var7 = new Arrow(level, *this);
+			Arrow *var7 = new Arrow(*level, *this);
 			var7->y++;
 			double var8 = target.y - 0.2f - var7->y;
 			float var10 = Mth::sqrt(var3 * var3 + var5 * var5) * 0.2f;
-			level.playSound(this, u"random.bow", 1.0f, 1.0f / (random.nextFloat() * 0.4f + 0.8f));
-			level.addEntity(std::shared_ptr<Entity>(var7));
+			level->playSound(this, u"random.bow", 1.0f, 1.0f / (random.nextFloat() * 0.4f + 0.8f));
+			level->addEntity(std::shared_ptr<Entity>(var7));
 			var7->shoot(var3, var8 + var10, var5, 0.6f, 12.0f);
 			attackTime = 30;
 		}

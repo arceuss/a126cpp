@@ -13,4 +13,5 @@ public:
 	SignModel();
 	
 	void render();
+	void renderImmediate();
 };

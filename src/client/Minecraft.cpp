@@ -22,6 +22,7 @@
 #include "client/gui/InventoryScreen.h"
 #include "client/gui/DeathScreen.h"
 #include "client/gui/GuiChat.h"
+#include "client/spc/SPCCommand.h"
 #include "client/title/TitleScreen.h"
 #include "client/player/KeyboardInput.h"
 #include "client/player/EntityClientPlayerMP.h"
@@ -33,6 +34,7 @@
 #include "world/phys/HitResult.h"
 #include "world/level/chunk/ChunkCache.h"
 #include "world/level/Level.h"
+#include "world/level/Teleporter.h"
 #include "world/level/tile/Tile.h"
 #include "world/item/Items.h"
 #include "world/item/crafting/FurnaceRecipes.h"
@@ -1037,16 +1039,14 @@ void Minecraft::tick()
 					}
 				}
 				
-				// Alpha 1.2.6: Open chat screen on chat key (T) when online
-				// Java: if (this.isOnline() && Keyboard.getEventKey() == this.options.keyChat.key) {
-				//     this.setScreen(new ChatScreen());
-				// }
-				if (isOnline() && lwjgl::Keyboard::getEventKey() == options.keyChat.key)
+				// Optional singleplayer command tooling needs a local text
+				// entry screen. This deliberately extends Alpha's online-only
+				// chat gate; it is not claimed as Alpha gameplay behavior.
+				if (SPCCommand::shouldOpenChat(player != nullptr,
+					lwjgl::Keyboard::getEventKey(), options.keyChat.key)
+					&& screen == nullptr)
 				{
-					if (screen == nullptr)
-					{
-						setScreen(Util::make_shared<GuiChat>(*this));
-					}
+					setScreen(Util::make_shared<GuiChat>(*this));
 				}
 			}
 		}
@@ -1090,7 +1090,15 @@ void Minecraft::tick()
 		if (!pause)
 			levelRenderer.tick();
 		if (!pause)
-			level->tickEntities();
+		{
+			// Alpha reads this.theWorld once for the call (Minecraft.java:957).
+			// A portal tick inside it calls toggleDimension(), which rebinds the
+			// field to the destination level, and the outgoing world stays alive
+			// in Java for the rest of the loop. Hold a reference so the frames
+			// still running on the old level keep a live object.
+			std::shared_ptr<Level> tickingLevel = level;
+			tickingLevel->tickEntities();
+		}
 		if (!pause || isOnline())
 		{
 			// Thread-safe check: ensure level is still valid before ticking
@@ -1158,63 +1166,57 @@ void Minecraft::toggleDimension()
 	}
 	
 	std::cout << "Toggling dimension!!" << std::endl;
-	
-	// Toggle dimension
-	if (player->dimension == -1)
-		player->dimension = 0;
-	else
-		player->dimension = -1;
-	
-	// Remove player from old level
+
+	// Alpha: this.thePlayer.dimension = this.thePlayer.dimension == -1 ? 0 : -1
+	// (Minecraft.java:1000)
+	int_t newDimension = (player->dimension == -1) ? 0 : -1;
+	player->dimension = newDimension;
+
 	level->removeEntity(player);
-	player->removed = false;  // Alpha: this.thePlayer.isDead = false (Minecraft.java:1166)
-	
-	// Calculate new position (scale by 8.0 for dimension conversion)
-	double var1 = player->x;
-	double var3 = player->z;
-	double var5 = 8.0;
-	
-	if (player->dimension == -1)
+	player->removed = false;  // Alpha: this.thePlayer.isDead = false (Minecraft.java:1002)
+
+	// Alpha scales horizontal coordinates by eight in both directions
+	// (Minecraft.java:1003-1019)
+	double x = player->x;
+	double z = player->z;
+	double scale = 8.0;
+	if (newDimension == -1)
 	{
-		// Entering Nether: divide coordinates by 8
-		var1 /= var5;
-		var3 /= var5;
-		player->moveTo(var1, player->y, var3, player->yRot, player->xRot);
-		if (player->isAlive())
-		{
-			level->tick(player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1176)
-		}
-		
-		// Create new level with Hell dimension (dimension ID -1)
-		std::shared_ptr<Level> newLevel = std::make_shared<Level>(*level, -1);
-		setLevel(newLevel, u"Entering the Nether", player);
+		x /= scale;
+		z /= scale;
 	}
 	else
 	{
-		// Leaving Nether: multiply coordinates by 8
-		var1 *= var5;
-		var3 *= var5;
-		player->moveTo(var1, player->y, var3, player->yRot, player->xRot);
-		if (player->isAlive())
-		{
-			level->tick(player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1185)
-		}
-		
-		// Create new level with normal dimension (dimension ID 0)
-		std::shared_ptr<Level> newLevel = std::make_shared<Level>(*level, 0);
-		setLevel(newLevel, u"Leaving the Nether", player);
+		x *= scale;
+		z *= scale;
 	}
-	
-	// Update player position (level reference is updated by setLevel())
-	// Note: player->level is a reference, so it's automatically updated when setLevel() is called
-	player->moveTo(var1, player->y, var3, player->yRot, player->xRot);
-	if (level != nullptr && player != nullptr)
+
+	// Alpha: setLocationAndAngles() (Minecraft.java:1007,1014)
+	player->absMoveTo(x, player->y, z, player->yRot, player->xRot);
+	if (player->isAlive())
+		level->tick(player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1009)
+
+	// Alpha keeps the exact player object and rebinds worldObj after destination
+	// setup returns, before the final tick and Teleporter
+	// (Minecraft.java:1021-1025). NBT is not an equivalent transfer mechanism:
+	// Entity/Player persistence intentionally omits live identity, combat,
+	// animation, collision and portal state.
+	std::shared_ptr<Level> oldLevel = level;
+	std::shared_ptr<LocalPlayer> switchingPlayer = player;
+	std::shared_ptr<Level> newLevel = Util::make_shared<Level>(*oldLevel, newDimension);
+
+	setLevel(newLevel, newDimension == -1 ? u"Entering the Nether" : u"Leaving the Nether", switchingPlayer);
+	switchingPlayer->setLevel(*newLevel);  // Alpha: thePlayer.worldObj = theWorld (Minecraft.java:1021)
+
+	// Alpha: new Teleporter().func_4107_a(this.theWorld, this.thePlayer)
+	// (Minecraft.java:1022-1026)
+	if (switchingPlayer->isAlive())
 	{
-		level->tick(player, false);  // Alpha: this.theWorld.func_4084_a(this.thePlayer, false) (Minecraft.java:1192)
+		// Alpha: setLocationAndAngles() (Minecraft.java:1023)
+		switchingPlayer->absMoveTo(x, switchingPlayer->y, z, switchingPlayer->yRot, switchingPlayer->xRot);
+		newLevel->tick(switchingPlayer, false);
+		Teleporter().teleport(*newLevel, *switchingPlayer);
 	}
-	
-	// Force portal placement (Alpha: new PortalForcer().force(this.level, this.player) - Minecraft.java:1194)
-	// Note: PortalForcer is not implemented in Alpha 1.2.6, so we skip this step
 }
 
 void Minecraft::setLevel(std::shared_ptr<Level> level)
@@ -1360,17 +1362,16 @@ jstring Minecraft::gatherStats3()
 	return u"P: 0. T: " + level->gatherStats();
 }
 
-void Minecraft::respawnPlayer()
+void Minecraft::respawnPlayer(int_t dimension, const jstring &title)
 {
-	// Beta: Minecraft.respawnPlayer() - handles player respawn (Minecraft.java:1399-1430)
-	// Safety check: ensure level and dimension are valid
-	if (level == nullptr || level->dimension == nullptr)
-	{
-		return;  // Can't respawn without a valid level
-	}
-	
-	if (!level->dimension->mayRespawn())  // Beta: if (!this.level.dimension.mayRespawn()) (Minecraft.java:1400)
-		toggleDimension();  // Beta: this.toggleDimension() (Minecraft.java:1401)
+	if (level == nullptr || level->dimension == nullptr || gameMode == nullptr)
+		return;
+
+	// AlphaPlace's multiplayer overload never performs a local dimension
+	// toggle; Packet9 has already installed the server-selected client level
+	// (Minecraft.java:1198-1202).
+	if (!level->isOnline && !level->dimension->mayRespawn())
+		toggleDimension();
 	
 	int_t xSpawn = level->xSpawn;  // Beta: int var1 = this.level.xSpawn (Minecraft.java:1404)
 	int_t zSpawn = level->zSpawn;  // Beta: int var2 = this.level.zSpawn (Minecraft.java:1405)
@@ -1394,13 +1395,14 @@ void Minecraft::respawnPlayer()
 	level->clearLoadedPlayerData();
 	
 	player = std::static_pointer_cast<LocalPlayer>(gameMode->createPlayer(*level));  // Beta: this.player = (LocalPlayer)this.gameMode.createPlayer(this.level) (Minecraft.java:1420)
+	player->dimension = dimension;  // AlphaPlace: entityPlayerSP.dimension = n (Minecraft.java:1223)
 	player->resetPos();  // Beta: this.player.resetPos() (Minecraft.java:1421)
 	gameMode->initPlayer(player);  // Beta: this.gameMode.initPlayer(this.player) (Minecraft.java:1422)
 	level->loadPlayer(player);  // Beta: this.level.loadPlayer(this.player) (Minecraft.java:1423)
 	player->input = Util::make_unique<KeyboardInput>(options);  // Beta: this.player.input = new KeyboardInput(this.options) (Minecraft.java:1424)
 	player->entityId = entityId;  // Beta: this.player.entityId = var5 (Minecraft.java:1425)
 	gameMode->adjustPlayer(player);  // Beta: this.gameMode.adjustPlayer(this.player) (Minecraft.java:1426)
-	prepareLevel(u"Respawning");  // Beta: this.prepareLevel("Respawning") (Minecraft.java:1427)
+	prepareLevel(title);  // AlphaPlace: func_6255_d(string) (Minecraft.java:1235)
 	// Alpha 1.2.6: Clear death screen after respawn (Minecraft.java:1431-1433)
 	if (dynamic_cast<DeathScreen *>(screen.get()) != nullptr)  // Beta: if (this.screen instanceof DeathScreen) (Minecraft.java:1431)
 		setScreen(nullptr);  // Beta: this.displayGuiScreen(null) (Minecraft.java:1432)

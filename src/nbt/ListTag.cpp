@@ -1,5 +1,8 @@
 #include "nbt/ListTag.h"
 
+#include <stdexcept>
+#include <string>
+
 #include "java/IOUtil.h"
 
 void ListTag::write(std::ostream &os)
@@ -18,12 +21,18 @@ void ListTag::write(std::ostream &os)
 void ListTag::load(std::istream &is)
 {
 	type = IOUtil::readByte(is);
-	int_t size = IOUtil::readInt(is);
+	const int_t size = IOUtil::readInt(is);
 
+	// Alpha NBTTagList.java:27-35 creates a tag only when the count is
+	// positive. Preserve its negative-count-as-empty behavior, but turn the
+	// null dereference caused by an unknown positive element id into a clear
+	// malformed-input failure.
 	list.clear();
-	for (int_t i = 0; i < size; i++)
+	for (int_t i = 0; i < size; ++i)
 	{
-		std::unique_ptr<Tag> tag(Tag::newTag(type));
+		std::shared_ptr<Tag> tag(Tag::newTag(type));
+		if (tag == nullptr)
+			throw std::runtime_error("Invalid NBT list tag id " + std::to_string(static_cast<int_t>(type)));
 		tag->load(is);
 		list.push_back(std::move(tag));
 	}

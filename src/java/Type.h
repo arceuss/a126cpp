@@ -6,7 +6,8 @@
 typedef std::int8_t byte_t;
 typedef std::uint8_t ubyte_t;
 
-typedef std::int16_t char_t;
+// Java char is an unsigned UTF-16 code unit.
+typedef std::uint16_t char_t;
 typedef std::uint16_t uchar_t;
 
 typedef std::int16_t short_t;

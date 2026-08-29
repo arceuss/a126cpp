@@ -2,7 +2,9 @@
 
 #include "network/Packet.h"
 
+class Entity;
 // Packet71Weather - matches Java Packet71Weather.java exactly
+
 // Thunderbolt packet - server to client (0x47)
 class Packet71Weather : public Packet {
 public:
@@ -13,6 +15,7 @@ public:
 	int_t field_27055_e;  // Unknown boolean (byte in Java)
 	
 	Packet71Weather();
+	explicit Packet71Weather(const Entity& entity);
 	
 	void readPacketData(SocketInputStream& in) override;
 	void writePacketData(SocketOutputStream& out) override;

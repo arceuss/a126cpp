@@ -8,10 +8,10 @@ Packet7::Packet7()
 {
 }
 
-Packet7::Packet7(int_t user, int_t target, byte_t leftClick)
+Packet7::Packet7(int_t user, int_t target, int_t action)
 	: field_9277_a(user)
 	, field_9276_b(target)
-	, field_9278_c(leftClick)
+	, field_9278_c(action)
 {
 }
 
@@ -25,7 +25,7 @@ void Packet7::readPacketData(SocketInputStream& in)
 	this->field_9276_b = in.readInt();
 	
 	// this.field_9278_c = var1.readByte();
-	this->field_9278_c = static_cast<byte_t>(in.read() & 0xFF);
+	this->field_9278_c = in.readByte();
 }
 
 void Packet7::writePacketData(SocketOutputStream& out)
@@ -38,7 +38,7 @@ void Packet7::writePacketData(SocketOutputStream& out)
 	out.writeInt(this->field_9276_b);
 	
 	// var1.writeByte(this.field_9278_c);
-	out.writeByte(this->field_9278_c);
+	out.writeByte(static_cast<byte_t>(this->field_9278_c));
 }
 
 void Packet7::processPacket(NetHandler* handler)

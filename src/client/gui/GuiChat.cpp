@@ -1,6 +1,7 @@
 #include "client/gui/GuiChat.h"
 #include "client/Minecraft.h"
 #include "client/gui/GuiNewChat.h"
+#include "client/spc/SPCCommand.h"
 #include "client/player/EntityClientPlayerMP.h"
 #include "pc/lwjgl/Keyboard.h"
 
@@ -88,12 +89,22 @@ void GuiChat::keyPressed(char_t eventCharacter, int_t eventKey)
 			GuiNewChat &chatGUI = minecraft.gui.getChatGUI();
 			chatGUI.addToSentHistory(message);
 			
-			if (minecraft.player)
+			if (minecraft.player != nullptr)
 			{
-				EntityClientPlayerMP *clientPlayer = dynamic_cast<EntityClientPlayerMP*>(minecraft.player.get());
-				if (clientPlayer)
+				EntityClientPlayerMP *clientPlayer =
+					dynamic_cast<EntityClientPlayerMP *>(minecraft.player.get());
+				if (clientPlayer != nullptr)
 				{
+					// Multiplayer slash commands remain server-owned.
 					clientPlayer->sendChatMessage(message);
+				}
+				else if (!message.empty() && message[0] == u'/'
+					&& minecraft.level != nullptr)
+				{
+					SPCCommand::Result result = SPCCommand::execute(
+						*minecraft.level, *minecraft.player, message);
+					for (const jstring &line : result.messages)
+						chatGUI.printChatMessage(line);
 				}
 			}
 		}

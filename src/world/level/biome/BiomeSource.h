@@ -43,13 +43,14 @@ private:
 
 public:
 	BiomeSource(Level &level);
+	virtual ~BiomeSource() = default;
 
-	double getTemperature(int_t x, int_t z);
+	virtual double getTemperature(int_t x, int_t z);
 
-	void getBiomeBlock(int_t x, int_t z, int_t xd, int_t zd);
+	virtual void getBiomeBlock(int_t x, int_t z, int_t xd, int_t zd);
 	
 	// Beta: BiomeSource.getTemperatureBlock() - returns temperature array for snow generation
-	std::array<double, 16 * 16> &getTemperatureBlock(int_t x, int_t z, int_t xd, int_t zd);
+	virtual std::array<double, 16 * 16> &getTemperatureBlock(int_t x, int_t z, int_t xd, int_t zd);
 	
 	// Alpha: MobSpawnerBase.getBiome(float var0, float var1) (MobSpawnerBase.java:63-65)
 	// var0 = temperature, var1 = rainfall/downfall
@@ -63,5 +64,5 @@ public:
 	static bool isDesert(BiomeType biome);
 	
 	// Get biome at specific coordinates (uses temperature/downfall from arrays)
-	BiomeType getBiomeAt(int_t x, int_t z);
+	virtual BiomeType getBiomeAt(int_t x, int_t z);
 };

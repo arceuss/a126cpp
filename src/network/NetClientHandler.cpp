@@ -198,20 +198,14 @@ void NetClientHandler::handleLogin(Packet1Login* var1)
 		dimension = 0;
 	}
 	
-	// Java: this.worldClient = new WorldClient(this, var1.field_4074_d, var1.field_4073_e);
-	// MultiPlayerLevel constructor sets isOnline = true (equivalent to multiplayerWorld = true)
-	// Mark old worldClient as invalid if it exists (but don't disconnect - this is initial login)
+	// Beta netcode owns the multiplayer level with a shared_ptr and only marks
+	// the old view inactive when replacing it. It never sends a disconnect
+	// packet during a level replacement (beta1.7.3cpp NetClientHandler.cpp:647-652).
 	if (worldClient != nullptr)
-	{
-		worldClient->markInvalid();  // Mark invalid without disconnecting
-	}
-	worldClient = new MultiPlayerLevel(this, var1->field_4074_d, dimension);
-	
-	// Java: this.worldClient.multiplayerWorld = true;
-	// Already set in MultiPlayerLevel constructor (isOnline = true)
-	
-	// Java: this.mc.func_6261_a(this.worldClient);
-	mc->setLevel(std::shared_ptr<Level>(worldClient));
+		worldClient->markInvalid();
+
+	worldClient = std::make_shared<MultiPlayerLevel>(this, var1->field_4074_d, dimension);
+	mc->setLevel(worldClient);
 	
 	// Java: this.mc.thePlayer.dimension = var1.field_4073_e;
 	if (mc->player != nullptr)
@@ -497,79 +491,12 @@ void NetClientHandler::func_6498_a(Packet28* var1)
 	}
 }
 
-void NetClientHandler::handleEntityMetadata(Packet40EntityMetadata* var1)
+void NetClientHandler::handleEntityMetadata(Packet40EntityMetadata* packet)
 {
-	// Alpha 1.2.6: NetClientHandler.handleEntityMetadata() - updates entity metadata
-	// Java: Entity var2 = this.func_12246_a(var1.field_21048_a);
-	//       if(var2 != null) {
-	//           var2.getDataWatcher().updateWatchedObjectsFromList(var1.func_21047_b());
-	//       }
-	Entity* entity = func_12246_a(var1->entityId);
+	// Direct Alpha transliteration: NetClientHandler.java:615-621.
+	Entity *entity = func_12246_a(packet->entityId);
 	if (entity != nullptr)
-	{
-		// Java: var2.getDataWatcher().updateWatchedObjectsFromList(var1.func_21047_b());
-		// Packet40EntityMetadata stores metadata in field_21048_b vector
-		if (!var1->field_21048_b.empty())
-		{
-			entity->getDataWatcher().updateWatchedObjectsFromList(var1->field_21048_b);
-			
-			// Alpha 1.2.6: Sync shared flags (sneaking, onFire, riding) from DataWatcher
-			// Data ID 0 = shared flags byte (FLAG_ONFIRE=0, FLAG_SNEAKING=1, FLAG_RIDING=2)
-			for (const auto& watchableObj : var1->field_21048_b)
-			{
-				if (watchableObj->getDataValueId() == 0 && watchableObj->getObjectType() == 0)  // Data ID 0, Type 0 = Byte
-				{
-					byte_t flags = watchableObj->getByte();
-					// Note: onFire flag is stored in DataWatcher and checked via isOnFire() which reads from DataWatcher in multiplayer
-					// We don't need to update entity->onFire here since baseTick() resets it and isOnFire() checks DataWatcher directly
-					
-					// Update sneaking flag from DataWatcher
-					// Java: FLAG_SNEAKING = 1, so check bit 1
-					bool sneaking = (flags & (1 << Entity::FLAG_SNEAKING)) != 0;
-					entity->setSneaking(sneaking);
-				}
-			}
-			
-			// Alpha 1.2.6: Note - hurtTime and deathTime are primarily handled via Packet38 (Entity Status)
-			// Packet40EntityMetadata may also contain these values, but Packet38 is the main mechanism
-			// We still check metadata for any additional synchronization
-			Mob* mobEntity = dynamic_cast<Mob*>(entity);
-			if (mobEntity != nullptr)
-			{
-				// Iterate through all metadata objects and apply short/int values
-				// Data IDs may vary - we check for short values that could be hurtTime/deathTime/attackTime
-				for (const auto& watchableObj : var1->field_21048_b)
-				{
-					if (watchableObj->getObjectType() == 1)  // Type 1 = Short
-					{
-						short_t value = watchableObj->getShort();
-						int dataId = watchableObj->getDataValueId();
-						
-						// Try common data IDs (may need adjustment based on server)
-						// Note: Packet38 is the primary mechanism for hurtTime (status 2) and death (status 3)
-						if (dataId >= 1 && dataId <= 5)
-						{
-							// Apply short values - exact mapping may vary
-							// Common: 2=hurtTime, 3=deathTime, 4=attackTime
-							if (dataId == 2)
-							{
-								mobEntity->hurtTime = static_cast<int_t>(value);
-								mobEntity->hurtDuration = static_cast<int_t>(value);
-							}
-							else if (dataId == 3)
-							{
-								mobEntity->deathTime = static_cast<int_t>(value);
-							}
-							else if (dataId == 4)
-							{
-								mobEntity->attackTime = static_cast<int_t>(value);
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+		entity->getDataWatcher().updateWatchedObjectsFromList(packet->func_21047_b());
 }
 
 void NetClientHandler::handleNamedEntitySpawn(Packet20NamedEntitySpawn* var1)
@@ -1345,56 +1272,15 @@ void NetClientHandler::handleSpawnPosition(Packet6SpawnPosition* var1)
 	}
 }
 
-void NetClientHandler::func_6497_a(Packet39* var1)
+void NetClientHandler::func_6497_a(Packet39* packet)
 {
-	// Beta 1.2: SetRidingPacket handling - matches newb12 ClientConnection.handleRidePacket() exactly
-	// Beta: Entity rider = this.getEntity(packet.riderId);
-	// Get rider entity - check if it's the local player first
-	Entity* rider = nullptr;
-	if (mc != nullptr && mc->player != nullptr && var1->riderId == mc->player->entityId)
-	{
-		// Beta: if (packet.riderId == this.minecraft.player.entityId) { rider = this.minecraft.player; }
+	// Direct Alpha transliteration: NetClientHandler.java:497-505.
+	Entity *rider = func_12246_a(packet->field_6365_a);
+	Entity *ridden = func_12246_a(packet->field_6364_b);
+	if (packet->field_6365_a == mc->player->entityId)
 		rider = mc->player.get();
-	}
-	else if (worldClient != nullptr)
-	{
-		// Beta: this.level.getEntity(packet.riderId)
-		std::shared_ptr<Entity> riderPtr = worldClient->getEntity(var1->riderId);
-		if (riderPtr != nullptr)
-		{
-			rider = riderPtr.get();
-		}
-	}
-	
-	// Beta 1.2: SetRidingPacket handling - matches newb12 ClientConnection.handleRidePacket() exactly
-	// Beta: Entity ridden = this.getEntity(packet.riddenId);
-	// Get ridden entity shared_ptr - can be null for dismount (riddenId = -1)
-	std::shared_ptr<Entity> ridden = nullptr;
-	if (var1->riddenId >= 0 && worldClient != nullptr)
-	{
-		// Beta: getEntity() checks if ID matches player first, then gets from world
-		if (mc != nullptr && mc->player != nullptr && var1->riddenId == mc->player->entityId)
-		{
-			// Player is the ridden entity (shouldn't happen, but handle it)
-			ridden = mc->player;
-		}
-		else
-		{
-			// Beta: this.level.getEntity(packet.riddenId)
-			ridden = worldClient->getEntity(var1->riddenId);
-		}
-	}
-	// If riddenId < 0 (e.g., -1), ridden stays nullptr (dismount)
-	
-	// Beta 1.2: if (rider != null) { rider.ride(ridden); }
-	// Matches newb12 ClientConnection.handleRidePacket():472-474 exactly
 	if (rider != nullptr)
-	{
-		// Beta: Use ride() with shared_ptr - matches newb12 Entity.ride() behavior
-		// If already mounted to same vehicle, ride() will dismount (matches Java line 930-933)
-		// If ridden is nullptr, ride(nullptr) dismounts (matches Java line 923-929)
-		rider->ride(ridden);
-	}
+		rider->mountEntity(ridden);
 }
 
 void NetClientHandler::func_6499_a(Packet7* var1)
@@ -1443,107 +1329,38 @@ void NetClientHandler::handleHealth(Packet8* var1)
 	}
 }
 
-void NetClientHandler::func_9448_a(Packet9* var1)
+void NetClientHandler::func_9448_a(Packet9* packet)
 {
-	// Alpha 1.2.6: NetClientHandler.func_9448_a() - handle respawn packet
-	// Java: public void func_9448_a(Packet9 var1) {
-	//     if(var1.field_28048_a == 1) {
-	//         var1.field_28048_a = 0;
-	//     }
-	int_t dimension = var1->field_28048_a;
-	if (dimension == 1)
+	if (packet == nullptr || mc == nullptr || mc->player == nullptr || worldClient == nullptr)
+		return;
+
+	// AlphaPlace maps dimension 1 back to the overworld before comparing it
+	// (NetClientHandler.java:526-529).
+	int_t dimension = packet->field_28048_a == 1 ? 0 : packet->field_28048_a;
+
+	jstring title = u"Respawning";
+	if (dimension == 0 && mc->player->dimension == -1)
+		title = u"Leaving the Nether";
+	else if (dimension == -1 && mc->player->dimension == 0)
+		title = u"Entering the Nether";
+
+	if (dimension != mc->player->dimension)
 	{
-		dimension = 0;
-	}
-	
-	// Java: String var2 = "Respawning";
-	//       if(var1.field_28048_a == 0 && this.mc.thePlayer.dimension == -1) {
-	//           var2 = "Leaving the Nether";
-	//       } else if(var1.field_28048_a == -1 && this.mc.thePlayer.dimension == 0) {
-	//           var2 = "Entering the Nether";
-	//       }
-	jstring respawnMessage = u"Respawning";
-	if (mc != nullptr && mc->player != nullptr)
-	{
-		if (dimension == 0 && mc->player->dimension == -1)
-		{
-			respawnMessage = u"Leaving the Nether";
-		}
-		else if (dimension == -1 && mc->player->dimension == 0)
-		{
-			respawnMessage = u"Entering the Nether";
-		}
-	}
-	
-	// Java: if(var1.field_28048_a != this.mc.thePlayer.dimension) {
-	//     this.field_1210_g = false;
-	//     this.worldClient = new WorldClient(this, var1.seed, var1.field_28048_a);
-	//     this.worldClient.multiplayerWorld = true;
-	//     this.mc.func_6261_a(this.worldClient);
-	//     this.mc.thePlayer.dimension = var1.field_28048_a;
-	//     this.mc.displayGuiScreen(new GuiDownloadTerrain(this));
-	// }
-	// Alpha 1.2.6: Always respawn, but handle dimension switch first if needed
-	// Java: this.mc.respawn(true, var1.field_28048_a, var2);
-	if (mc != nullptr && mc->player != nullptr && dimension != mc->player->dimension)
-	{
+		// Beta 1.7.3's working path drops the old client-level owner, creates a
+		// fresh level, installs it, then waits for the server's first position.
+		// The AlphaPlace protocol additionally supplies the destination seed.
 		field_1210_g = false;
-		
-		// Alpha 1.2.6: Store old level reference before switching
-		std::shared_ptr<Level> oldLevel = mc->level;
-		
-		// Alpha 1.2.6: Mark old MultiPlayerLevel as invalid if it exists
-		// This prevents crashes when tick() is called on a destroyed/moved level
-		// NOTE: Use markInvalid() not disconnect() - we don't want to close the connection when switching dimensions
-		if (oldLevel != nullptr)
-		{
-			MultiPlayerLevel* oldMPLevel = dynamic_cast<MultiPlayerLevel*>(oldLevel.get());
-			if (oldMPLevel != nullptr)
-			{
-				oldMPLevel->markInvalid();  // Mark invalid without disconnecting
-			}
-			
-			// Remove player from old level before switching dimensions
-			if (mc->player != nullptr)
-			{
-				oldLevel->removeEntity(mc->player);
-			}
-		}
-		
-		// Alpha 1.2.6: Mark old worldClient as invalid before creating new one
-		// This prevents crashes when tick() is called on a destroyed/moved level
-		// NOTE: Use markInvalid() not disconnect() - we don't want to close the connection when switching dimensions
-		if (worldClient != nullptr)
-		{
-			worldClient->markInvalid();  // Mark invalid without disconnecting
-		}
-		
-		// Alpha 1.2.6: Create new world client for new dimension
-		// Note: The old worldClient will be cleaned up when mc->setLevel() replaces the old level
-		// The shared_ptr in mc->level will handle cleanup of the old level
-		// setLevel() will also call levelRenderer.setLevel() which cleans up old chunks
-		worldClient = new MultiPlayerLevel(this, var1->seed, dimension);
-		mc->setLevel(std::shared_ptr<Level>(worldClient));
+		std::shared_ptr<MultiPlayerLevel> previousLevel = worldClient;
+		previousLevel->markInvalid();
+		worldClient = std::make_shared<MultiPlayerLevel>(this, packet->seed, dimension);
+		mc->setLevel(worldClient);
 		mc->player->dimension = dimension;
 		mc->setScreen(std::make_shared<GuiDownloadTerrain>(*mc, this));
-		
-		// Alpha 1.2.6: Don't explicitly clear oldLevel - let shared_ptr handle cleanup
-		// The old level will be destroyed when the last reference is released
-		// Explicitly resetting it here can cause issues during dimension transitions
 	}
-	
-	// Alpha 1.2.6: Respawn player (in new dimension if switched, or same dimension if not)
-	// Java: this.mc.respawn(true, var1.field_28048_a, var2);
-	// respawnPlayer() will:
-	// 1. Remove old player entity (if not already removed)
-	// 2. Create new player via gameMode->createPlayer() (creates EntityClientPlayerMP)
-	// 3. Reset player position
-	// 4. Clear death screen
-	// Note: respawnPlayer() now has null checks for level and dimension
-	if (mc != nullptr && mc->level != nullptr && mc->level->dimension != nullptr)
-	{
-		mc->respawnPlayer();
-	}
+
+	// AlphaPlace's respawn overload carries the target dimension and loading
+	// title (Minecraft.java:1198-1238).
+	mc->respawnPlayer(dimension, title);
 }
 
 void NetClientHandler::func_12245_a(Packet60* var1)
@@ -2212,9 +2029,12 @@ void NetClientHandler::handleSignUpdate(Packet130UpdateSign* var1)
 				{
 					signEntity->messages[i] = var1->signLines[i];
 				}
-				// Alpha: Call onInventoryChanged() to notify renderer
-				// Note: In our implementation, we might not have onInventoryChanged(), 
-				// but the sign will be re-rendered on next frame anyway
+				// Alpha calls onInventoryChanged() here (NetClientHandler.java:621);
+				// TileEntitySign inherits Alpha TileEntity's no-op implementation.
+				// The static cache therefore performs a renderer-only invalidation:
+				// no save/chunk semantics are added to packet handling.
+				if (mc != nullptr)
+					mc->levelRenderer.tileEntityChanged(var1->xPosition, var1->yPosition, var1->zPosition, tileEntity);
 			}
 		}
 	}
@@ -2386,14 +2206,9 @@ void NetClientHandler::func_28115_a(Packet61DoorChange* var1)
 					// Java: double var25 = (double)var9 * var31 + var7.nextGaussian() * 0.01D; (line 1193)
 					// Java: double var27 = -0.03D + var7.nextGaussian() * 0.01D; (line 1194)
 					// Java: double var29 = (double)var10 * var31 + var7.nextGaussian() * 0.01D; (line 1195)
-					// Note: Random doesn't have nextGaussian, approximate using Box-Muller transform
-					// For simplicity, use nextDouble() - 0.5 scaled appropriately to approximate Gaussian noise
-					double gaussian1 = (mc->level->random.nextDouble() - 0.5) * (mc->level->random.nextDouble() - 0.5) * 2.0;
-					double gaussian2 = (mc->level->random.nextDouble() - 0.5) * (mc->level->random.nextDouble() - 0.5) * 2.0;
-					double gaussian3 = (mc->level->random.nextDouble() - 0.5) * (mc->level->random.nextDouble() - 0.5) * 2.0;
-					double vx = static_cast<double>(var9) * var31 + gaussian1 * 0.01;
-					double vy = -0.03 + gaussian2 * 0.01;
-					double vz = static_cast<double>(var10) * var31 + gaussian3 * 0.01;
+					double vx = static_cast<double>(var9) * var31 + mc->level->random.nextGaussian() * 0.01;
+					double vy = -0.03 + mc->level->random.nextGaussian() * 0.01;
+					double vz = static_cast<double>(var10) * var31 + mc->level->random.nextGaussian() * 0.01;
 					
 					// Java: this.spawnParticle("smoke", var19, var21, var23, var25, var27, var29); (line 1196)
 					auto smoke = std::make_unique<SmokeParticle>(*mc->level, px, py, pz, vx, vy, vz);

@@ -1,5 +1,6 @@
 #include "client/model/Polygon.h"
 #include "client/renderer/Tesselator.h"
+#include "OpenGL.h"
 
 Poly::Poly()
 {
@@ -55,6 +56,33 @@ void Poly::render(Tesselator &t, float scale)
 	}
 
 	t.end();
+}
+
+void Poly::renderImmediate(float scale)
+{
+	Vec3 *v0 = vertices[1].pos.vectorTo(vertices[0].pos);
+	Vec3 *v1 = vertices[1].pos.vectorTo(vertices[2].pos);
+	Vec3 *n = v1->cross(*v0)->normalize();
+
+	float nx = flipNormalFlag ? -n->x : n->x;
+	float ny = flipNormalFlag ? -n->y : n->y;
+	float nz = flipNormalFlag ? -n->z : n->z;
+
+	// Match Tesselator::normal's packed GL_BYTE normal representation exactly.
+	GLbyte bx = static_cast<GLbyte>(static_cast<unsigned char>(nx * 128.0f));
+	GLbyte by = static_cast<GLbyte>(static_cast<unsigned char>(ny * 127.0f));
+	GLbyte bz = static_cast<GLbyte>(static_cast<unsigned char>(nz * 127.0f));
+
+	static const int_t indices[6] = { 0, 1, 2, 0, 2, 3 };
+	glBegin(GL_TRIANGLES);
+	glNormal3b(bx, by, bz);
+	for (int_t index : indices)
+	{
+		Vertex &v = vertices[static_cast<size_t>(index)];
+		glTexCoord2f(v.u, v.v);
+		glVertex3f(v.pos.x * scale, v.pos.y * scale, v.pos.z * scale);
+	}
+	glEnd();
 }
 
 Poly &Poly::flipNormal()

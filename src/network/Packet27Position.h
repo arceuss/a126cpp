@@ -3,7 +3,7 @@
 #include "network/Packet.h"
 
 // Packet27Position - matches Java Packet27Position.java exactly
-// Stance update packet - bidirectional
+// Stance update packet - serverbound
 class Packet27Position : public Packet {
 public:
 	float field_22039_a;

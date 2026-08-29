@@ -1,59 +1,59 @@
-#include "TntTile.h"
+#include "world/level/tile/TntTile.h"
 
-#include "Facing.h"
+#include <memory>
+
+#include "world/entity/PrimedTnt.h"
 #include "world/level/Level.h"
-#include "java/Random.h"
 
 TntTile::TntTile(int_t id, int_t texture) : Tile(id, texture, Material::explosive)
 {
-	// Beta: Properties set in initTiles()
 }
 
 int_t TntTile::getTexture(Facing face)
 {
-	// Beta: TntTile.getTexture() (TntTile.java:14-19)
-	// Face 0 (DOWN) = tex+2, face 1 (UP) = tex+1, others = tex
-	if (face == Facing::DOWN)  // Face 0
-		return this->tex + 2;
-	else if (face == Facing::UP)  // Face 1
-		return this->tex + 1;
-	else
-		return this->tex;
+	if (face == Facing::DOWN)
+		return tex + 2;
+	if (face == Facing::UP)
+		return tex + 1;
+	return tex;
 }
 
 void TntTile::neighborChanged(Level &level, int_t x, int_t y, int_t z, int_t tile)
 {
-	// Beta: TntTile.neighborChanged() (TntTile.java:23-28)
-	// If neighbor is signal source and level has neighbor signal, destroy TNT
-	// TODO: Implement Tile::isSignalSource() and Level::hasNeighborSignal() for redstone signal detection
-	// For now, skip redstone trigger logic - TNT will activate when player breaks it
-	// if (tile > 0)
-	// {
-	//     Tile *neighborTile = Tile::tiles[tile];
-	//     if (neighborTile != nullptr && neighborTile->isSignalSource() && level.hasNeighborSignal(x, y, z))
-	//     {
-	//         this->destroy(level, x, y, z, 0);
-	//         level.setTile(x, y, z, 0);
-	//     }
-	// }
+	// Direct Alpha transliteration: BlockTNT.java:28-32.
+	if (tile > 0 && Tile::tiles[tile]->isSignalSource()
+		&& level.hasNeighborSignal(x, y, z))
+	{
+		destroy(level, x, y, z, 0);
+		level.setTile(x, y, z, 0);
+	}
 }
 
 int_t TntTile::getResourceCount(Random &random)
 {
-	// Beta: TntTile.getResourceCount() returns 0 (TntTile.java:31-33)
-	// TNT doesn't drop when broken (converted to PrimedTnt entity)
+	(void)random;
 	return 0;
+}
+
+void TntTile::wasExploded(Level &level, int_t x, int_t y, int_t z)
+{
+	// Direct Alpha transliteration: BlockTNT.java:39-42.
+	std::shared_ptr<PrimedTnt> primed = std::make_shared<PrimedTnt>(
+		level, static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5,
+		static_cast<double>(z) + 0.5);
+	primed->life = level.random.nextInt(primed->life / 4) + primed->life / 8;
+	level.addEntity(primed);
 }
 
 void TntTile::destroy(Level &level, int_t x, int_t y, int_t z, int_t data)
 {
-	// Beta: TntTile.destroy() (TntTile.java:43-49)
-	// Creates PrimedTnt entity if not online, plays fuse sound
-	if (!level.isOnline)
-	{
-		// TODO: Implement PrimedTnt entity class
-		// PrimedTnt *primedTnt = new PrimedTnt(level, x + 0.5f, y + 0.5f, z + 0.5f);
-		// level.addEntity(primedTnt);
-		// level.playSound(primedTnt, "random.fuse", 1.0f, 1.0f);
-	}
+	(void)data;
+	// Direct Alpha transliteration: BlockTNT.java:45-52.
+	if (level.isOnline)
+		return;
+	std::shared_ptr<PrimedTnt> primed = std::make_shared<PrimedTnt>(
+		level, static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5,
+		static_cast<double>(z) + 0.5);
+	level.addEntity(primed);
+	level.playSound(primed.get(), u"random.fuse", 1.0f, 1.0f);
 }

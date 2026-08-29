@@ -1,4 +1,5 @@
 #include "world/level/tile/FluidTile.h"
+#include "java/Math.h"
 #include "world/level/Level.h"
 #include "world/level/LevelSource.h"
 #include "world/entity/Entity.h"
@@ -364,19 +365,20 @@ void FluidTile::updateLiquid(Level &level, int_t x, int_t y, int_t z)
 	}
 }
 
-// Beta: LiquidTile.fizz() - plays fizz sound and particles (LiquidTile.java:292-298)
+// Alpha BlockFluids.func_292_i (BlockFluids.java:265-269).
 void FluidTile::fizz(Level &level, int_t x, int_t y, int_t z)
 {
-	// TODO: Play sound "random.fizz" when sound system is implemented
-	// level.playSound(x + 0.5F, y + 0.5F, z + 0.5F, "random.fizz", 0.5F, 2.6F + (level.random.nextFloat() - level.random.nextFloat()) * 0.8F);
-	
-	// Beta: Spawn 8 smoke particles (LiquidTile.java:295-297)
+	level.playSound(static_cast<double>(x) + 0.5,
+		static_cast<double>(y) + 0.5,
+		static_cast<double>(z) + 0.5,
+		u"random.fizz", 0.5f,
+		2.6f + (level.random.nextFloat() - level.random.nextFloat()) * 0.8f);
 	for (int_t i = 0; i < 8; ++i)
 	{
-		double px = x + (static_cast<double>(rand()) / RAND_MAX);
-		double py = y + 1.2;
-		double pz = z + (static_cast<double>(rand()) / RAND_MAX);
-		// TODO: Add particle "largesmoke" when particle system is implemented
-		// level.addParticle("largesmoke", px, py, pz, 0.0, 0.0, 0.0);
+		level.addParticle(u"largesmoke",
+			static_cast<double>(x) + Math::random(),
+			static_cast<double>(y) + 1.2,
+			static_cast<double>(z) + Math::random(),
+			0.0, 0.0, 0.0);
 	}
 }

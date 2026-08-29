@@ -3,6 +3,8 @@
 #include "network/Packet.h"
 #include "java/String.h"
 
+class Painting;
+
 // Packet25EntityPainting - matches Java Packet25EntityPainting.java exactly
 // Entity Painting packet - server to client
 class Packet25EntityPainting : public Packet {
@@ -15,6 +17,7 @@ public:
 	int_t direction;
 	
 	Packet25EntityPainting();
+	Packet25EntityPainting(Painting &painting);
 	
 	void readPacketData(SocketInputStream& in) override;
 	void writePacketData(SocketOutputStream& out) override;

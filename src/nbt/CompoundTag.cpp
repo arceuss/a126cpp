@@ -27,7 +27,10 @@ void CompoundTag::load(std::istream &is)
 		std::unique_ptr<Tag> tag(Tag::readNamedTag(is));
 		if (tag->getId() == TAG_End)
 			break;
-		tags.emplace(tag->getName(), std::move(tag));
+		// Alpha NBTTagCompound.readTagContents uses Map.put, so the last
+		// occurrence of a duplicate key replaces the earlier tag
+		// (NBTTagCompound.java:28-34).
+		tags[tag->getName()] = std::move(tag);
 	}
 }
 
@@ -38,53 +41,55 @@ byte_t CompoundTag::getId() const
 
 void CompoundTag::put(const jstring &name, std::shared_ptr<Tag> tag)
 {
-	tags.emplace(name, tag);
 	tag->setName(name);
+	// Alpha setTag delegates to Map.put: replacement, not emplace.
+	tags[name] = std::move(tag);
 }
 
 void CompoundTag::putByte(const jstring &name, byte_t value)
 {
-	tags.emplace(name, &((new ByteTag(value))->setName(name)));
+	put(name, std::make_shared<ByteTag>(value));
 }
 
 void CompoundTag::putShort(const jstring &name, short_t value)
 {
-	tags.emplace(name, &((new ShortTag(value))->setName(name)));
+	put(name, std::make_shared<ShortTag>(value));
 }
 
 void CompoundTag::putInt(const jstring &name, int_t value)
 {
-	tags.emplace(name, &((new IntTag(value))->setName(name)));
+	put(name, std::make_shared<IntTag>(value));
 }
 
 void CompoundTag::putLong(const jstring &name, long_t value)
 {
-	tags.emplace(name, &((new LongTag(value))->setName(name)));
+	put(name, std::make_shared<LongTag>(value));
 }
 
 void CompoundTag::putFloat(const jstring &name, float value)
 {
-	tags.emplace(name, &((new FloatTag(value))->setName(name)));
+	put(name, std::make_shared<FloatTag>(value));
 }
 
 void CompoundTag::putDouble(const jstring &name, double value)
 {
-	tags.emplace(name, &((new DoubleTag(value))->setName(name)));
+	put(name, std::make_shared<DoubleTag>(value));
 }
 
 void CompoundTag::putString(const jstring &name, const jstring &value)
 {
-	tags.emplace(name, &((new StringTag(value))->setName(name)));
+	put(name, std::make_shared<StringTag>(value));
 }
 
 void CompoundTag::putByteArray(const jstring &name, std::vector<byte_t> &&value)
 {
-	tags.emplace(name, &((new ByteArrayTag(std::move(value)))->setName(name)));
+	put(name, std::make_shared<ByteArrayTag>(std::move(value)));
 }
 
 void CompoundTag::putCompound(const jstring &name, std::unique_ptr<CompoundTag> &&value)
 {
-	tags.emplace(name, std::move(value));
+	value->setName(name);
+	tags[name] = std::move(value);
 }
 
 void CompoundTag::putBoolean(const jstring &name, bool value)

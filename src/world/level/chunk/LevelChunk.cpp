@@ -393,18 +393,21 @@ void LevelChunk::addEntity(std::shared_ptr<Entity> entity)
 
 void LevelChunk::removeEntity(std::shared_ptr<Entity> entity)
 {
-	// Beta: LevelChunk.removeEntity() - removes entity from entityBlocks (LevelChunk.java:377-389)
-	int_t y = Mth::floor(entity->y / 16.0);
+	// Alpha: Chunk.func_1015_b() removes the entity from the slice it was
+	// filed under, not from one recomputed from its current position
+	// (Chunk.java:364-366). Recomputing leaks the entity in its old slice as
+	// soon as it has moved vertically since being added.
+	removeEntity(entity, entity->yChunk);
+}
+
+void LevelChunk::removeEntity(std::shared_ptr<Entity> entity, int_t y)
+{
+	// Alpha: Chunk.func_1016_a() (Chunk.java:368-376)
 	if (y < 0)
 		y = 0;
 	if (y >= static_cast<int_t>(entityBlocks.size()))
 		y = static_cast<int_t>(entityBlocks.size()) - 1;
 	entityBlocks[y].erase(entity);
-}
-
-void LevelChunk::removeEntity(std::shared_ptr<Entity> entity, int_t y)
-{
-
 }
 
 bool LevelChunk::isSkyLit(int_t x, int_t y, int_t z)
@@ -525,11 +528,20 @@ void LevelChunk::removeTileEntity(int_t x, int_t y, int_t z)
 
 void LevelChunk::load()
 {
-
+	// Alpha: Chunk.onChunkLoad() registers the chunk's existing tile entities
+	// and every entity slice with the level (Chunk.java:430-436). unload()
+	// below performs the exact inverse; leaving this empty made a reloaded
+	// chunk's contents invisible to the level.
+	loaded = true;
+	for (auto &i : tileEntities)
+		level.tileEntityList.insert(i.second);
+	for (auto &b : entityBlocks)
+		level.addEntities(b);
 }
 
 void LevelChunk::unload()
 {
+	// Alpha: Chunk.onChunkUnload() (Chunk.java:438-444)
 	loaded = false;
 	for (auto &i : tileEntities)
 		level.tileEntityList.erase(i.second);

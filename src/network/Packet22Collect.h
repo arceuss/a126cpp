@@ -10,7 +10,6 @@ public:
 	int_t collectorEntityId;
 	
 	Packet22Collect();
-	Packet22Collect(int_t collectedEntityId, int_t collectorEntityId);
 	
 	void readPacketData(SocketInputStream& in) override;
 	void writePacketData(SocketOutputStream& out) override;

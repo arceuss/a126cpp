@@ -128,6 +128,10 @@ public:
 	// Get packet ID for this instance
 	virtual int getPacketId() const = 0;
 	
-	// Initialize packet registry - must be called before using packets
+	// Java initialises Packet's static registration table exactly once when
+	// the class is first used. std::call_once provides the same guarantee.
+	static void ensurePacketRegistryInitialized();
+
+private:
 	static void initializePacketRegistry();
 };

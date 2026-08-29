@@ -3,6 +3,7 @@
 #include <array>
 #include <stdexcept>
 #include "java/Type.h"
+#include "java/Random.h"
 #include "Facing.h"
 
 class ItemStack;
@@ -21,6 +22,9 @@ public:
 	static std::array<Item *, 32000> itemsList;
 	
 protected:
+	// Alpha Item.itemRand is a separate static RNG, not World.rand
+	// (Item.java:39).
+	static Random itemRand;
 	int_t itemID;  // Base item ID (can be > 255 for records, etc.)
 	int_t shiftedIndex;  // Actual ID = 256 + itemID (stored in itemsList[shiftedIndex])
 	int_t maxStackSize = 64;
@@ -37,6 +41,8 @@ public:
 	int_t getShiftedIndex() const { return shiftedIndex; }
 	int_t getMaxStackSize() const { return maxStackSize; }
 	int_t getMaxDamage() const { return maxDamage; }
+	// Alpha: Item.getHasSubtypes() (Item.java:219-221)
+	bool getHasSubtypes() const { return hasSubtypes; }
 	
 	// Block interaction
 	virtual float getStrVsBlock(ItemStack &stack, Tile &tile);

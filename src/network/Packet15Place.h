@@ -9,10 +9,10 @@ class ItemStack;
 class Packet15Place : public Packet {
 public:
 	int_t xPosition;
-	byte_t yPosition;  // Note: Java uses int but reads/writes as byte
+	int_t yPosition;
 	int_t zPosition;
-	byte_t direction;  // Note: Java uses int but reads/writes as byte
-	std::shared_ptr<ItemStack> itemStack;  // Can be null
+	int_t direction;
+	std::shared_ptr<ItemStack> itemStack;
 	
 	Packet15Place();
 	Packet15Place(int_t x, int_t y, int_t z, int_t direction, std::shared_ptr<ItemStack> itemStack);

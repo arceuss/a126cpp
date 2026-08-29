@@ -60,7 +60,7 @@ double Boat::getRideHeight()
 
 bool Boat::hurt(Entity *var1, int_t var2)
 {
-	if (!level.isOnline && !removed)
+	if (!level->isOnline && !removed)
 	{
 		hurtDir = -hurtDir;
 		hurtTime = 10;
@@ -145,13 +145,13 @@ void Boat::tick()
 		double var5 = bb.y0 + (bb.y1 - bb.y0) * (var4 + 0) / var1 - 0.125;
 		double var7 = bb.y0 + (bb.y1 - bb.y0) * (var4 + 1) / var1 - 0.125;
 		AABB *var9 = AABB::newTemp(bb.x0, var5, bb.z0, bb.x1, var7, bb.z1);
-		if (level.containsAnyLiquid(*var9))
+		if (level->containsAnyLiquid(*var9))
 		{
 			var2 += 1.0 / var1;
 		}
 	}
 
-	if (level.isOnline)
+	if (level->isOnline)
 	{
 		if (lSteps > 0)
 		{
@@ -277,13 +277,13 @@ void Boat::tick()
 				{
 					double var19 = x - var10 * var15 * 0.8 + var12 * var17;
 					double var21 = z - var12 * var15 * 0.8 - var10 * var17;
-					level.addParticle(u"splash", var19, y - 0.125, var21, xd, yd, zd);
+					level->addParticle(u"splash", var19, y - 0.125, var21, xd, yd, zd);
 				}
 				else
 				{
 					double var36 = x + var10 + var12 * var15 * 0.7;
 					double var38 = z + var12 - var10 * var15 * 0.7;
-					level.addParticle(u"splash", var36, y - 0.125, var38, xd, yd, zd);
+					level->addParticle(u"splash", var36, y - 0.125, var38, xd, yd, zd);
 			}
 		}
 	}
@@ -300,7 +300,7 @@ void Boat::tick()
 		yd *= 0.95f;
 		zd *= 0.99f;
 	}
-	else if (!level.isOnline)
+	else if (!level->isOnline)
 	{
 		remove();
 
@@ -349,7 +349,7 @@ void Boat::tick()
 		yRot = (float)(yRot + var16);
 		setRot(yRot, xRot);
 		AABB expanded = *bb.grow(0.2f, 0.0, 0.2f);
-		std::vector<std::shared_ptr<Entity>> var18 = level.getEntities(this, expanded);
+		std::vector<std::shared_ptr<Entity>> var18 = level->getEntities(this, expanded);
 		if (var18.size() > 0)
 		{
 			for (size_t var37 = 0; var37 < var18.size(); var37++)
@@ -403,11 +403,11 @@ bool Boat::interact(Player &var1)
 	else
 	{
 		// Beta: if (!this.level.isOnline) { var1.ride(this); }
-		if (!level.isOnline)
+		if (!level->isOnline)
 		{
 			// Find this boat in the level's entities to get a shared_ptr for ride()
 			std::shared_ptr<Entity> boatPtr = nullptr;
-			for (const auto &e : level.getAllEntities())
+			for (const auto &e : level->getAllEntities())
 			{
 				if (e.get() == this)
 				{

@@ -12,7 +12,7 @@ void Packet103SetSlot::readPacketData(SocketInputStream& in)
 {
 	// Java: EXACT ORDER
 	// this.windowId = var1.readByte();
-	this->windowId = static_cast<int_t>(in.read() & 0xFF);
+	this->windowId = static_cast<int_t>(in.readByte());
 	
 	// this.itemSlot = var1.readShort();
 	this->itemSlot = in.readShort();

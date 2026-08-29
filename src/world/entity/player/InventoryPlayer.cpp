@@ -5,6 +5,8 @@
 #include "nbt/CompoundTag.h"
 #include "util/Memory.h"
 
+#include <stdexcept>
+
 InventoryPlayer::InventoryPlayer(Player *player) : player(player)
 {
 	// Initialize empty inventory
@@ -32,14 +34,23 @@ ItemStack *InventoryPlayer::getCurrentItem()
 	return nullptr;
 }
 
+// Alpha: every IInventory accessor maps slots past mainInventory.length into
+// armorInventory (InventoryPlayer.java:146-150, 168-172, 227-231)
+ItemStack *InventoryPlayer::slotRef(int_t slot)
+{
+	if (slot < 0 || slot >= getSizeInventory())
+		return nullptr;
+	if (slot >= (int_t)mainInventory.size())
+		return &armorInventory[slot - (int_t)mainInventory.size()];
+	return &mainInventory[slot];
+}
+
 ItemStack *InventoryPlayer::getStackInSlot(int_t slot)
 {
-	if (slot >= 0 && slot < 36)
-	{
-		ItemStack &stack = mainInventory[slot];
-		if (!stack.isEmpty())
-			return &stack;
-	}
+	// Alpha: getStackInSlot(int) (InventoryPlayer.java:225-233)
+	ItemStack *stack = slotRef(slot);
+	if (stack != nullptr && !stack->isEmpty())
+		return stack;
 	return nullptr;
 }
 
@@ -69,48 +80,62 @@ bool InventoryPlayer::canHarvestBlock(Tile &tile)
 	return false;
 }
 
-int_t InventoryPlayer::storePartialItemStack(ItemStack &stack)
+// Alpha: storeItemStack(ItemStack) - first slot the stack may merge into (InventoryPlayer.java:40-46)
+int_t InventoryPlayer::storeItemStack(ItemStack &stack)
 {
-	// Alpha: storePartialItemStack() - tries to merge with existing stacks, returns remaining count (InventoryPlayer.java:103-128)
-	if (stack.isEmpty())
-		return stack.stackSize;
-	
-	int_t maxStack = stack.getMaxStackSize();
-	
-	// Try to merge with existing stacks first
-	for (int_t i = 0; i < 36 && stack.stackSize > 0; ++i)
+	for (int_t i = 0; i < (int_t)mainInventory.size(); ++i)
 	{
 		ItemStack &existing = mainInventory[i];
-		if (!existing.isEmpty() && existing.itemID == stack.itemID && existing.itemDamage == stack.itemDamage)
-		{
-			// Alpha: Check if stackable (InventoryPlayer.java:29-31)
-			// For now, assume all items with same ID/damage are stackable
-			int_t space = maxStack - existing.stackSize;
-			if (space > 0)
-			{
-				int_t toAdd = (stack.stackSize < space) ? stack.stackSize : space;
-				existing.stackSize += toAdd;
-				stack.stackSize -= toAdd;
-			}
-		}
+		// Alpha's single skip condition, split for readability (InventoryPlayer.java:42).
+		// isEmpty() stands in for Java's null slot.
+		if (existing.isEmpty())
+			continue;
+		if (existing.itemID != stack.itemID)
+			continue;
+		if (!existing.isStackable())
+			continue;
+		if (existing.stackSize >= existing.getMaxStackSize())
+			continue;
+		if (existing.stackSize >= getInventoryStackLimit())
+			continue;
+		// Damage only blocks merging for items that use it as a subtype
+		if (existing.getHasSubtypes() && existing.itemDamage != stack.itemDamage)
+			continue;
+		return i;
 	}
-	
-	// If still has items, try to find empty slot
-	if (stack.stackSize > 0)
-	{
-		for (int_t i = 0; i < 36 && stack.stackSize > 0; ++i)
-		{
-			if (mainInventory[i].isEmpty())
-			{
-				// Alpha: Copy the stack (InventoryPlayer.java:115-120)
-				mainInventory[i] = stack;
-				mainInventory[i].stackSize = (stack.stackSize < maxStack) ? stack.stackSize : maxStack;
-				stack.stackSize -= mainInventory[i].stackSize;
-			}
-		}
-	}
-	
-	return stack.stackSize;  // Return remaining count
+	return -1;
+}
+
+int_t InventoryPlayer::storePartialItemStack(ItemStack &stack)
+{
+	// Alpha: storePartialItemStack() fills at most ONE slot per call and returns the
+	// leftover count; addItemStackToInventory drives the loop (InventoryPlayer.java:79-105)
+	int_t itemID = stack.itemID;
+	int_t remaining = stack.stackSize;
+	int_t slot = storeItemStack(stack);
+	if (slot < 0)
+		slot = getFreeSlot();  // Alpha: getFirstEmptyStack() (InventoryPlayer.java:48-54)
+
+	if (slot < 0)
+		return remaining;
+
+	if (mainInventory[slot].isEmpty())
+		mainInventory[slot] = ItemStack(itemID, 0, stack.itemDamage);
+
+	int_t toAdd = remaining;
+	if (remaining > mainInventory[slot].getMaxStackSize() - mainInventory[slot].stackSize)
+		toAdd = mainInventory[slot].getMaxStackSize() - mainInventory[slot].stackSize;
+
+	if (toAdd > getInventoryStackLimit() - mainInventory[slot].stackSize)
+		toAdd = getInventoryStackLimit() - mainInventory[slot].stackSize;
+
+	if (toAdd == 0)
+		return remaining;
+
+	remaining -= toAdd;
+	mainInventory[slot].stackSize += toAdd;
+	mainInventory[slot].popTime = 5;  // Alpha: animationsToGo = 5 (InventoryPlayer.java:103)
+	return remaining;
 }
 
 // Beta: Inventory.getSlot(int var1) - finds slot with item (Inventory.java:32-40)
@@ -124,6 +149,17 @@ int_t InventoryPlayer::getSlot(int_t itemID)
 		}
 	}
 	return -1;
+}
+
+bool InventoryPlayer::consumeInventoryItem(int_t itemID)
+{
+	// Direct Alpha transliteration: InventoryPlayer.java:114-123.
+	const int_t slot = getSlot(itemID);
+	if (slot < 0)
+		return false;
+	if (--mainInventory[slot].stackSize <= 0)
+		mainInventory[slot] = ItemStack();
+	return true;
 }
 
 // Beta: Inventory.getSlotWithRemainingSpace(ItemInstance var1) - finds slot with space for item (Inventory.java:42-55)
@@ -235,35 +271,36 @@ bool InventoryPlayer::add(ItemStack &stack)
 
 bool InventoryPlayer::addItemStackToInventory(ItemStack &stack)
 {
-	// Alpha: addItemStackToInventory logic (InventoryPlayer.java:132-152)
-	if (stack.isEmpty())
-		return false;
-	
-	// Alpha: Damaged items go to first empty slot (InventoryPlayer.java:134-143)
+	// Alpha: addItemStackToInventory (InventoryPlayer.java:125-142)
 	if (stack.isItemDamaged())
 	{
-		for (int_t i = 0; i < 36; ++i)
+		int_t slot = getFreeSlot();  // Alpha: getFirstEmptyStack() (InventoryPlayer.java:128)
+		if (slot >= 0)
 		{
-			if (mainInventory[i].isEmpty())
-			{
-				mainInventory[i] = stack;  // Copy ItemStack
-				// TODO: animationsToGo = 5 (InventoryPlayer.java:138)
-				stack.stackSize = 0;
-				return true;
-			}
+			mainInventory[slot] = stack.copy();  // Alpha: ItemStack.copyItemStack(itemStack)
+			mainInventory[slot].popTime = 5;  // Alpha: animationsToGo = 5 (InventoryPlayer.java:131)
+			stack.stackSize = 0;
+			return true;
 		}
 		return false;
 	}
 	
-	// Alpha: Stackable items merge with existing stacks (InventoryPlayer.java:144-151)
-	int_t originalSize = stack.stackSize;
-	do {
-		int_t prevSize = stack.stackSize;
-		storePartialItemStack(stack);
-	} while (stack.stackSize > 0 && stack.stackSize < originalSize);
-	
-	// Alpha: Return true if any items were added (InventoryPlayer.java:150)
-	return stack.stackSize < originalSize;
+	// Alpha refreshes the comparison size every iteration, so the loop stops as
+	// soon as one iteration makes no progress (InventoryPlayer.java:137-141).
+	// At most 36 successful iterations plus one no-progress iteration are
+	// possible. Keep that invariant explicit so a future bad loop condition
+	// fails instead of hanging the whole game or headless suite.
+	int_t prevSize;
+	int_t iterations = 0;
+	do
+	{
+		if (iterations++ > static_cast<int_t>(mainInventory.size()))
+			throw std::runtime_error("Inventory merge loop did not make bounded progress");
+		prevSize = stack.stackSize;
+		stack.stackSize = storePartialItemStack(stack);
+	}
+	while (stack.stackSize > 0 && stack.stackSize < prevSize);
+	return stack.stackSize < prevSize;
 }
 
 void InventoryPlayer::changeCurrentItem(int_t direction)
@@ -326,42 +363,40 @@ ItemStack *InventoryPlayer::armorItemInSlot(int_t slot)
 	return nullptr;
 }
 
-// Beta: Inventory.removeItem(int var1, int var2) - removes count items from slot (Inventory.java:188-212)
+// Alpha: decrStackSize(int, int) - armor slots follow the main inventory (InventoryPlayer.java:144-164)
 ItemStack *InventoryPlayer::removeItem(int_t slot, int_t count)
 {
-	if (slot >= 0 && slot < 36)
+	ItemStack *entry = slotRef(slot);
+	if (entry != nullptr && !entry->isEmpty())
 	{
-		ItemStack &stack = mainInventory[slot];
-		if (!stack.isEmpty())
+		if (entry->stackSize <= count)  // Alpha: if (itemStackArray[n].stackSize <= n2) (InventoryPlayer.java:152)
 		{
-			if (stack.stackSize <= count)  // Beta: if (var3[var1].count <= var2) (Inventory.java:197)
+			ItemStack *result = new ItemStack(entry->itemID, entry->stackSize, entry->itemDamage);
+			*entry = ItemStack();  // Alpha: itemStackArray[n] = null (InventoryPlayer.java:154)
+			return result;
+		}
+		else
+		{
+			// Alpha: ItemStack itemStack = itemStackArray[n].splitStack(n2) (InventoryPlayer.java:157)
+			ItemStack *result = new ItemStack(entry->itemID, count, entry->itemDamage);
+			entry->stackSize -= count;
+			if (entry->stackSize <= 0)  // Alpha: if (itemStackArray[n].stackSize == 0) (InventoryPlayer.java:158)
 			{
-				ItemStack *result = new ItemStack(stack.itemID, stack.stackSize, stack.itemDamage);  // Beta: ItemInstance var5 = var3[var1] (Inventory.java:198)
-				stack = ItemStack();  // Beta: var3[var1] = null (Inventory.java:199)
-				return result;  // Beta: return var5 (Inventory.java:200)
+				*entry = ItemStack();
 			}
-			else
-			{
-				// Beta: ItemInstance var4 = var3[var1].remove(var2) (Inventory.java:202)
-				ItemStack *result = new ItemStack(stack.itemID, count, stack.itemDamage);
-				stack.stackSize -= count;  // Beta: Decrement count (Inventory.java:202)
-				if (stack.stackSize <= 0)  // Beta: if (var3[var1].count == 0) (Inventory.java:203)
-				{
-					stack = ItemStack();  // Beta: var3[var1] = null (Inventory.java:204)
-				}
-				return result;  // Beta: return var4 (Inventory.java:207)
-			}
+			return result;
 		}
 	}
-	return nullptr;  // Beta: return null (Inventory.java:210)
+	return nullptr;  // Alpha: return null (InventoryPlayer.java:163)
 }
 
-// Beta: Inventory.setItem(int var1, ItemInstance var2) - sets item at slot (Inventory.java:214-223)
+// Alpha: setInventorySlotContents(int, ItemStack) (InventoryPlayer.java:166-174)
 void InventoryPlayer::setItem(int_t slot, ItemStack &stack)
 {
-	if (slot >= 0 && slot < 36)
+	ItemStack *entry = slotRef(slot);
+	if (entry != nullptr)
 	{
-		mainInventory[slot] = stack;  // Beta: var3[var1] = var2 (Inventory.java:222)
+		*entry = stack;
 	}
 }
 
@@ -418,11 +453,23 @@ int_t InventoryPlayer::getArmorValue()
 	}
 }
 
-// Beta: Inventory.hurtArmor(int var1) - damages armor pieces (Inventory.java:340-349)
+// Alpha: damageArmor(int) - kept under the Beta call-site name (InventoryPlayer.java:282-290)
 void InventoryPlayer::hurtArmor(int_t damage)
 {
-	// Beta: Armor damage (Inventory.java:340-349)
-	// TODO: Armor system not implemented yet - no-op for now
+	for (int_t i = 0; i < (int_t)armorInventory.size(); ++i)
+	{
+		if (armorInventory[i].isEmpty())
+			continue;
+		if (dynamic_cast<ItemArmor *>(armorInventory[i].getItem()) == nullptr)
+			continue;
+		// Alpha: damageItem(n, this.player); ItemStack::damageItem is already the
+		// damageable-guarded two-arg form (ItemStack.java:179-190)
+		armorInventory[i].damageItem(damage);
+		if (armorInventory[i].stackSize != 0)
+			continue;
+		// Alpha calls func_1097_a(player) here, which is empty (ItemStack.java:132-133)
+		armorInventory[i] = ItemStack();
+	}
 }
 
 // Beta: Inventory.dropAll() - drops all items when player dies (Inventory.java:352-366)
@@ -441,8 +488,15 @@ void InventoryPlayer::dropAll()
 		}
 	}
 	
-	// Beta: Drop all armor items (Inventory.java:360-365) - skip for now since armor doesn't exist in a126cpp
-	// TODO: Armor system
+	// Alpha: dropAllItems() also drops every armor piece (InventoryPlayer.java:299-303)
+	for (int_t i = 0; i < (int_t)armorInventory.size(); ++i)
+	{
+		if (!armorInventory[i].isEmpty())
+		{
+			player->drop(armorInventory[i], true);
+			armorInventory[i] = ItemStack();
+		}
+	}
 }
 
 // Beta: Inventory.save() - saves inventory to NBT (Inventory.java:234-254)

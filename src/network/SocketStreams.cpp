@@ -1,8 +1,9 @@
 #include "network/SocketStreams.h"
 #include "java/String.h"
-#include <stdexcept>
-#include <iostream>
+#include <cmath>
 #include <cstring>
+#include <iostream>
+#include <stdexcept>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -30,6 +31,14 @@ SocketInputStream::SocketInputStream(SocketHandle sock)
 	}
 }
 
+SocketInputStream::SocketInputStream(const std::vector<byte_t> &data)
+	: socket(INVALID_SOCKET_HANDLE)
+	, readBuffer(data)
+	, readBufferPos(0)
+	, memoryMode(true)
+{
+}
+
 SocketInputStream::~SocketInputStream()
 {
 	close();
@@ -37,6 +46,13 @@ SocketInputStream::~SocketInputStream()
 
 int SocketInputStream::read()
 {
+	if (memoryMode)
+	{
+		if (readBufferPos >= readBuffer.size())
+			return -1;
+		return static_cast<int_t>(static_cast<ubyte_t>(readBuffer[readBufferPos++]));
+	}
+
 	// Match Java InputStream.read():
 	// - returns 0..255 for a byte
 	// - returns -1 on EOF
@@ -89,6 +105,16 @@ int SocketInputStream::read()
 
 void SocketInputStream::readFully(byte_t* buf, size_t len)
 {
+	if (memoryMode)
+	{
+		if (len > readBuffer.size() - readBufferPos)
+			throw EOFException();
+		if (len > 0)
+			std::memcpy(buf, readBuffer.data() + readBufferPos, len);
+		readBufferPos += len;
+		return;
+	}
+
 	size_t totalRead = 0;
 	while (totalRead < len)
 	{
@@ -104,7 +130,7 @@ void SocketInputStream::readFully(byte_t* buf, size_t len)
 		}
 			if (error == WSAECONNRESET || error == WSAECONNABORTED)
 			{
-				throw std::runtime_error("End of stream reached");
+				throw EOFException();
 			}
 			throw std::runtime_error("Socket read failed");
 		}
@@ -119,7 +145,7 @@ void SocketInputStream::readFully(byte_t* buf, size_t len)
 		}
 			if (errno == ECONNRESET || errno == EPIPE)
 			{
-				throw std::runtime_error("End of stream reached");
+				throw EOFException();
 			}
 			throw std::runtime_error("Socket read failed");
 		}
@@ -127,7 +153,7 @@ void SocketInputStream::readFully(byte_t* buf, size_t len)
 		
 		if (bytesRead == 0)
 		{
-			throw std::runtime_error("End of stream reached");
+			throw EOFException();
 		}
 		
 		totalRead += bytesRead;
@@ -145,43 +171,38 @@ short_t SocketInputStream::readShort()
 {
 	byte_t bytes[2];
 	readFully(bytes, 2);
-	// Java DataInputStream.readShort(): ((ch1 << 8) + (ch2 << 0))
-	// Where ch1, ch2 are int values 0-255 from in.read()
-	// We use unsigned cast to match Java's unsigned byte treatment
-	return static_cast<short_t>((static_cast<uint_t>(bytes[0] & 0xFF) << 8) + (static_cast<uint_t>(bytes[1] & 0xFF)));
+	const ushort_t bits = static_cast<ushort_t>(
+		(static_cast<uint_t>(static_cast<ubyte_t>(bytes[0])) << 8)
+		| static_cast<uint_t>(static_cast<ubyte_t>(bytes[1])));
+	short_t value = 0;
+	std::memcpy(&value, &bits, sizeof(value));
+	return value;
 }
 
 int_t SocketInputStream::readInt()
 {
 	byte_t bytes[4];
 	readFully(bytes, 4);
-	// Java DataInputStream.readInt(): ((ch1 << 24) + (ch2 << 16) + (ch3 << 8) + (ch4 << 0))
-	// Where ch1-ch4 are int values 0-255 from in.read()
-	return static_cast<int_t>(
-		(static_cast<uint_t>(bytes[0] & 0xFF) << 24) +
-		(static_cast<uint_t>(bytes[1] & 0xFF) << 16) +
-		(static_cast<uint_t>(bytes[2] & 0xFF) << 8) +
-		(static_cast<uint_t>(bytes[3] & 0xFF))
-	);
+	const uint_t bits =
+		(static_cast<uint_t>(static_cast<ubyte_t>(bytes[0])) << 24)
+		| (static_cast<uint_t>(static_cast<ubyte_t>(bytes[1])) << 16)
+		| (static_cast<uint_t>(static_cast<ubyte_t>(bytes[2])) << 8)
+		| static_cast<uint_t>(static_cast<ubyte_t>(bytes[3]));
+	int_t value = 0;
+	std::memcpy(&value, &bits, sizeof(value));
+	return value;
 }
 
 long_t SocketInputStream::readLong()
 {
 	byte_t bytes[8];
 	readFully(bytes, 8);
-	// Java DataInputStream.readLong(): Uses readFully(readBuffer, 0, 8) then:
-	// (((long)readBuffer[0] << 56) + ((long)(readBuffer[1] & 255) << 48) + ...)
-	// Note: JDK8 does NOT mask readBuffer[0], only readBuffer[1-7]
-	return static_cast<long_t>(
-		(static_cast<ulong_t>(bytes[0]) << 56) +
-		(static_cast<ulong_t>(bytes[1] & 0xFF) << 48) +
-		(static_cast<ulong_t>(bytes[2] & 0xFF) << 40) +
-		(static_cast<ulong_t>(bytes[3] & 0xFF) << 32) +
-		(static_cast<ulong_t>(bytes[4] & 0xFF) << 24) +
-		(static_cast<ulong_t>(bytes[5] & 0xFF) << 16) +
-		(static_cast<ulong_t>(bytes[6] & 0xFF) << 8) +
-		(static_cast<ulong_t>(bytes[7] & 0xFF))
-	);
+	ulong_t bits = 0;
+	for (int_t i = 0; i < 8; ++i)
+		bits = (bits << 8) | static_cast<ulong_t>(static_cast<ubyte_t>(bytes[i]));
+	long_t value = 0;
+	std::memcpy(&value, &bits, sizeof(value));
+	return value;
 }
 
 float SocketInputStream::readFloat()
@@ -257,6 +278,15 @@ SocketOutputStream::SocketOutputStream(SocketHandle sock)
 	}
 }
 
+SocketOutputStream::SocketOutputStream(std::vector<byte_t> &sink)
+	: socket(INVALID_SOCKET_HANDLE)
+	, writeBuffer(BUFFER_SIZE)
+	, writeBufferPos(0)
+	, memorySink(&sink)
+{
+	sink.clear();
+}
+
 SocketOutputStream::~SocketOutputStream()
 {
 	flush();
@@ -297,55 +327,60 @@ void SocketOutputStream::writeByte(byte_t b)
 
 void SocketOutputStream::writeShort(short_t s)
 {
-	// Java DataOutputStream uses big-endian (network byte order)
-	byte_t bytes[2];
-	bytes[0] = static_cast<byte_t>((s >> 8) & 0xFF);
-	bytes[1] = static_cast<byte_t>(s & 0xFF);
+	const ushort_t bits = static_cast<ushort_t>(s);
+	const byte_t bytes[2] = {
+		static_cast<byte_t>((bits >> 8) & 0xFF),
+		static_cast<byte_t>(bits & 0xFF)
+	};
 	write(bytes, 2);
 }
 
 void SocketOutputStream::writeInt(int_t i)
 {
-	// Java DataOutputStream uses big-endian (network byte order)
-	byte_t bytes[4];
-	bytes[0] = static_cast<byte_t>((i >> 24) & 0xFF);
-	bytes[1] = static_cast<byte_t>((i >> 16) & 0xFF);
-	bytes[2] = static_cast<byte_t>((i >> 8) & 0xFF);
-	bytes[3] = static_cast<byte_t>(i & 0xFF);
+	const uint_t bits = static_cast<uint_t>(i);
+	const byte_t bytes[4] = {
+		static_cast<byte_t>((bits >> 24) & 0xFF),
+		static_cast<byte_t>((bits >> 16) & 0xFF),
+		static_cast<byte_t>((bits >> 8) & 0xFF),
+		static_cast<byte_t>(bits & 0xFF)
+	};
 	write(bytes, 4);
 }
 
 void SocketOutputStream::writeLong(long_t l)
 {
-	// Java DataOutputStream uses big-endian (network byte order)
-	byte_t bytes[8];
-	bytes[0] = static_cast<byte_t>((l >> 56) & 0xFF);
-	bytes[1] = static_cast<byte_t>((l >> 48) & 0xFF);
-	bytes[2] = static_cast<byte_t>((l >> 40) & 0xFF);
-	bytes[3] = static_cast<byte_t>((l >> 32) & 0xFF);
-	bytes[4] = static_cast<byte_t>((l >> 24) & 0xFF);
-	bytes[5] = static_cast<byte_t>((l >> 16) & 0xFF);
-	bytes[6] = static_cast<byte_t>((l >> 8) & 0xFF);
-	bytes[7] = static_cast<byte_t>(l & 0xFF);
+	const ulong_t bits = static_cast<ulong_t>(l);
+	const byte_t bytes[8] = {
+		static_cast<byte_t>((bits >> 56) & 0xFF),
+		static_cast<byte_t>((bits >> 48) & 0xFF),
+		static_cast<byte_t>((bits >> 40) & 0xFF),
+		static_cast<byte_t>((bits >> 32) & 0xFF),
+		static_cast<byte_t>((bits >> 24) & 0xFF),
+		static_cast<byte_t>((bits >> 16) & 0xFF),
+		static_cast<byte_t>((bits >> 8) & 0xFF),
+		static_cast<byte_t>(bits & 0xFF)
+	};
 	write(bytes, 8);
 }
 
 void SocketOutputStream::writeFloat(float f)
 {
-	// Java Float.floatToIntBits: bit-exact conversion (avoid strict-aliasing UB)
-	int_t bits;
-	static_assert(sizeof(float) == sizeof(int_t), "float must be 32-bit");
-	std::memcpy(&bits, &f, sizeof(int_t));
-	writeInt(bits);
+	uint_t bits = 0;
+	if (std::isnan(f))
+		bits = 0x7FC00000U;
+	else
+		std::memcpy(&bits, &f, sizeof(bits));
+	writeInt(static_cast<int_t>(bits));
 }
 
 void SocketOutputStream::writeDouble(double d)
 {
-	// Java Double.doubleToLongBits: bit-exact conversion (avoid strict-aliasing UB)
-	long_t bits;
-	static_assert(sizeof(double) == sizeof(long_t), "double must be 64-bit");
-	std::memcpy(&bits, &d, sizeof(long_t));
-	writeLong(bits);
+	ulong_t bits = 0;
+	if (std::isnan(d))
+		bits = 0x7FF8000000000000ULL;
+	else
+		std::memcpy(&bits, &d, sizeof(bits));
+	writeLong(static_cast<long_t>(bits));
 }
 
 void SocketOutputStream::writeString(const jstring& str, int maxLength)
@@ -373,6 +408,14 @@ void SocketOutputStream::writeBoolean(bool b)
 
 void SocketOutputStream::flush()
 {
+	if (memorySink != nullptr)
+	{
+		memorySink->insert(memorySink->end(), writeBuffer.begin(),
+			writeBuffer.begin() + static_cast<std::ptrdiff_t>(writeBufferPos));
+		writeBufferPos = 0;
+		return;
+	}
+
 	if (writeBufferPos > 0)
 	{
 		size_t totalSent = 0;

@@ -31,14 +31,21 @@ public:
 	// Get currently held item (from hotbar slot 0-8)
 	ItemStack *getCurrentItem();
 	ItemStack *getStackInSlot(int_t slot);
-	
+
+	// Alpha: getSizeInventory() = mainInventory.length + 4 (InventoryPlayer.java:220-223)
+	int_t getSizeInventory() const { return (int_t)mainInventory.size() + (int_t)armorInventory.size(); }
+	// Alpha: getInventoryStackLimit() (InventoryPlayer.java:240-243)
+	int_t getInventoryStackLimit() const { return 64; }
+
 	// Block interaction (delegates to held item)
 	float getStrVsBlock(Tile &tile);
 	bool canHarvestBlock(Tile &tile);
-	
+
 	// Item management
 	bool add(ItemStack &stack);  // Beta: Inventory.add(ItemInstance var1) (Inventory.java:170-186)
 	bool addItemStackToInventory(ItemStack &stack);  // Alpha-style method (kept for compatibility)
+	// Alpha InventoryPlayer.consumeInventoryItem (InventoryPlayer.java:114-123).
+	bool consumeInventoryItem(int_t itemID);
 	
 	// Alpha: changeCurrentItem() for scroll wheel (InventoryPlayer.java:55-65)
 	void changeCurrentItem(int_t direction);
@@ -67,8 +74,11 @@ public:
 	void setCarriedNull() { carried = ItemStack(); }
 	
 private:
+	ItemStack *slotRef(int_t slot);
 	// Alpha: storePartialItemStack() - helper for merging stacks (InventoryPlayer.java:103-128)
 	int_t storePartialItemStack(ItemStack &stack);
+	// Alpha: storeItemStack() - first slot the stack can merge into (InventoryPlayer.java:40-46)
+	int_t storeItemStack(ItemStack &stack);
 	
 	// Beta: Inventory helper methods (Inventory.java:32-65, 108-141)
 	int_t getSlot(int_t itemID);  // Beta: getSlot(int var1) - finds slot with item (Inventory.java:32-40)

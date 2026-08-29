@@ -21,10 +21,15 @@ void ProgressRenderer::progressStart(const jstring &title)
 	_progressStart(title);
 }
 
-void ProgressRenderer::progressStartNoAbort(const jstring &title)
+void ProgressRenderer::progressStartNoAbort(const jstring &)
 {
+	// Alpha: func_594_b() only raises the no-abort flag and repaints with the
+	// title that is already showing; the argument is discarded
+	// (LoadingScreenRenderer.java:32-35). Applying it would replace "Entering
+	// the Nether" with "Saving level" while a dimension switch saves the level
+	// it is leaving.
 	noAbort = true;
-	_progressStart(title);
+	_progressStart(this->title);
 }
 
 void ProgressRenderer::_progressStart(const jstring &title)

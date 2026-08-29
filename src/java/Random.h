@@ -2,10 +2,20 @@
 
 #include "java/Type.h"
 
+// Reproduction of java.util.Random.
+//
+// Every value and every bit consumed must match Java exactly: world
+// generation, mob spawning and drop tables all depend on the number of calls
+// made as much as on the numbers produced.
 class Random
 {
 private:
-	long_t seed;
+	// Held unsigned so the linear congruential step wraps instead of
+	// overflowing signed arithmetic.
+	ulong_t seed;
+
+	double nextNextGaussian = 0.0;
+	bool haveNextNextGaussian = false;
 
 public:
 	Random();
@@ -24,4 +34,6 @@ public:
 
 	float nextFloat();
 	double nextDouble();
+
+	double nextGaussian();
 };

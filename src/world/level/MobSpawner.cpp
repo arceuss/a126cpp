@@ -9,6 +9,8 @@
 #include "world/level/material/LiquidMaterial.h"
 #include "world/entity/MobCategory.h"
 #include "world/entity/Mob.h"
+#include "world/entity/monster/Skeleton.h"
+#include "world/entity/monster/Spider.h"
 #include "util/Mth.h"
 #include <unordered_set>
 #include <vector>
@@ -50,14 +52,18 @@ namespace MobSpawner
 		}
 	}
 
-	// newb12: MobSpawner.finalizeMobSettings() - finalizes mob settings after spawning
-	// Reference: newb12/net/minecraft/world/level/MobSpawner.java:126-135
-	// Note: In Alpha, Sheep colors don't exist, and Spider/Skeleton aren't implemented
-	static void finalizeMobSettings(std::shared_ptr<Mob> mob, Level &level, float x, float y, float z)
+	static void finalizeMobSettings(std::shared_ptr<Mob> mob, Level &level,
+		float x, float y, float z)
 	{
-		// In newb12 Java: Spider/Skeleton jockey logic and Sheep.setColor
-		// But in Alpha: Sheep colors don't exist, and Spider/Skeleton aren't implemented
-		// So this is a no-op in Alpha
+		// Direct Alpha transliteration: SpawnerAnimals.java:85-90.
+		std::shared_ptr<Spider> spider = std::dynamic_pointer_cast<Spider>(mob);
+		if (spider != nullptr && level.random.nextInt(100) == 0)
+		{
+			std::shared_ptr<Skeleton> skeleton = std::make_shared<Skeleton>(level);
+			skeleton->moveTo(x, y, z, mob->yRot, 0.0f);
+			level.addEntity(skeleton);
+			skeleton->mountEntity(mob.get());
+		}
 	}
 
 	// newb12: MobSpawner.tick() - main spawning logic
@@ -77,7 +83,7 @@ namespace MobSpawner
 				auto &player = level.players[i];
 				int_t cx = Mth::floor(player->x / 16.0);
 				int_t cz = Mth::floor(player->z / 16.0);
-				byte_t radius = 8;
+				int_t radius = 8;
 
 				for (int_t dx = -radius; dx <= radius; dx++)
 				{
@@ -104,14 +110,19 @@ namespace MobSpawner
 					label109:
 					for (const ChunkPos &chunkPos : chunksToPoll)
 					{
+						// Direct Alpha admission gate: SpawnerAnimals.java:48-52.
+						// It occurs before class selection and position RNG.
+						if (level.random.nextInt(50) != 0)
+							continue;
 						// Get biome at chunk center (convert chunk coordinates to world coordinates)
 						BiomeSource &biomeSource = level.getBiomeSource();
 						int_t worldX = chunkPos.x * 16 + 8;
 						int_t worldZ = chunkPos.z * 16 + 8;
 						BiomeType biome = biomeSource.getBiomeAt(worldX, worldZ);
 
-						// Get entity factories for this category (replaces Biome.getMobs)
-						const auto &entityFactories = BiomeMobs::getMobs(category);
+						// Alpha: the biome at the chunk decides which classes may
+						// spawn (SpawnerAnimals.java:57, MobSpawnerBase.java:131-138)
+						const auto &entityFactories = BiomeMobs::getMobs(biome, category);
 						if (!entityFactories.empty())
 						{
 							int_t factoryIndex = level.random.nextInt(static_cast<int_t>(entityFactories.size()));
@@ -129,7 +140,7 @@ namespace MobSpawner
 									int_t px = x;
 									int_t py = y;
 									int_t pz = z;
-									byte_t spread = 6;
+									int_t spread = 6;
 
 									for (int_t offset = 0; offset < 4; offset++)
 									{

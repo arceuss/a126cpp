@@ -91,7 +91,12 @@ std::shared_ptr<LevelChunk> ChunkCache::getChunk(int_t x, int_t z)
 
 std::shared_ptr<LevelChunk> ChunkCache::load(int_t x, int_t z)
 {
-	if (storage == nullptr) return emptyChunk;
+	// Alpha ChunkProviderLoadOrGenerate.func_542_c returns null when there is
+	// no loader, allowing provideChunk to call the generation source
+	// (ChunkProviderLoadOrGenerate.java:104-118). Returning emptyChunk here
+	// suppressed generation for every in-memory/headless level.
+	if (storage == nullptr)
+		return nullptr;
 
 	std::shared_ptr<LevelChunk> chunk = storage->load(level, x, z);
 	if (chunk != nullptr)
@@ -177,9 +182,13 @@ bool ChunkCache::tick()
 	return false;
 }
 
+// Alpha: IChunkProvider.canSave - the file-backed provider can save, the
+// storage-less client provider cannot (ChunkProviderClient.java:76-79), and
+// `World.saveWorld` skips everything when it cannot (World.java:290-295).
+// Without this the level data path runs with no directory at all.
 bool ChunkCache::shouldSave()
 {
-	return true;
+	return storage != nullptr;
 }
 
 jstring ChunkCache::gatherStats()

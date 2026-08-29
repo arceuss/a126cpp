@@ -1,12 +1,17 @@
 #include "client/renderer/Chunk.h"
 
+#include <algorithm>
+#include <unordered_set>
+
 #include "client/renderer/Tesselator.h"
 #include "client/renderer/entity/EntityRenderer.h"
 #include "client/renderer/TileRenderer.h"
 #include "client/renderer/tileentity/TileEntityRenderDispatcher.h"
+#include "client/renderer/tileentity/SignRenderer.h"
 
 #include "world/level/Region.h"
 #include "world/level/chunk/LevelChunk.h"
+#include "world/level/tile/entity/SignTileEntity.h"
 
 #include "util/Mth.h"
 
@@ -76,9 +81,7 @@ void Chunk::rebuild()
 
 	LevelChunk::touchedSky = false;
 
-	std::unordered_set<std::shared_ptr<TileEntity>> oldTileEntities;
-	oldTileEntities.insert(renderableTileEntities.begin(), renderableTileEntities.end());
-	renderableTileEntities.clear();
+	std::vector<std::shared_ptr<TileEntity>> discoveredTileEntities;
 
 	int_t r = 1;
 	Region region(level, x0 - r, y0 - r, z0 - r, x1 + r, y1 + r, z1 + r);
@@ -120,16 +123,9 @@ void Chunk::rebuild()
 
 					if (i == 0 && Tile::isEntityTile[tileId])
 					{
-						// newb12: Collect tile entities for rendering (Chunk.java:148-152)
-						// newb12: TileEntity et = region.getTileEntity(x, y, z);
-						// newb12: if (TileEntityRenderDispatcher.instance.hasRenderer(et)) {
-						// newb12:     this.renderableTileEntities.add(et);
-						// newb12: }
 						std::shared_ptr<TileEntity> tileEntity = region.getTileEntity(x, y, z);
 						if (tileEntity != nullptr && TileEntityRenderDispatcher::instance.hasRenderer(tileEntity.get()))
-						{
-							globalRenderableTileEntities.push_back(tileEntity);
-						}
+							discoveredTileEntities.push_back(tileEntity);
 					}
 
 					Tile *tile = Tile::tiles[tileId];
@@ -165,7 +161,50 @@ void Chunk::rebuild()
 
 	skyLit = LevelChunk::touchedSky;
 	compiled = true;
+	reconcileRenderableTileEntities(renderableTileEntities,
+		globalRenderableTileEntities, discoveredTileEntities);
 }
+
+
+void Chunk::reconcileRenderableTileEntities(
+	std::vector<std::shared_ptr<TileEntity>> &current,
+	std::vector<std::shared_ptr<TileEntity>> &global,
+	const std::vector<std::shared_ptr<TileEntity>> &discovered)
+{
+	// Alpha takes a set snapshot of the old local list, builds a new local
+	// list, adds new-old to the global list, then removes old-new from it
+	// (WorldRenderer.java:114-116,169-174).
+	std::unordered_set<std::shared_ptr<TileEntity>> oldSet(current.begin(), current.end());
+	std::unordered_set<std::shared_ptr<TileEntity>> newSet(discovered.begin(), discovered.end());
+
+	current = discovered;
+
+	for (const std::shared_ptr<TileEntity> &tileEntity : newSet)
+	{
+		if (oldSet.find(tileEntity) == oldSet.end())
+			global.push_back(tileEntity);
+	}
+
+	for (const std::shared_ptr<TileEntity> &tileEntity : oldSet)
+	{
+		if (newSet.find(tileEntity) != newSet.end())
+			continue;
+		global.erase(std::remove(global.begin(), global.end(), tileEntity), global.end());
+
+		// A renderer chunk rebuild/unload is the lifetime boundary for cached
+		// sign command streams. Remove the GL list while the shared_ptr is still
+		// valid so exploration cannot accumulate stale display lists.
+		SignTileEntity *sign = dynamic_cast<SignTileEntity *>(tileEntity.get());
+		if (sign != nullptr)
+		{
+			SignRenderer *signRenderer = dynamic_cast<SignRenderer *>(
+				TileEntityRenderDispatcher::instance.getRenderer(sign));
+			if (signRenderer != nullptr)
+				signRenderer->invalidateWorldSign(sign);
+		}
+	}
+}
+
 
 float Chunk::distanceToSqr(Entity &player)
 {
@@ -192,9 +231,11 @@ void Chunk::reset()
 
 void Chunk::remove()
 {
+	std::vector<std::shared_ptr<TileEntity>> none;
+	reconcileRenderableTileEntities(renderableTileEntities,
+		globalRenderableTileEntities, none);
 	reset();
 }
-
 int_t Chunk::getList(int_t layer)
 {
 	if (!visible) return -1;

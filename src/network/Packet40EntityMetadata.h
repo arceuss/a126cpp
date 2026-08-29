@@ -5,13 +5,9 @@
 #include <vector>
 #include <memory>
 
-// Packet40EntityMetadata - matches Java Packet40EntityMetadata.java exactly
-// Entity Metadata packet - server to client (0x28)
 class Packet40EntityMetadata : public Packet {
 public:
 	int_t entityId;
-	std::vector<std::shared_ptr<WatchableObject>> field_21048_b;  // Metadata list
-	
 	Packet40EntityMetadata();
 	
 	void readPacketData(SocketInputStream& in) override;
@@ -19,8 +15,9 @@ public:
 	void processPacket(NetHandler* handler) override;
 	int getPacketSize() override;
 	int getPacketId() const override;
+	std::vector<std::shared_ptr<WatchableObject>>& func_21047_b();
 	
 private:
-	// Helper to read metadata from SocketInputStream (matches DataWatcher logic)
+	std::vector<std::shared_ptr<WatchableObject>> field_21048_b;
 	std::vector<std::shared_ptr<WatchableObject>> readWatchableObjectsFromSocket(SocketInputStream& in);
 };

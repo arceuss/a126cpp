@@ -26,7 +26,7 @@ std::shared_ptr<Entity> Spider::findAttackTarget()
 	if (brightness < 0.5f)
 	{
 		double distance = 16.0;
-		std::shared_ptr<Player> player = level.getNearestPlayer(*this, distance);
+		std::shared_ptr<Player> player = level->getNearestPlayer(*this, distance);
 		if (player != nullptr)
 		{
 			return std::static_pointer_cast<Entity>(player);

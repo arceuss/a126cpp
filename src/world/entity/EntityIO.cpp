@@ -1,5 +1,6 @@
 #include "world/entity/EntityIO.h"
 
+#include <typeindex>
 #include <unordered_map>
 
 #include "util/Memory.h"
@@ -41,6 +42,36 @@ static std::unordered_map<int_t, std::shared_ptr<Entity>(*)(Level &level)> numCl
 #include "world/entity/EntityIDs.h"
 };
 #undef ENTITYIO_ID
+
+// Alpha keys these by the entity's exact class, so a subclass that is not
+// registered has no identity of its own and inherits none.
+#define ENTITYIO_ID(type, name, id) { std::type_index(typeid(type)), name },
+static const std::unordered_map<std::type_index, jstring> classToIdMap = {
+#include "world/entity/EntityIDs.h"
+};
+#undef ENTITYIO_ID
+
+#define ENTITYIO_ID(type, name, id) { std::type_index(typeid(type)), id },
+static const std::unordered_map<std::type_index, int_t> classToNumMap = {
+#include "world/entity/EntityIDs.h"
+};
+#undef ENTITYIO_ID
+
+jstring getEncodeId(const Entity &entity)
+{
+	auto it = classToIdMap.find(std::type_index(typeid(entity)));
+	if (it == classToIdMap.end())
+		return u"";
+	return it->second;
+}
+
+int_t getEncodeNumericId(const Entity &entity)
+{
+	auto it = classToNumMap.find(std::type_index(typeid(entity)));
+	if (it == classToNumMap.end())
+		return -1;
+	return it->second;
+}
 
 std::shared_ptr<Entity> loadStatic(CompoundTag &tag, Level &level)
 {

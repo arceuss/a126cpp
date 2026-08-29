@@ -6,11 +6,16 @@ Packet101CloseWindow::Packet101CloseWindow()
 {
 }
 
+Packet101CloseWindow::Packet101CloseWindow(int_t windowId)
+	: windowId(windowId)
+{
+}
+
 void Packet101CloseWindow::readPacketData(SocketInputStream& in)
 {
 	// Java: EXACT ORDER
 	// this.windowId = var1.readByte();
-	this->windowId = static_cast<int_t>(in.read() & 0xFF);
+	this->windowId = static_cast<int_t>(in.readByte());
 }
 
 void Packet101CloseWindow::writePacketData(SocketOutputStream& out)

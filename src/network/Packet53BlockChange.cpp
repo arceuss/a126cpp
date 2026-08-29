@@ -14,40 +14,20 @@ Packet53BlockChange::Packet53BlockChange()
 
 void Packet53BlockChange::readPacketData(SocketInputStream& in)
 {
-	// Java: EXACT ORDER
-	// this.xPosition = var1.readInt();
-	this->xPosition = in.readInt();
-	
-	// this.yPosition = var1.read();
-	this->yPosition = static_cast<byte_t>(in.read() & 0xFF);
-	
-	// this.zPosition = var1.readInt();
-	this->zPosition = in.readInt();
-	
-	// this.type = var1.read();
-	this->type = static_cast<byte_t>(in.read() & 0xFF);
-	
-	// this.metadata = var1.read();
-	this->metadata = static_cast<byte_t>(in.read() & 0xFF);
+	xPosition = in.readInt();
+	yPosition = in.read();
+	zPosition = in.readInt();
+	type = in.read();
+	metadata = in.read();
 }
 
 void Packet53BlockChange::writePacketData(SocketOutputStream& out)
 {
-	// Java: EXACT ORDER
-	// var1.writeInt(this.xPosition);
-	out.writeInt(this->xPosition);
-	
-	// var1.write(this.yPosition);
-	out.writeByte(this->yPosition);
-	
-	// var1.writeInt(this.zPosition);
-	out.writeInt(this->zPosition);
-	
-	// var1.write(this.type);
-	out.writeByte(this->type);
-	
-	// var1.write(this.metadata);
-	out.writeByte(this->metadata);
+	out.writeInt(xPosition);
+	out.write(yPosition);
+	out.writeInt(zPosition);
+	out.write(type);
+	out.write(metadata);
 }
 
 void Packet53BlockChange::processPacket(NetHandler* handler)

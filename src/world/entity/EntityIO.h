@@ -26,4 +26,11 @@ std::shared_ptr<Entity> newEntity(const jstring &id, Level &level);
 // Used for Packet24MobSpawn
 std::shared_ptr<Entity> createEntity(int_t id, Level &level);
 
+// Alpha: EntityList.getEntityString()/getEntityID() look the entity's exact
+// runtime class up in the registry (EntityList.java:97-103). An unregistered
+// class has no save identity, which is how Alpha keeps players and internal
+// entities out of chunk files.
+jstring getEncodeId(const Entity &entity);
+int_t getEncodeNumericId(const Entity &entity);
+
 }

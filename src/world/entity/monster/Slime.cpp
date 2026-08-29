@@ -53,12 +53,12 @@ void Slime::tick()
 			float var4 = random.nextFloat() * 0.5f + 0.5f;
 			float var5 = Mth::sin(var3) * size * 0.5f * var4;
 			float var6 = Mth::cos(var3) * size * 0.5f * var4;
-			level.addParticle(u"slime", x + var5, bb.y0, z + var6, 0.0, 0.0, 0.0);
+			level->addParticle(u"slime", x + var5, bb.y0, z + var6, 0.0, 0.0, 0.0);
 		}
 
 		if (size > 2)
 		{
-			level.playSound(this, u"mob.slime", getSoundVolume(), ((random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f) / 0.8f);
+			level->playSound(this, u"mob.slime", getSoundVolume(), ((random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f) / 0.8f);
 		}
 
 		squish = -0.5f;
@@ -69,7 +69,7 @@ void Slime::tick()
 
 void Slime::updateAi()
 {
-	std::shared_ptr<Player> var1 = level.getNearestPlayer(*this, 16.0);
+	std::shared_ptr<Player> var1 = level->getNearestPlayer(*this, 16.0);
 	if (var1 != nullptr)
 	{
 		lookAt(*var1, 10.0f);
@@ -86,7 +86,7 @@ void Slime::updateAi()
 		jumping = true;
 		if (size > 1)
 		{
-			level.playSound(this, u"mob.slime", getSoundVolume(), ((random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f) * 0.8f);
+			level->playSound(this, u"mob.slime", getSoundVolume(), ((random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f) * 0.8f);
 		}
 
 		squish = 1.0f;
@@ -111,10 +111,10 @@ void Slime::remove()
 		{
 			float var2 = (var1 % 2 - 0.5f) * size / 4.0f;
 			float var3 = (var1 / 2 - 0.5f) * size / 4.0f;
-			Slime *var4 = new Slime(level);
+			Slime *var4 = new Slime(*level);
 			var4->setSize(size / 2);
 			var4->moveTo(x + var2, y + 0.5, z + var3, random.nextFloat() * 360.0f, 0.0f);
-			level.addEntity(std::shared_ptr<Entity>(var4));
+			level->addEntity(std::shared_ptr<Entity>(var4));
 		}
 	}
 
@@ -125,7 +125,7 @@ void Slime::playerTouch(Player &player)
 {
 	if (size > 1 && canSee(player) && distanceTo(player) < 0.6 * size && player.hurt(this, size))
 	{
-		level.playSound(this, u"mob.slimeattack", 1.0f, (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
+		level->playSound(this, u"mob.slimeattack", 1.0f, (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
 	}
 }
 
@@ -146,8 +146,8 @@ int_t Slime::getDeathLoot()
 
 bool Slime::canSpawn()
 {
-	std::shared_ptr<LevelChunk> var1 = level.getChunkAt(Mth::floor(x), Mth::floor(z));
-	return (size == 1 || level.difficulty > 0) && random.nextInt(10) == 0 && var1->getRandom(987234911L).nextInt(10) == 0 && y < 16.0;
+	std::shared_ptr<LevelChunk> var1 = level->getChunkAt(Mth::floor(x), Mth::floor(z));
+	return (size == 1 || level->difficulty > 0) && random.nextInt(10) == 0 && var1->getRandom(987234911L).nextInt(10) == 0 && y < 16.0;
 }
 
 float Slime::getSoundVolume()

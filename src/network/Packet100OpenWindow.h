@@ -21,6 +21,6 @@ public:
 	int getPacketId() const override;
 	
 private:
-	// Helper to read UTF-8 string (Modified UTF-8 format)
-	jstring readUTF(SocketInputStream& in);
+	static jstring readUTF(SocketInputStream& in);
+	static void writeUTF(const jstring& value, SocketOutputStream& out);
 };

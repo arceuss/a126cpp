@@ -29,7 +29,7 @@ TerrainParticle &TerrainParticle::init(int_t x, int_t y, int_t z)
 	}
 	
 	// Beta: Get color from tile and modify particle color (TerrainParticle.java:23-26)
-	int_t col = tile->getColor(level, x, y, z);
+	int_t col = tile->getColor(*level, x, y, z);
 	rCol *= ((col >> 16) & 0xFF) / 255.0f;
 	gCol *= ((col >> 8) & 0xFF) / 255.0f;
 	bCol *= (col & 0xFF) / 255.0f;

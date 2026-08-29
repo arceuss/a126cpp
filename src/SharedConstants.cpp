@@ -1,5 +1,7 @@
 #include "SharedConstants.h"
 
+#include <vector>
+
 #include "java/Resource.h"
 
 namespace SharedConstants
@@ -27,5 +29,26 @@ static jstring readAcceptableChars()
 const int NETWORK_PROTOCOL_VERSION = 2000;
 const int maxChatLength = 100;
 const jstring acceptableLetters = readAcceptableChars();
+
+static std::vector<int_t> buildLetterIndex()
+{
+	// One entry per UTF-16 code unit. First occurrence wins, matching
+	// `acceptableLetters.find(c)`; the quote character appears twice.
+	std::vector<int_t> table(0x10000, -1);
+	for (size_t i = 0; i < acceptableLetters.size(); i++)
+	{
+		int_t &slot = table[static_cast<size_t>(acceptableLetters[i])];
+		if (slot < 0)
+			slot = static_cast<int_t>(i);
+	}
+	return table;
+}
+
+static const std::vector<int_t> letterIndexTable = buildLetterIndex();
+
+int_t letterIndex(char_t c)
+{
+	return letterIndexTable[static_cast<size_t>(c)];
+}
 
 }

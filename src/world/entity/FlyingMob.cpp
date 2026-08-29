@@ -37,7 +37,7 @@ void FlyingMob::travel(float x, float z)
 		if (onGround)
 		{
 			var3 = 0.54600006f;
-			int_t var4 = level.getTile(Mth::floor(this->x), Mth::floor(bb.y0) - 1, Mth::floor(this->z));
+			int_t var4 = level->getTile(Mth::floor(this->x), Mth::floor(bb.y0) - 1, Mth::floor(this->z));
 			if (var4 > 0)
 			{
 				var3 = Tile::tiles[var4]->friction * 0.91f;
@@ -50,7 +50,7 @@ void FlyingMob::travel(float x, float z)
 		if (onGround)
 		{
 			var3 = 0.54600006f;
-			int_t var5 = level.getTile(Mth::floor(this->x), Mth::floor(bb.y0) - 1, Mth::floor(this->z));
+			int_t var5 = level->getTile(Mth::floor(this->x), Mth::floor(bb.y0) - 1, Mth::floor(this->z));
 			if (var5 > 0)
 			{
 				var3 = Tile::tiles[var5]->friction * 0.91f;

@@ -25,7 +25,7 @@ void PigZombie::tick()
 	runSpeed = attackTarget != nullptr ? 0.95f : 0.5f;
 	if (playAngrySoundIn > 0 && --playAngrySoundIn == 0)
 	{
-		level.playSound(this, u"mob.zombiepig.zpigangry", getSoundVolume() * 2.0f, ((random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f) * 1.8f);
+		level->playSound(this, u"mob.zombiepig.zpigangry", getSoundVolume() * 2.0f, ((random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f) * 1.8f);
 	}
 
 	Zombie::tick();
@@ -33,10 +33,10 @@ void PigZombie::tick()
 
 bool PigZombie::canSpawn()
 {
-	return level.difficulty > 0
-		&& level.isUnobstructed(bb)
-		&& level.getCubes(*this, bb).size() == 0
-		&& !level.containsAnyLiquid(bb);
+	return level->difficulty > 0
+		&& level->isUnobstructed(bb)
+		&& level->getCubes(*this, bb).size() == 0
+		&& !level->containsAnyLiquid(bb);
 }
 
 void PigZombie::addAdditionalSaveData(CompoundTag &tag)
@@ -66,7 +66,7 @@ bool PigZombie::hurt(Entity *source, int_t dmg)
 	if (source != nullptr && dynamic_cast<Player*>(source) != nullptr)
 	{
 		AABB expanded = *bb.grow(32.0, 32.0, 32.0);
-		std::vector<std::shared_ptr<Entity>> var3 = level.getEntities(this, expanded);
+		std::vector<std::shared_ptr<Entity>> var3 = level->getEntities(this, expanded);
 
 		for (size_t var4 = 0; var4 < var3.size(); var4++)
 		{
@@ -115,33 +115,7 @@ int_t PigZombie::getDeathLoot()
 
 ItemStack *PigZombie::getCarriedItem()
 {
-	// Alpha 1.2.6: PigZombie.getCarriedItem() - returns sword from DataWatcher (for multiplayer) or static sword (for singleplayer)
-	// In multiplayer, the carried item is synchronized via DataWatcher (data ID 1)
-	static constexpr int_t DATA_CARRIED_ITEM_ID = 1;
-	
-	// For client-side entities (spawned from network), read from DataWatcher
-	if (field_9343_G || interpolateOnly)
-	{
-		if (dataWatcher.hasWatchableObject(DATA_CARRIED_ITEM_ID))
-		{
-			try
-			{
-				ItemStack carriedItem = dataWatcher.getWatchableObjectItemStack(DATA_CARRIED_ITEM_ID);
-				if (!carriedItem.isEmpty())
-				{
-					// Store in static sword for now (since we return a pointer)
-					// TODO: Consider per-instance storage for multiplayer pig zombies
-					sword = carriedItem;
-					return &sword;
-				}
-			}
-			catch (...)
-			{
-				// DataWatcher doesn't have the item yet, fall through to static sword
-			}
-		}
-	}
-	
-	// Fall back to static sword (for singleplayer or if DataWatcher doesn't have it)
-	return sword.isEmpty() ? nullptr : &sword;
+	// Alpha: getHeldItem() always returns the shared golden-sword stack
+	// (EntityPigZombie.java:19,106-109).
+	return &sword;
 }

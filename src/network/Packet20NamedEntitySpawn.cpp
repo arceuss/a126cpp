@@ -1,5 +1,47 @@
 #include "network/Packet20NamedEntitySpawn.h"
 #include "network/NetHandler.h"
+#include "world/entity/player/Player.h"
+#include <cmath>
+#include <limits>
+
+namespace
+{
+int_t javaFloatToInt(float value)
+{
+	if (std::isnan(value))
+		return 0;
+	if (value >= static_cast<float>((std::numeric_limits<int_t>::max)()))
+		return (std::numeric_limits<int_t>::max)();
+	if (value <= static_cast<float>((std::numeric_limits<int_t>::min)()))
+		return (std::numeric_limits<int_t>::min)();
+	return static_cast<int_t>(value);
+}
+
+int_t javaDoubleToInt(double value)
+{
+	if (std::isnan(value))
+		return 0;
+	if (value >= static_cast<double>((std::numeric_limits<int_t>::max)()))
+		return (std::numeric_limits<int_t>::max)();
+	if (value <= static_cast<double>((std::numeric_limits<int_t>::min)()))
+		return (std::numeric_limits<int_t>::min)();
+	return static_cast<int_t>(value);
+}
+
+int_t javaFloor(double value)
+{
+	const int_t truncated = javaDoubleToInt(value);
+	if (!(value < static_cast<double>(truncated)))
+		return truncated;
+	return static_cast<int_t>(static_cast<uint_t>(truncated) - 1u);
+}
+
+byte_t narrowByte(int_t value)
+{
+	const int_t low = static_cast<int_t>(static_cast<uint_t>(value) & 0xFFu);
+	return static_cast<byte_t>(low >= 128 ? low - 256 : low);
+}
+}
 
 Packet20NamedEntitySpawn::Packet20NamedEntitySpawn()
 	: entityId(0)
@@ -11,6 +53,20 @@ Packet20NamedEntitySpawn::Packet20NamedEntitySpawn()
 	, pitch(0)
 	, currentItem(0)
 {
+}
+
+Packet20NamedEntitySpawn::Packet20NamedEntitySpawn(Player &player)
+	: entityId(player.entityId)
+	, name(player.name)
+	, xPosition(javaFloor(player.x * 32.0))
+	, yPosition(javaFloor(player.y * 32.0))
+	, zPosition(javaFloor(player.z * 32.0))
+	, rotation(narrowByte(javaFloatToInt(player.yRot * 256.0f / 360.0f)))
+	, pitch(narrowByte(javaFloatToInt(player.xRot * 256.0f / 360.0f)))
+	, currentItem(0)
+{
+	ItemStack *item = player.inventory.getCurrentItem();
+	currentItem = item == nullptr ? 0 : item->itemID;
 }
 
 void Packet20NamedEntitySpawn::readPacketData(SocketInputStream& in)
@@ -66,7 +122,7 @@ void Packet20NamedEntitySpawn::writePacketData(SocketOutputStream& out)
 	out.writeByte(this->pitch);
 	
 	// var1.writeShort(this.currentItem);
-	out.writeShort(this->currentItem);
+	out.writeShort(static_cast<short_t>(this->currentItem));
 }
 
 void Packet20NamedEntitySpawn::processPacket(NetHandler* handler)
@@ -77,11 +133,6 @@ void Packet20NamedEntitySpawn::processPacket(NetHandler* handler)
 
 int Packet20NamedEntitySpawn::getPacketSize()
 {
-	// Java: return 28;
-	// int (4) + string (2 + name.length()*2) + int (4) + int (4) + int (4) + byte (1) + byte (1) + short (2)
-	// Actually, let's calculate: 4 + (2 + name.length()*2) + 4 + 4 + 4 + 1 + 1 + 2 = 22 + name.length()*2
-	// But Java says 28. This might assume a fixed string length or the calculation is approximate.
-	// Let's match Java exactly:
 	return 28;
 }
 

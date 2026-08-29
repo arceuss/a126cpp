@@ -8,10 +8,10 @@ class Packet7 : public Packet {
 public:
 	int_t field_9277_a;  // User entity ID
 	int_t field_9276_b;  // Target entity ID
-	byte_t field_9278_c;  // Left-click flag (bool as byte)
+	int_t field_9278_c;  // Stored as int in Java; serialized with writeByte.
 	
 	Packet7();
-	Packet7(int_t user, int_t target, byte_t leftClick);
+	Packet7(int_t user, int_t target, int_t action);
 	
 	void readPacketData(SocketInputStream& in) override;
 	void writePacketData(SocketOutputStream& out) override;

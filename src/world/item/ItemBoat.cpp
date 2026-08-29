@@ -1,12 +1,14 @@
 #include "world/item/ItemBoat.h"
-#include "world/item/ItemStack.h"
+
+#include <memory>
+
+#include "util/Mth.h"
+#include "world/entity/item/Boat.h"
 #include "world/entity/player/Player.h"
+#include "world/item/ItemStack.h"
 #include "world/level/Level.h"
 #include "world/phys/HitResult.h"
 #include "world/phys/Vec3.h"
-#include "util/Mth.h"
-// TODO: Include Boat entity when available
-// #include "world/entity/item/Boat.h"
 
 // Beta: BoatItem(int var1) (BoatItem.java:11-14)
 // Alpha: ItemBoat(int var1) (ItemBoat.java:11-14)
@@ -52,12 +54,13 @@ ItemStack ItemBoat::use(ItemStack &stack, Level &level, Player &player)
 		int_t hitY = hit.y;
 		int_t hitZ = hit.z;
 		
-		// Beta: Spawn boat if not online (BoatItem.java:41-43)
+		// Direct Alpha transliteration: ItemBoat.java:43-50.
 		if (!level.isOnline)
 		{
-			// TODO: Create and add Boat entity
-			// Boat *boat = new Boat(level, hitX + 0.5f, hitY + 1.5f, hitZ + 0.5f);
-			// level.addEntity(boat);
+			level.addEntity(std::make_shared<Boat>(level,
+				static_cast<double>(hitX) + 0.5,
+				static_cast<double>(hitY) + 1.5,
+				static_cast<double>(hitZ) + 0.5));
 		}
 		
 		// Beta: Decrement stack (BoatItem.java:45)

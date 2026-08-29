@@ -176,7 +176,7 @@ float Painting::offs(int_t var1)
 
 void Painting::tick()
 {
-	if (checkInterval++ == 100 && !level.isOnline)
+	if (checkInterval++ == 100 && !level->isOnline)
 	{
 		checkInterval = 0;
 		if (!survives())
@@ -185,8 +185,8 @@ void Painting::tick()
 			if (Items::painting != nullptr)
 			{
 				ItemStack stack(Items::painting->getShiftedIndex(), 1);
-				EntityItem *item = new EntityItem(level, x, y, z, stack);
-				level.addEntity(std::shared_ptr<Entity>(item));
+				EntityItem *item = new EntityItem(*level, x, y, z, stack);
+				level->addEntity(std::shared_ptr<Entity>(item));
 			}
 		}
 	}
@@ -194,7 +194,7 @@ void Painting::tick()
 
 bool Painting::survives()
 {
-	if (level.getCubes(*this, bb).size() > 0)
+	if (level->getCubes(*this, bb).size() > 0)
 	{
 		return false;
 	}
@@ -235,11 +235,11 @@ bool Painting::survives()
 				const Material *var8;
 				if (dir != 0 && dir != 2)
 				{
-					var8 = &level.getMaterial(xTile, var4 + var7, var5 + var6);
+					var8 = &level->getMaterial(xTile, var4 + var7, var5 + var6);
 				}
 				else
 				{
-					var8 = &level.getMaterial(var3 + var6, var4 + var7, zTile);
+					var8 = &level->getMaterial(var3 + var6, var4 + var7, zTile);
 				}
 
 				if (!var8->isSolid())
@@ -249,7 +249,7 @@ bool Painting::survives()
 			}
 		}
 
-		std::vector<std::shared_ptr<Entity>> var10 = level.getEntities(this, bb);
+		std::vector<std::shared_ptr<Entity>> var10 = level->getEntities(this, bb);
 
 		for (size_t var11 = 0; var11 < var10.size(); var11++)
 		{
@@ -270,15 +270,15 @@ bool Painting::isPickable()
 
 bool Painting::hurt(Entity *var1, int_t var2)
 {
-	if (!removed && !level.isOnline)
+	if (!removed && !level->isOnline)
 	{
 		remove();
 		markHurt();
 		if (Items::painting != nullptr)
 		{
 			ItemStack stack(Items::painting->getShiftedIndex(), 1);
-			EntityItem *item = new EntityItem(level, x, y, z, stack);
-			level.addEntity(std::shared_ptr<Entity>(item));
+			EntityItem *item = new EntityItem(*level, x, y, z, stack);
+			level->addEntity(std::shared_ptr<Entity>(item));
 		}
 	}
 

@@ -34,5 +34,5 @@ public:
 	virtual float getShadowHeightOffs();
 
 public:
-	Level &getLevel() { return level; }
+	Level &getLevel() { return *level; }
 };

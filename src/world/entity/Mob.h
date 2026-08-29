@@ -14,9 +14,6 @@ class ItemStack;
 class Mob : public Entity
 {
 public:
-	virtual jstring getEncodeId() const override { return u"Mob"; }
-
-public:
 	static constexpr int_t ATTACK_DURATION = 5;
 
 	int_t invulnerableDuration = 20;
@@ -175,7 +172,7 @@ protected:
 
 public:
 	void knockback(Entity &source, int_t unknown, double x, double z);
-	void die(Entity *source);
+	virtual void die(Entity *source);
 
 protected:
 	virtual void dropDeathLoot();

@@ -47,6 +47,7 @@ public:
 private:
 	// State
 	bool tesselating = false;
+	bool graphicsReady = false;
 	bool vboMode = false;
 
 	// VBO state
@@ -56,6 +57,8 @@ private:
 
 	// Buffer state
 	int_t size = 0;
+
+	void ensureGraphicsReady();
 
 public:
 	Tesselator(int_t size);

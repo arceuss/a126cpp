@@ -27,7 +27,7 @@ void Sheep::defineSynchedData()
 
 bool Sheep::hurt(Entity *source, int_t dmg)
 {
-	if (!level.isOnline && !isSheared() && source != nullptr && dynamic_cast<Mob*>(source) != nullptr)
+	if (!level->isOnline && !isSheared() && source != nullptr && dynamic_cast<Mob*>(source) != nullptr)
 	{
 		setSheared(true);
 		int_t count = 1 + random.nextInt(3);
@@ -37,12 +37,12 @@ bool Sheep::hurt(Entity *source, int_t dmg)
 			// Alpha: Sheep drops white cloth (no colors in Alpha)
 			// Java: new ItemInstance(Tile.cloth.id, 1, ...) - uses tile ID directly (35)
 			ItemStack stack(Tile::cloth.id, 1);
-			auto itemEntity = std::make_shared<EntityItem>(level, x, y + 1.0f, z, stack);
+			auto itemEntity = std::make_shared<EntityItem>(*level, x, y + 1.0f, z, stack);
 			itemEntity->yd = itemEntity->yd + random.nextFloat() * 0.05f;
 			itemEntity->xd = itemEntity->xd + (random.nextFloat() - random.nextFloat()) * 0.1f;
 			itemEntity->zd = itemEntity->zd + (random.nextFloat() - random.nextFloat()) * 0.1f;
 			itemEntity->throwTime = 10;
-			level.addEntity(itemEntity);
+			level->addEntity(itemEntity);
 		}
 	}
 

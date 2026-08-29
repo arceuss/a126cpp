@@ -30,7 +30,7 @@ void Player::tick()
 	Mob::tick();
 	
 	// Beta: Container menu check (Player.java:66-69) - skip for now since containers don't exist in a126cpp
-	// if (!level.isOnline && containerMenu != null && !containerMenu.stillValid(this)) {
+	// if (!level->isOnline && containerMenu != null && !containerMenu.stillValid(this)) {
 	//     closeContainer();
 	//     containerMenu = inventoryMenu;
 	// }
@@ -81,7 +81,7 @@ void Player::aiStep()
 {
 	// Beta: RemotePlayer.aiStep() - handles interpolation for remote players (RemotePlayer.java:49-111)
 	// Beta: Player.aiStep() - difficulty healing, inventory tick, bob/tilt, entity touch (Player.java:149-183)
-	if (level.difficulty == 0 && health < 20 && tickCount % 20 * 12 == 0)  // Beta: this.tickCount % 20 * 12 == 0 (Player.java:150)
+	if (level->difficulty == 0 && health < 20 && tickCount % 20 * 12 == 0)  // Beta: this.tickCount % 20 * 12 == 0 (Player.java:150)
 	{
 		heal(1);  // Beta: this.heal(1) (Player.java:151)
 	}
@@ -135,7 +135,7 @@ void Player::aiStep()
 	
 	if (health > 0)  // Beta: if (this.health > 0) (Player.java:173)
 	{
-		auto &es = level.getEntities(this, *bb.grow(1.0, 0.0, 1.0));  // Beta: List var3 = this.level.getEntities(this, this.bb.grow(1.0, 0.0, 1.0)) (Player.java:174)
+		auto &es = level->getEntities(this, *bb.grow(1.0, 0.0, 1.0));  // Beta: List var3 = this.level.getEntities(this, this.bb.grow(1.0, 0.0, 1.0)) (Player.java:174)
 		if (!es.empty())  // Beta: if (var3 != null) (Player.java:175)
 		{
 			for (const auto &e : es)  // Beta: for (int var4 = 0; var4 < var3.size(); var4++) (Player.java:176)
@@ -270,7 +270,7 @@ void Player::drop(ItemStack &stack, bool randomSpread)
 
 	// Beta: Create EntityItem (Player.java:244)
 	double dropY = y - 0.3f + getHeadHeight();  // Beta: this.y - 0.3F + this.getHeadHeight() (Player.java:244)
-	auto itemEntity = std::make_shared<EntityItem>(level, x, dropY, z, stack);  // Beta: new ItemEntity(this.level, this.x, var3, this.z, var1) (Player.java:244)
+	auto itemEntity = std::make_shared<EntityItem>(*level, x, dropY, z, stack);  // Beta: new ItemEntity(this.level, this.x, var3, this.z, var1) (Player.java:244)
 	itemEntity->throwTime = 40;  // Beta: var3.throwTime = 40 (Player.java:245)
 	
 	float speed = 0.1f;  // Beta: float var4 = 0.1F (Player.java:246)
@@ -306,7 +306,7 @@ void Player::drop(ItemStack &stack, bool randomSpread)
 void Player::reallyDrop(std::shared_ptr<EntityItem> itemEntity)
 {
 	// Beta: Player.reallyDrop(ItemEntity var1) - adds entity to level (Player.java:270-272)
-	this->level.addEntity(itemEntity);  // Beta: this.level.addEntity(var1) (Player.java:271)
+	this->level->addEntity(itemEntity);  // Beta: this.level.addEntity(var1) (Player.java:271)
 }
 
 // Beta: Player die() override (Player.java:199-217)
@@ -357,17 +357,17 @@ bool Player::hurt(Entity *source, int_t dmg)
 		// TODO: Check for Arrow when it exists in a126cpp
 		if (monster != nullptr)  // Beta: if (var1 instanceof Monster || var1 instanceof Arrow) (Player.java:326)
 		{
-			if (level.difficulty == 0)  // Beta: if (this.level.difficulty == 0) (Player.java:327)
+			if (level->difficulty == 0)  // Beta: if (this.level.difficulty == 0) (Player.java:327)
 			{
 				dmg = 0;  // Beta: var2 = 0 (Player.java:328)
 			}
 			
-			if (level.difficulty == 1)  // Beta: if (this.level.difficulty == 1) (Player.java:331)
+			if (level->difficulty == 1)  // Beta: if (this.level.difficulty == 1) (Player.java:331)
 			{
 				dmg = dmg / 3 + 1;  // Beta: var2 = var2 / 3 + 1 (Player.java:332)
 			}
 			
-			if (level.difficulty == 3)  // Beta: if (this.level.difficulty == 3) (Player.java:335)
+			if (level->difficulty == 3)  // Beta: if (this.level.difficulty == 3) (Player.java:335)
 			{
 				dmg = dmg * 3 / 2;  // Beta: var2 = var2 * 3 / 2 (Player.java:336)
 			}
@@ -390,23 +390,20 @@ void Player::actuallyHurt(int_t dmg)
 
 void Player::interact(const std::shared_ptr<Entity> &entity)
 {
-	// Beta: Player.interact(Entity var1) - selected item interaction (Player.java:363-374)
-	if (entity->interact(*this))  // Beta: if (!var1.interact(this)) (Player.java:364)
-		return;  // Beta: return early if entity handled interaction (Player.java:364)
-	
-	ItemStack *selected = getSelectedItem();  // Beta: ItemInstance var2 = this.getSelectedItem() (Player.java:365)
-	if (selected != nullptr)  // Beta: if (var2 != null) (Player.java:365)
+	// Direct EntityPlayerSP.java:174-182 transliteration. Multiplayer sends
+	// Packet7 first, then runs this same local item mutation.
+	if (entity->interact(*this))
+		return;
+
+	ItemStack *selected = getSelectedItem();
+	Mob *mob = dynamic_cast<Mob *>(entity.get());
+	if (selected != nullptr && mob != nullptr)
 	{
-		Mob *mob = dynamic_cast<Mob*>(entity.get());  // Beta: if (var1 instanceof Mob) (Player.java:366)
-		if (mob != nullptr)
+		selected->interactEnemy(*mob);
+		if (selected->stackSize <= 0)
 		{
-			// Beta: Item interaction with mob (Player.java:367-371)
-			// TODO: selected->interactEnemy(*mob); - need to add interactEnemy() to ItemStack
-			// if (selected->stackSize <= 0)  // Beta: if (var2.count <= 0) (Player.java:368)
-			// {
-			//     selected->snap(*this);  // Beta: var2.snap(this) (Player.java:369)
-			//     removeSelectedItem();  // Beta: this.removeSelectedItem() (Player.java:370)
-			// }
+			// ItemStack.func_1097_a is empty in Alpha (ItemStack.java:132-133).
+			removeSelectedItem();
 		}
 	}
 }

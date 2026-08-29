@@ -50,12 +50,6 @@ void Packet5PlayerInventory::processPacket(NetHandler* handler)
 int Packet5PlayerInventory::getPacketSize()
 {
 	// Java: return 8;
-	// int (4) + short (2) + short (2) + short (2) = 10 bytes?
-	// Wait, Java says 8. Let me check: entityID is int (4), slot is short (2), itemID is short (2), itemDamage is short (2)
-	// That's 4+2+2+2 = 10. But Java says 8. Maybe slot/itemID/itemDamage are stored as int but written as short?
-	// Actually, Java short is 2 bytes, so: 4 + 2 + 2 + 2 = 10
-	// But the Java code says return 8. This might be a mistake in the original, or maybe the calculation is wrong.
-	// Let's match Java exactly as written:
 	return 8;
 }
 

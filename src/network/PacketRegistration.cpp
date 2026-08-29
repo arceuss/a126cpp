@@ -1,4 +1,6 @@
 #include "network/Packet.h"
+
+#include <mutex>
 #include "network/Packet0KeepAlive.h"
 #include "network/Packet1Login.h"
 #include "network/Packet2Handshake.h"
@@ -171,8 +173,9 @@ void Packet::initializePacketRegistry()
 	Packet::addIdClassMapping(25, true, false, []() -> Packet* { return new Packet25EntityPainting(); });
 	Packet::packetClassToId[std::type_index(typeid(Packet25EntityPainting))] = 25;
 	
-	// Packet27Position: client=true, server=true
-	Packet::addIdClassMapping(27, true, true, []() -> Packet* { return new Packet27Position(); });
+	// Packet27Position: client=false, server=true
+	// Alpha registers 27 as serverbound only (Packet.java:216).
+	Packet::addIdClassMapping(27, false, true, []() -> Packet* { return new Packet27Position(); });
 	Packet::packetClassToId[std::type_index(typeid(Packet27Position))] = 27;
 	
 	// Packet28: client=true, server=false
@@ -302,20 +305,13 @@ void Packet::initializePacketRegistry()
 	// Packet255KickDisconnect: client=true, server=true
 	Packet::addIdClassMapping(255, true, true, []() -> Packet* { return new Packet255KickDisconnect(); });
 	Packet::packetClassToId[std::type_index(typeid(Packet255KickDisconnect))] = 255;
-	
-	// TODO: Add remaining packets as they are created
-	// Note: This function should be called once at program startup, before any networking code
 }
 
-// Auto-initialize on first use (called from Packet::getNewPacket if registry is empty)
-// This matches Java's static initializer behavior
-static bool packetRegistryInitialized = false;
-
-void ensurePacketRegistryInitialized()
+void Packet::ensurePacketRegistryInitialized()
 {
-	if (!packetRegistryInitialized)
+	static std::once_flag initialized;
+	std::call_once(initialized, []()
 	{
 		Packet::initializePacketRegistry();
-		packetRegistryInitialized = true;
-	}
+	});
 }

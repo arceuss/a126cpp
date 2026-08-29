@@ -7,11 +7,6 @@ Packet22Collect::Packet22Collect()
 {
 }
 
-Packet22Collect::Packet22Collect(int_t collectedEntityId, int_t collectorEntityId)
-	: collectedEntityId(collectedEntityId)
-	, collectorEntityId(collectorEntityId)
-{
-}
 
 void Packet22Collect::readPacketData(SocketInputStream& in)
 {

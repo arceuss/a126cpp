@@ -13,21 +13,20 @@ Packet255KickDisconnect::Packet255KickDisconnect(const jstring& reason)
 
 void Packet255KickDisconnect::readPacketData(SocketInputStream& in)
 {
-	// Java: this.reason = readString(var1, 100);
+	// Alpha Packet255KickDisconnect.java:24-25.
 	this->reason = Packet::readString(in, 100);
 }
 
 void Packet255KickDisconnect::writePacketData(SocketOutputStream& out)
 {
-	// Java: writeString(this.reason, var1);
-	// Java side reads this with readString(in, 100). Enforce the same limit here
-	// so we never send a string that would be rejected by the server.
-	Packet::writeString(this->reason, out, 100);
+	// Alpha Packet255KickDisconnect.java:29-30. writeString only applies
+	// Packet's Short.MAX_VALUE limit; the 100-character limit is read-side.
+	Packet::writeString(this->reason, out);
 }
 
 void Packet255KickDisconnect::processPacket(NetHandler* handler)
 {
-	// Java: var1.handleKickDisconnect(this);
+	// Alpha Packet255KickDisconnect.java:34-35.
 	handler->handleKickDisconnect(this);
 }
 

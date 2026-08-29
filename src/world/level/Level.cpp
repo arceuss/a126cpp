@@ -124,11 +124,16 @@ Level::Level(const jstring &name, int_t dimension, long_t seed)
 	updateSkyBrightness();
 }
 
+// Alpha 1.2.6: World(World, WorldProvider) - the new dimension level shares the
+// existing save handles instead of taking them over (World.java:150-165).
+// Moving them left the outgoing level with null directories, so the save that
+// Minecraft performs while switching dimensions dereferenced a null `dir`.
 Level::Level(Level &level, int_t dimension)
 {
 	this->sessionId = level.sessionId;
-	this->workDir = std::move(level.workDir);
-	this->dir = std::move(level.dir);
+	this->workDir = level.workDir;
+	this->dir = level.dir;
+	this->name = level.name;
 	this->seed = level.seed;
 	this->time = level.time;
 	this->xSpawn = level.xSpawn;
@@ -171,7 +176,11 @@ Level::Level(File *workingDirectory, const jstring &name, long_t seed, int_t dim
 	{
 		std::shared_ptr<CompoundTag> root(NbtIo::readCompressed(*std::unique_ptr<std::istream>(fileDat->toStreamIn())));
 		std::shared_ptr<CompoundTag> data(root->getCompound(u"Data"));
-		seed = data->getLong(u"RandomSeed");
+		// Alpha: this.randomSeed = ... assigns the field, so a stored non-zero
+		// seed suppresses the spawn search below (World.java:203, 225-228).
+		// Assigning the constructor parameter instead leaves the member at 0,
+		// which re-runs the search and clobbers the saved spawn on every load.
+		this->seed = data->getLong(u"RandomSeed");
 		xSpawn = data->getInt(u"SpawnX");
 		ySpawn = data->getInt(u"SpawnY");
 		zSpawn = data->getInt(u"SpawnZ");
@@ -214,6 +223,10 @@ Level::Level(File *workingDirectory, const jstring &name, long_t seed, int_t dim
 		}
 		isFindingSpawn = false;
 	}
+
+	// Alpha: World(File, String, long, WorldProvider) ends with
+	// calculateInitialSkylight() (World.java:243).
+	updateSkyBrightness();
 }
 
 ChunkSource *Level::createChunkSource(std::shared_ptr<File> dir)
@@ -1251,7 +1264,10 @@ void Level::addToTickNextTick(int_t x, int_t y, int_t z, int_t delay)
 
 void Level::tickEntities()
 {
-	// Remove entities queued to remove
+	// Alpha: World.func_633_c() drains field_1024_A before ticking: drop the
+	// queued entities from the loaded list, unfile each one that is still in an
+	// existing chunk, release its skin, then clear the queue
+	// (World.java:970-981).
 	for (auto &entity : entitiesToRemove)
 		entities.erase(entity);
 
@@ -1316,13 +1332,16 @@ void Level::tick(std::shared_ptr<Entity> entity)
 	tick(entity, true);
 }
 
-void Level::tick(std::shared_ptr<Entity> entity, bool ai)
+void Level::tick(std::shared_ptr<Entity> entity, bool force)
 {
 	int_t xt = Mth::floor(entity->x);
 	int_t zt = Mth::floor(entity->z);
 
-	byte_t rad = 32;
-	if (ai && !hasChunksAt(xt - rad, 0, zt - rad, xt + rad, DEPTH, zt + rad))
+	// Alpha: World.func_4084_a() runs unconditionally when the forced flag is
+	// set; only the non-forced path is gated, and on a 16-block loaded region,
+	// not 32 (World.java:1014-1015).
+	int_t rad = 16;
+	if (!force && !hasChunksAt(xt - rad, 0, zt - rad, xt + rad, DEPTH, zt + rad))
 		return;
 
 	// Interpolation setup
@@ -1332,17 +1351,16 @@ void Level::tick(std::shared_ptr<Entity> entity, bool ai)
 	entity->yRotO = entity->yRot;
 	entity->xRotO = entity->xRot;
 
-	if (ai && entity->inChunk)
+	// Alpha: the full update only happens on the forced path and only while the
+	// entity is filed in a chunk. The non-forced path deliberately falls
+	// through to the interpolation and chunk-membership bookkeeping below
+	// without ticking (World.java:1021-1027).
+	if (force && entity->inChunk)
 	{
 		if (entity->riding != nullptr)
 			entity->rideTick();
 		else
 			entity->tick();
-	}
-	else
-	{
-		// TODO REMOVE
-		entity->tick();
 	}
 
 	// Check if any invalid operations occured
@@ -1364,8 +1382,11 @@ void Level::tick(std::shared_ptr<Entity> entity, bool ai)
 
 	if (!entity->inChunk || entity->xChunk != xc || entity->yChunk != yc || entity->zChunk != zc)
 	{
+		// Alpha: func_1016_a(entity, entity.field_656_bb) unfiles the entity
+		// using the recorded slice index, not one recomputed from its new
+		// position (World.java:1047-1048).
 		if (entity->inChunk && hasChunk(entity->xChunk, entity->zChunk))
-			getChunk(entity->xChunk, entity->zChunk)->removeEntity(entity);
+			getChunk(entity->xChunk, entity->zChunk)->removeEntity(entity, entity->yChunk);
 
 		if (hasChunk(xc, zc))
 		{
@@ -1378,17 +1399,15 @@ void Level::tick(std::shared_ptr<Entity> entity, bool ai)
 		}
 	}
 
-	// Beta 1.2: Tick rider - matches newb12 Level.java:1265-1272 exactly
-	if (ai && entity->inChunk && entity->rider != nullptr)
+	// Alpha: World.func_4084_a() (World.java:1057-1063)
+	if (force && entity->inChunk && entity->rider != nullptr)
 	{
-		// Beta: if (!var1.rider.removed && var1.rider.riding == var1) { this.tick(var1.rider); } else { ... } (Level.java:1266-1271)
 		if (!entity->rider->removed && entity->rider->riding == entity)
 		{
-			tick(entity->rider);  // Beta: this.tick(var1.rider) (Level.java:1267)
+			tick(entity->rider);
 		}
 		else
 		{
-			// Beta: var1.rider.riding = null; var1.rider = null; (Level.java:1269-1270)
 			entity->rider->riding = nullptr;
 			entity->rider = nullptr;
 		}
@@ -1535,20 +1554,26 @@ bool Level::containsFireTile(AABB &bb)
 
 void Level::extinguishFire(int_t x, int_t y, int_t z, Facing f)
 {
-	if (f == Facing::DOWN)
-		y--;
-	if (f == Facing::UP)
-		y++;
-	if (f == Facing::NORTH)
-		z--;
-	if (f == Facing::SOUTH)
-		z++;
-	if (f == Facing::WEST)
-		x--;
-	if (f == Facing::EAST)
-		x++;
+	if (f == Facing::DOWN) --y;
+	if (f == Facing::UP) ++y;
+	if (f == Facing::NORTH) --z;
+	if (f == Facing::SOUTH) ++z;
+	if (f == Facing::WEST) --x;
+	if (f == Facing::EAST) ++x;
 
-	// TODO
+	// Direct Alpha transliteration: World.java:1239-1263.
+	if (getTile(x, y, z) == Tile::fire.id)
+	{
+		if (!isOnline)
+		{
+			playSound(static_cast<double>(x) + 0.5,
+				static_cast<double>(y) + 0.5,
+				static_cast<double>(z) + 0.5,
+				u"random.fizz", 0.5f,
+				2.6f + (random.nextFloat() - random.nextFloat()) * 0.8f);
+		}
+		setTile(x, y, z, 0);
+	}
 }
 
 jstring Level::gatherStats()
@@ -2023,8 +2048,12 @@ void Level::ensureAdded(std::shared_ptr<Entity> entity)
 	entities.emplace(entity);
 }
 
-bool Level::mayInteract(std::shared_ptr<Player> player, int_t x, int_t y, int_t z)
+bool Level::mayInteract(Player &player, int_t x, int_t y, int_t z)
 {
+	(void)player;
+	(void)x;
+	(void)y;
+	(void)z;
 	return true;
 }
 

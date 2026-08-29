@@ -6,15 +6,19 @@
 #include "world/entity/animal/Cow.h"
 #include "world/entity/animal/Pig.h"
 #include "world/entity/animal/Sheep.h"
+#include "world/entity/monster/Creeper.h"
+#include "world/entity/monster/Skeleton.h"
+#include "world/entity/monster/Spider.h"
+#include "world/entity/monster/Zombie.h"
+#include "world/entity/monster/Ghast.h"
+#include "world/entity/monster/PigZombie.h"
 #include "world/level/Level.h"
 #include "util/Memory.h"
 #include <memory>
 #include <vector>
 
-// newb12: Biome entity mapping system
-// Reference: newb12/net/minecraft/world/level/biome/Biome.java:128-136
-// Note: Monsters (Spider, Zombie, Skeleton, Creeper) are not yet implemented
-// Only animals (Chicken, Cow, Pig, Sheep) are available for now
+// Direct replacement for Alpha MobSpawnerBase's class arrays
+// (MobSpawnerBase.java:43-49).
 
 namespace BiomeMobs
 {
@@ -36,12 +40,29 @@ namespace BiomeMobs
 		}
 	};
 
-	// Entity factories for monster category (not yet implemented)
-	// newb12: enemies = {Spider.class, Zombie.class, Skeleton.class, Creeper.class}
-	// Reference: newb12/net/minecraft/world/level/biome/Biome.java:39
 	static std::vector<EntityFactory> monsterFactories = {
-		// TODO: Add when monsters are implemented
-		// Spider, Zombie, Skeleton, Creeper
+		[](Level &level) -> std::shared_ptr<Mob> {
+			return Util::make_shared<Spider>(level);
+		},
+		[](Level &level) -> std::shared_ptr<Mob> {
+			return Util::make_shared<Zombie>(level);
+		},
+		[](Level &level) -> std::shared_ptr<Mob> {
+			return Util::make_shared<Skeleton>(level);
+		},
+		[](Level &level) -> std::shared_ptr<Mob> {
+			return Util::make_shared<Creeper>(level);
+		}
+	};
+
+	// Alpha: MobSpawnerHell.biomeMonsters = {Ghast, PigZombie} (MobSpawnerHell.java:13)
+	static std::vector<EntityFactory> hellMonsterFactories = {
+		[](Level &level) -> std::shared_ptr<Mob> {
+			return Util::make_shared<Ghast>(level);
+		},
+		[](Level &level) -> std::shared_ptr<Mob> {
+			return Util::make_shared<PigZombie>(level);
+		}
 	};
 
 	// Entity factories for waterCreature category (excluded - Squid not in Alpha)
@@ -51,8 +72,22 @@ namespace BiomeMobs
 		// Excluded - Squid not in Alpha
 	};
 
-	const std::vector<EntityFactory> &getMobs(MobCategory category)
+	// Alpha: MobSpawnerHell.biomeCreatures = new Class[0] (MobSpawnerHell.java:14)
+	static std::vector<EntityFactory> noFactories;
+
+	const std::vector<EntityFactory> &getMobs(BiomeType biome, MobCategory category)
 	{
+		if (biome == BiomeType::HELL)
+		{
+			switch (category)
+			{
+			case MobCategory::monster:
+				return hellMonsterFactories;
+			default:
+				return noFactories;
+			}
+		}
+
 		switch (category)
 		{
 		case MobCategory::monster:
@@ -62,9 +97,7 @@ namespace BiomeMobs
 		case MobCategory::waterCreature:
 			return waterCreatureFactories;
 		default:
-			// Return empty vector for unknown categories
-			static std::vector<EntityFactory> empty;
-			return empty;
+			return noFactories;
 		}
 	}
 }

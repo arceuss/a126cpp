@@ -43,16 +43,16 @@ void Chicken::aiStep()
 	}
 
 	flap = flap + flapping * 2.0f;
-	if (!level.isOnline && --eggTime <= 0)
+	if (!level->isOnline && --eggTime <= 0)
 	{
-		level.playSound(this, u"mob.chickenplop", 1.0f, (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
+		level->playSound(this, u"mob.chickenplop", 1.0f, (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
 		// TODO: spawnAtLocation - create EntityItem with egg
 		if (Items::egg != nullptr)
 		{
 			ItemStack stack(Items::egg->getShiftedIndex(), 1);
-			auto itemEntity = std::make_shared<EntityItem>(level, x, y, z, stack);
+			auto itemEntity = std::make_shared<EntityItem>(*level, x, y, z, stack);
 			itemEntity->throwTime = 10;
-			level.addEntity(itemEntity);
+			level->addEntity(itemEntity);
 		}
 		eggTime = random.nextInt(6000) + 6000;
 	}

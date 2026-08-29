@@ -2,6 +2,8 @@
 
 #include "network/Packet.h"
 
+class Entity;
+
 // Packet34EntityTeleport - matches Java Packet34EntityTeleport.java exactly
 class Packet34EntityTeleport : public Packet {
 public:
@@ -13,6 +15,7 @@ public:
 	byte_t pitch;     // Packed pitch
 	
 	Packet34EntityTeleport();
+	explicit Packet34EntityTeleport(const Entity& entity);
 	
 	void readPacketData(SocketInputStream& in) override;
 	void writePacketData(SocketOutputStream& out) override;

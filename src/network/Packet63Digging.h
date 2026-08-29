@@ -9,7 +9,7 @@ public:
 	int_t x;
 	int_t y;
 	int_t z;
-	byte_t face;
+	int_t face;
 	float progress;
 	long_t timestamp;  // Set on read, not written
 	

@@ -23,6 +23,12 @@ public:
 
 	void mirror();
 	void render(Tesselator &t, float scale);
+	// Emits the same two triangles as Tesselator's GL_QUADS compatibility
+	// conversion directly into the current OpenGL command stream.  This is used
+	// while compiling immutable sign display lists so the board geometry is
+	// flattened into the sign list instead of nesting two Cube display lists per
+	// sign.
+	void renderImmediate(float scale);
 	
 	Poly &flipNormal();
 };

@@ -1,12 +1,14 @@
 #include "world/item/ItemMinecart.h"
-#include "world/item/ItemStack.h"
-#include "world/entity/player/Player.h"
-#include "world/level/Level.h"
-#include "world/level/tile/Tile.h"
-#include "world/level/tile/RailTile.h"
-// TODO: Include Minecart entity when available
-// #include "world/entity/item/Minecart.h"
+
+#include <memory>
+
 #include "Facing.h"
+#include "world/entity/item/Minecart.h"
+#include "world/entity/player/Player.h"
+#include "world/item/ItemStack.h"
+#include "world/level/Level.h"
+#include "world/level/tile/RailTile.h"
+#include "world/level/tile/Tile.h"
 
 // Beta: MinecartItem(int var1, int var2) (MinecartItem.java:11-15)
 // Alpha: ItemMinecart(int var1, int var2) (ItemMinecart.java:6-10)
@@ -24,12 +26,13 @@ bool ItemMinecart::useOn(ItemStack &stack, Player &player, Level &level, int_t x
 	int_t tileId = level.getTile(x, y, z);
 	if (tileId == Tile::rail.id)
 	{
-		// Beta: Spawn minecart if not online (MinecartItem.java:21-23)
+		// Direct Alpha transliteration: ItemMinecart.java:25-30.
 		if (!level.isOnline)
 		{
-			// TODO: Create and add Minecart entity
-			// Minecart *minecart = new Minecart(level, (double)x + 0.5, (double)y + 0.5, (double)z + 0.5, type);
-			// level.addEntity(minecart);
+			level.addEntity(std::make_shared<Minecart>(level,
+				static_cast<double>(x) + 0.5,
+				static_cast<double>(y) + 0.5,
+				static_cast<double>(z) + 0.5, type));
 		}
 		
 		// Beta: Decrement stack (MinecartItem.java:25)

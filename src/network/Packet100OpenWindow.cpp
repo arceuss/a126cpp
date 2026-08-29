@@ -5,63 +5,82 @@
 
 jstring Packet100OpenWindow::readUTF(SocketInputStream& in)
 {
-	// Java readUTF: reads short length (in bytes), then Modified UTF-8 bytes
-	short_t utfByteLength = in.readShort();
-	if (utfByteLength < 0)
+	// DataInputStream.readUTF reads an unsigned-short byte count.
+	const int_t byteLength = static_cast<int_t>(static_cast<ushort_t>(in.readShort()));
+	std::vector<byte_t> bytes(static_cast<size_t>(byteLength));
+	in.readFully(bytes.data(), bytes.size());
+
+	jstring result;
+	result.reserve(static_cast<size_t>(byteLength));
+	for (int_t i = 0; i < byteLength;)
 	{
-		throw std::runtime_error("Invalid UTF string length: " + std::to_string(utfByteLength));
-	}
-	
-	// Read UTF-8 bytes
-	std::vector<byte_t> utfBytes(utfByteLength);
-	for (int i = 0; i < utfByteLength; ++i)
-	{
-		utfBytes[i] = in.readByte();
-	}
-	
-	// Convert Modified UTF-8 to UTF-16 (jstring)
-	jstring result = u"";
-	for (int i = 0; i < utfByteLength; )
-	{
-		byte_t b = utfBytes[i++];
-		if ((b & 0x80) == 0)
+		const ubyte_t b1 = static_cast<ubyte_t>(bytes[static_cast<size_t>(i++)]);
+		if ((b1 & 0x80) == 0)
 		{
-			// ASCII character (0xxxxxxx)
-			result += static_cast<char16_t>(b);
+			result += static_cast<char16_t>(b1);
 		}
-		else if ((b & 0xE0) == 0xC0 && i < utfByteLength)
+		else if ((b1 & 0xE0) == 0xC0)
 		{
-			// 2-byte UTF-8 (110xxxxx 10xxxxxx)
-			byte_t b2 = utfBytes[i++];
-			int codePoint = ((b & 0x1F) << 6) | (b2 & 0x3F);
-			result += static_cast<char16_t>(codePoint);
+			if (i >= byteLength)
+				throw std::runtime_error("UTFDataFormatException: malformed input: partial character at end");
+			const ubyte_t b2 = static_cast<ubyte_t>(bytes[static_cast<size_t>(i++)]);
+			if ((b2 & 0xC0) != 0x80)
+				throw std::runtime_error("UTFDataFormatException: malformed input around byte " + std::to_string(i));
+			result += static_cast<char16_t>(((b1 & 0x1F) << 6) | (b2 & 0x3F));
 		}
-		else if ((b & 0xF0) == 0xE0 && i + 1 < utfByteLength)
+		else if ((b1 & 0xF0) == 0xE0)
 		{
-			// 3-byte UTF-8 (1110xxxx 10xxxxxx 10xxxxxx)
-			byte_t b2 = utfBytes[i++];
-			byte_t b3 = utfBytes[i++];
-			int codePoint = ((b & 0x0F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
-			if (codePoint <= 0xFFFF)
-			{
-				result += static_cast<char16_t>(codePoint);
-			}
-			else
-			{
-				// Surrogate pair (code point > 0xFFFF)
-				codePoint -= 0x10000;
-				result += static_cast<char16_t>(0xD800 + (codePoint >> 10));
-				result += static_cast<char16_t>(0xDC00 + (codePoint & 0x3FF));
-			}
+			if (i + 1 >= byteLength)
+				throw std::runtime_error("UTFDataFormatException: malformed input: partial character at end");
+			const ubyte_t b2 = static_cast<ubyte_t>(bytes[static_cast<size_t>(i++)]);
+			const ubyte_t b3 = static_cast<ubyte_t>(bytes[static_cast<size_t>(i++)]);
+			if ((b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80)
+				throw std::runtime_error("UTFDataFormatException: malformed input around byte " + std::to_string(i - 1));
+			result += static_cast<char16_t>(
+				((b1 & 0x0F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F));
 		}
 		else
 		{
-			// Invalid UTF-8, use replacement character
-			result += static_cast<char16_t>(0xFFFD);
+			throw std::runtime_error("UTFDataFormatException: malformed input around byte " + std::to_string(i));
 		}
 	}
-	
 	return result;
+}
+
+void Packet100OpenWindow::writeUTF(const jstring& value, SocketOutputStream& out)
+{
+	size_t byteLength = 0;
+	for (char16_t c : value)
+	{
+		byteLength += c == 0 ? 2 : c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
+		if (byteLength > 65535)
+			throw std::runtime_error("UTFDataFormatException: encoded string too long");
+	}
+
+	out.writeShort(static_cast<short_t>(byteLength));
+	for (char16_t c : value)
+	{
+		if (c == 0)
+		{
+			out.writeByte(static_cast<byte_t>(0xC0));
+			out.writeByte(static_cast<byte_t>(0x80));
+		}
+		else if (c < 0x80)
+		{
+			out.writeByte(static_cast<byte_t>(c));
+		}
+		else if (c < 0x800)
+		{
+			out.writeByte(static_cast<byte_t>(0xC0 | (c >> 6)));
+			out.writeByte(static_cast<byte_t>(0x80 | (c & 0x3F)));
+		}
+		else
+		{
+			out.writeByte(static_cast<byte_t>(0xE0 | (c >> 12)));
+			out.writeByte(static_cast<byte_t>(0x80 | ((c >> 6) & 0x3F)));
+			out.writeByte(static_cast<byte_t>(0x80 | (c & 0x3F)));
+		}
+	}
 }
 
 Packet100OpenWindow::Packet100OpenWindow()
@@ -76,16 +95,16 @@ void Packet100OpenWindow::readPacketData(SocketInputStream& in)
 {
 	// Java: EXACT ORDER
 	// this.windowId = var1.readByte();
-	this->windowId = static_cast<int_t>(in.read() & 0xFF);
+	this->windowId = static_cast<int_t>(in.readByte());
 	
 	// this.inventoryType = var1.readByte();
-	this->inventoryType = static_cast<int_t>(in.read() & 0xFF);
+	this->inventoryType = static_cast<int_t>(in.readByte());
 	
 	// this.windowTitle = var1.readUTF();
 	this->windowTitle = readUTF(in);
 	
 	// this.slotsCount = var1.readByte();
-	this->slotsCount = static_cast<int_t>(in.read() & 0xFF);
+	this->slotsCount = static_cast<int_t>(in.readByte());
 }
 
 void Packet100OpenWindow::writePacketData(SocketOutputStream& out)
@@ -98,35 +117,7 @@ void Packet100OpenWindow::writePacketData(SocketOutputStream& out)
 	out.writeByte(static_cast<byte_t>(this->inventoryType));
 	
 	// var1.writeUTF(this.windowTitle);
-	// Note: writeUTF writes short length (in bytes) then UTF-8 bytes
-	// For now, this is server-to-client only, so writePacketData may be empty
-	// But let's implement it to match Java
-	// Convert UTF-16 to Modified UTF-8
-	std::vector<byte_t> utf8Bytes;
-	for (size_t i = 0; i < windowTitle.length(); ++i)
-	{
-		char16_t ch = windowTitle[i];
-		if (ch < 0x80)
-		{
-			utf8Bytes.push_back(static_cast<byte_t>(ch));
-		}
-		else if (ch < 0x800)
-		{
-			utf8Bytes.push_back(static_cast<byte_t>(0xC0 | (ch >> 6)));
-			utf8Bytes.push_back(static_cast<byte_t>(0x80 | (ch & 0x3F)));
-		}
-		else
-		{
-			utf8Bytes.push_back(static_cast<byte_t>(0xE0 | (ch >> 12)));
-			utf8Bytes.push_back(static_cast<byte_t>(0x80 | ((ch >> 6) & 0x3F)));
-			utf8Bytes.push_back(static_cast<byte_t>(0x80 | (ch & 0x3F)));
-		}
-	}
-	out.writeShort(static_cast<short_t>(utf8Bytes.size()));
-	for (byte_t b : utf8Bytes)
-	{
-		out.writeByte(b);
-	}
+	writeUTF(this->windowTitle, out);
 	
 	// var1.writeByte(this.slotsCount);
 	out.writeByte(static_cast<byte_t>(this->slotsCount));
@@ -140,10 +131,8 @@ void Packet100OpenWindow::processPacket(NetHandler* handler)
 
 int Packet100OpenWindow::getPacketSize()
 {
-	// Java: variable size
-	// byte (1) + byte (1) + UTF string (2 + bytes) + byte (1)
-	// Approximate - actual depends on string length
-	return 4 + static_cast<int>(windowTitle.length());
+	// Java: return 3 + this.windowTitle.length();
+	return static_cast<int_t>(3U + static_cast<uint_t>(windowTitle.length()));
 }
 
 int Packet100OpenWindow::getPacketId() const

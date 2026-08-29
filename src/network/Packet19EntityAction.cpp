@@ -20,7 +20,7 @@ void Packet19EntityAction::readPacketData(SocketInputStream& in)
 	this->entityId = in.readInt();
 	
 	// this.state = var1.readByte();
-	this->state = static_cast<int_t>(in.read() & 0xFF);
+	this->state = in.readByte();
 }
 
 void Packet19EntityAction::writePacketData(SocketOutputStream& out)

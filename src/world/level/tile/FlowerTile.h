@@ -41,6 +41,8 @@ protected:
 	// Alpha: BlockFlower.canThisPlantGrowOnThisBlockID() - returns true for grass, dirt, tilledField
 	virtual bool canThisPlantGrowOnThisBlockID(int_t blockId);
 	
+
+public:
 	// Alpha: BlockFlower.canBlockStay() - checks light >= 8 or canSeeSky, and valid block below
-	bool canBlockStay(Level &level, int_t x, int_t y, int_t z);
+	bool canBlockStay(Level &level, int_t x, int_t y, int_t z) override;
 };

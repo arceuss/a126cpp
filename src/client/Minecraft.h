@@ -200,7 +200,7 @@ public:
 	jstring gatherStats2();
 	jstring gatherStats4();
 	jstring gatherStats3();
-	void respawnPlayer();
+	void respawnPlayer(int_t dimension = 0, const jstring &title = u"Respawning");
 	static void start(const jstring *name, const jstring *sessionId);
 	static void startAndConnectTo(const jstring *name, const jstring *sessionId, const jstring *ip);
 	// public ClientConnection getConnection()

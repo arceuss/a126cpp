@@ -152,9 +152,12 @@ void Explosion::addParticles()
 
 		if (var7 > 0)
 		{
-			Tile::tiles[var7]->spawnResources(level, var4, var5, var6, level.getData(var4, var5, var6), 0.3f);
+			Tile *tile = Tile::tiles[var7];
+			tile->spawnResources(level, var4, var5, var6,
+				level.getData(var4, var5, var6), 0.3f);
 			level.setTile(var4, var5, var6, 0);
-			// Note: wasExploded() not implemented yet - may need to add to Tile
+			// Direct Alpha transliteration: Explosion.java:153-156.
+			tile->wasExploded(level, var4, var5, var6);
 		}
 	}
 }

@@ -27,6 +27,7 @@ public:
 	// Alpha 1.2.6: EntityItem constructor for EntityIO (takes only Level, sets defaults)
 	// Used when creating from EntityList.createEntity() - position and stack set separately
 	EntityItem(Level &level);
+	bool hasValidItem() const;
 	
 	virtual void tick() override;
 	
@@ -38,8 +39,11 @@ public:
 	
 	// Override render distance - EntityItem needs larger render distance than default
 	virtual bool shouldRenderAtSqrDistance(double distance) override;
-	
 protected:
+	void addAdditionalSaveData(CompoundTag &tag) override;
+	void readAdditionalSaveData(CompoundTag &tag) override;
+
+private:
 	// Helper: handle collision detection with blocks
 	bool func_466_g(double x, double y, double z);
 };

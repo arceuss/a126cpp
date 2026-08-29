@@ -1,12 +1,17 @@
 #include "world/entity/item/EntityItem.h"
-#include "world/entity/player/Player.h"
+
+#include <iostream>
+#include <memory>
+
+#include "java/Math.h"
+#include "nbt/CompoundTag.h"
 #include "world/entity/player/InventoryPlayer.h"
+#include "world/entity/player/Player.h"
+#include "world/item/Item.h"
 #include "world/item/ItemStack.h"
 #include "world/level/Level.h"
-#include "world/level/tile/Tile.h"
 #include "world/level/material/Material.h"
-#include "java/Math.h"
-#include <iostream>
+#include "world/level/tile/Tile.h"
 
 // Ensure Player is fully defined for playerTouch override
 
@@ -56,8 +61,25 @@ EntityItem::EntityItem(Level &level, double x, double y, double z, ItemStack sta
 	this->throwTime = 10;  // Beta: throwTime = 10 (default delay before pickup)
 }
 
+bool EntityItem::hasValidItem() const
+{
+	if (item.stackSize <= 0 || item.itemID <= 0)
+		return false;
+	if (item.itemID < static_cast<int_t>(Tile::tiles.size()))
+		return Tile::tiles[static_cast<size_t>(item.itemID)] != nullptr;
+	if (item.itemID < static_cast<int_t>(Item::itemsList.size()))
+		return Item::itemsList[static_cast<size_t>(item.itemID)] != nullptr;
+	return false;
+}
+
 void EntityItem::tick()
 {
+	if (!hasValidItem())
+	{
+		remove();
+		return;
+	}
+
 	Entity::tick();
 	
 	// Beta: Decrement throwTime (ItemEntity.java:47-49)
@@ -90,7 +112,7 @@ void EntityItem::tick()
 	{
 		friction = 0.1f * 0.1f * 58.8f;  // Alpha: 0.1F * 0.1F * 58.8F (EntityItem.java:57)
 		// TODO: Get block slipperiness from tile at position
-		// int_t blockId = level.getTile((int_t)x, (int_t)(bb.minY - 1.0), (int_t)z);
+		// int_t blockId = level->getTile((int_t)x, (int_t)(bb.minY - 1.0), (int_t)z);
 		// if (blockId > 0) friction = Tile::tiles[blockId]->slipperiness * 0.98f;
 	}
 	
@@ -129,7 +151,7 @@ void EntityItem::playerTouch(Player &player)
 	// Beta: Only handle pickup in single-player; server controls pickup in multiplayer
 	// Beta: if (!this.world.isStatic) - only in single-player (ItemEntity.java:200)
 	// In multiplayer, the server handles collision detection and pickup, sending Packet103SetSlot updates
-	if (!level.isOnline)  // Beta: Only in single-player (ItemEntity.java:200)
+	if (!level->isOnline)  // Beta: Only in single-player (ItemEntity.java:200)
 	{
 		int_t originalCount = item.stackSize;  // Beta: var2 = this.item.count (ItemEntity.java:201)
 		
@@ -138,8 +160,8 @@ void EntityItem::playerTouch(Player &player)
 		if (throwTime == 0 && player.inventory.add(item))
 		{
 			// Beta: Play pickup sound (ItemEntity.java:203)
-			// Beta: level.playSound(this, "random.pop", 0.2F, ((this.random.nextFloat() - this.random.nextFloat()) * 0.7F + 1.0F) * 2.0F)
-			level.playSound(this, u"random.pop", 0.2f, ((random.nextFloat() - random.nextFloat()) * 0.7f + 1.0f) * 2.0f);
+			// Beta: level->playSound(this, "random.pop", 0.2F, ((this.random.nextFloat() - this.random.nextFloat()) * 0.7F + 1.0F) * 2.0F)
+			level->playSound(this, u"random.pop", 0.2f, ((random.nextFloat() - random.nextFloat()) * 0.7f + 1.0f) * 2.0f);
 			
 			// Beta: Call player.take() (ItemEntity.java:204)
 			player.take(*this, originalCount);
@@ -163,6 +185,25 @@ bool EntityItem::hurt(Entity *source, int_t dmg)
 		removed = true;  // Alpha: setEntityDead()
 	}
 	return false;
+}
+
+void EntityItem::addAdditionalSaveData(CompoundTag &tag)
+{
+	// Direct Alpha transliteration: EntityItem.java:173-177.
+	tag.putShort(u"Health", static_cast<short_t>(static_cast<byte_t>(health)));
+	tag.putShort(u"Age", static_cast<short_t>(age));
+	std::unique_ptr<CompoundTag> itemTag = std::make_unique<CompoundTag>();
+	item.save(*itemTag);
+	tag.putCompound(u"Item", std::move(itemTag));
+}
+
+void EntityItem::readAdditionalSaveData(CompoundTag &tag)
+{
+	// Direct Alpha transliteration: EntityItem.java:180-185.
+	health = tag.getShort(u"Health") & 0xFF;
+	age = tag.getShort(u"Age");
+	std::shared_ptr<CompoundTag> itemTag = tag.getCompound(u"Item");
+	item.load(*itemTag);
 }
 
 bool EntityItem::shouldRenderAtSqrDistance(double distance)

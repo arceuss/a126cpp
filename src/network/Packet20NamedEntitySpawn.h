@@ -3,6 +3,8 @@
 #include "network/Packet.h"
 #include "java/String.h"
 
+class Player;
+
 // Packet20NamedEntitySpawn - matches Java Packet20NamedEntitySpawn.java exactly
 class Packet20NamedEntitySpawn : public Packet {
 public:
@@ -13,9 +15,10 @@ public:
 	int_t zPosition;  // Absolute Integer (fixed-point)
 	byte_t rotation;  // Packed rotation
 	byte_t pitch;     // Packed pitch
-	short_t currentItem;
+	int_t currentItem;
 	
 	Packet20NamedEntitySpawn();
+	Packet20NamedEntitySpawn(Player &player);
 	
 	void readPacketData(SocketInputStream& in) override;
 	void writePacketData(SocketOutputStream& out) override;

@@ -231,7 +231,7 @@ void LocalPlayer::respawn()
 void LocalPlayer::startCrafting(int_t x, int_t y, int_t z)
 {
 	// Beta: this.minecraft.setScreen(new CraftingScreen(this.inventory, this.level, x, y, z)) (LocalPlayer.java:125)
-	minecraft.setScreen(Util::make_shared<WorkbenchScreen>(minecraft, level, x, y, z));
+	minecraft.setScreen(Util::make_shared<WorkbenchScreen>(minecraft, *level, x, y, z));
 }
 
 // Beta: LocalPlayer.openContainer() - opens chest screen (LocalPlayer.java:119-121)

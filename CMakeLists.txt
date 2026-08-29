@@ -34,6 +34,9 @@ set(Alpha126Cpp_SOURCES
 	"src/client/User.cpp"
 	"src/client/User.h"
 
+	"src/client/spc/SPCCommand.cpp"
+	"src/client/spc/SPCCommand.h"
+
 	"src/client/gamemode/GameMode.cpp"
 	"src/client/gamemode/GameMode.h"
 	"src/client/gamemode/SurvivalMode.cpp"
@@ -252,6 +255,8 @@ set(Alpha126Cpp_SOURCES
 	"src/client/renderer/entity/SlimeRenderer.h"
 	"src/client/renderer/entity/GhastRenderer.cpp"
 	"src/client/renderer/entity/GhastRenderer.h"
+	"src/client/renderer/entity/FireballRenderer.cpp"
+	"src/client/renderer/entity/FireballRenderer.h"
 	"src/client/renderer/entity/SpiderRenderer.cpp"
 	"src/client/renderer/entity/SpiderRenderer.h"
 	
@@ -452,6 +457,8 @@ set(Alpha126Cpp_SOURCES
 	"src/world/item/ItemSword.h"
 	"src/world/item/ItemFood.cpp"
 	"src/world/item/ItemFood.h"
+	"src/world/item/ItemSoup.cpp"
+	"src/world/item/ItemSoup.h"
 	"src/world/item/ItemFlintAndSteel.cpp"
 	"src/world/item/ItemFlintAndSteel.h"
 	"src/world/item/ItemBow.cpp"
@@ -530,6 +537,8 @@ set(Alpha126Cpp_SOURCES
 	"src/world/level/NextTickListEntry.h"
 	"src/world/level/Region.cpp"
 	"src/world/level/Region.h"
+	"src/world/level/Teleporter.cpp"
+	"src/world/level/Teleporter.h"
 	"src/world/level/TilePos.h"
 	"src/world/level/MobSpawner.cpp"
 	"src/world/level/MobSpawner.h"
@@ -544,6 +553,8 @@ set(Alpha126Cpp_SOURCES
 
 	"src/world/level/biome/BiomeSource.cpp"
 	"src/world/level/biome/BiomeSource.h"
+	"src/world/level/biome/FixedBiomeSource.cpp"
+	"src/world/level/biome/FixedBiomeSource.h"
 	"src/world/level/biome/BiomeMobs.cpp"
 	"src/world/level/biome/BiomeMobs.h"
 
@@ -592,6 +603,14 @@ set(Alpha126Cpp_SOURCES
 	"src/world/level/levelgen/feature/PumpkinFeature.h"
 	"src/world/level/levelgen/feature/OreFeature.cpp"
 	"src/world/level/levelgen/feature/OreFeature.h"
+	"src/world/level/levelgen/feature/WorldGenHellLava.cpp"
+	"src/world/level/levelgen/feature/WorldGenHellLava.h"
+	"src/world/level/levelgen/feature/WorldGenFire.cpp"
+	"src/world/level/levelgen/feature/WorldGenFire.h"
+	"src/world/level/levelgen/feature/WorldGenLightStone1.cpp"
+	"src/world/level/levelgen/feature/WorldGenLightStone1.h"
+	"src/world/level/levelgen/feature/WorldGenLightStone2.cpp"
+	"src/world/level/levelgen/feature/WorldGenLightStone2.h"
 	
 	"src/world/level/levelgen/synth/ImprovedNoise.cpp"
 	"src/world/level/levelgen/synth/ImprovedNoise.h"
@@ -610,6 +629,10 @@ set(Alpha126Cpp_SOURCES
 	"src/world/level/levelgen/LargeFeature.h"
 	"src/world/level/levelgen/RandomLevelSource.cpp"
 	"src/world/level/levelgen/RandomLevelSource.h"
+	"src/world/level/levelgen/HellCaveFeature.cpp"
+	"src/world/level/levelgen/HellCaveFeature.h"
+	"src/world/level/levelgen/HellRandomLevelSource.cpp"
+	"src/world/level/levelgen/HellRandomLevelSource.h"
 	
 	"src/world/level/material/DecorationMaterial.cpp"
 	"src/world/level/material/DecorationMaterial.h"
@@ -920,6 +943,8 @@ set(Alpha126Cpp_SOURCES
 	"src/java/Random.h"
 	"src/java/Resource.h"
 	"src/java/Runtime.h"
+	"src/java/StrictMath.cpp"
+	"src/java/StrictMath.h"
 	"src/java/String.cpp"
 	"src/java/String.h"
 	"src/java/System.cpp"
@@ -929,10 +954,12 @@ set(Alpha126Cpp_SOURCES
 	"src/external/stb_image.cpp"
 )
 
-add_executable(Alpha126Cpp
+# Core object library shared by the client executable and the headless test target.
+# An OBJECT library (not STATIC) is used deliberately: every translation unit is
+# always linked, so registries relying on translation-unit initialisation cannot
+# be silently discarded by the linker.
+add_library(Alpha126CppCore OBJECT
 	${Alpha126Cpp_SOURCES}
-	
-	"src/pc/Main.cpp"
 
 	"src/pc/CrashHandler.cpp"
 	"src/pc/CrashHandler.h"
@@ -952,47 +979,41 @@ add_executable(Alpha126Cpp
 	"src/pc/lwjgl/Mouse.cpp"
 	"src/pc/lwjgl/Mouse.h"
 )
-target_include_directories(Alpha126Cpp PRIVATE "src/pc")
 
-target_include_directories(Alpha126Cpp PRIVATE "src")
+target_include_directories(Alpha126CppCore PUBLIC "src")
+target_include_directories(Alpha126CppCore PUBLIC "src/pc")
 
 # OpenAL-Soft headers (for SoundEngine)
-target_include_directories(Alpha126Cpp PRIVATE "external/openal-soft/include")
+target_include_directories(Alpha126CppCore PUBLIC "external/openal-soft/include")
 
 # Compile platform specific code
 if(WIN32)
-	target_sources(Alpha126Cpp PRIVATE
+	target_sources(Alpha126CppCore PRIVATE
 		"src/pc/win32/java/File.cpp"
 		"src/pc/win32/java/Resource.cpp"
 		"src/pc/win32/java/Runtime.cpp"
-		"src/pc/win32/Alpha126Cpp.rc"
-	)
-	
-	# Set icon file path for resource compiler
-	set_source_files_properties("src/pc/win32/Alpha126Cpp.rc" PROPERTIES
-		VS_RESOURCE_GENERATOR "rc"
 	)
 
-	target_compile_definitions(Alpha126Cpp PRIVATE MC_WIN32)
+	target_compile_definitions(Alpha126CppCore PUBLIC MC_WIN32)
 elseif(APPLE)
 	#message(FATAL_ERROR "MacOS is not supported yet.")
-	target_sources(Alpha126Cpp PRIVATE
+	target_sources(Alpha126CppCore PRIVATE
 		"src/pc/linux/java/File.cpp"
 		"src/pc/linux/java/Resource.cpp"
 		"src/pc/linux/java/Runtime.cpp"
 	)
 elseif(UNIX)
-	target_sources(Alpha126Cpp PRIVATE
+	target_sources(Alpha126CppCore PRIVATE
 		"src/pc/linux/java/File.cpp"
 		"src/pc/linux/java/Resource.cpp"
 		"src/pc/linux/java/Runtime.cpp"
 	)
-	
-	target_compile_definitions(Alpha126Cpp PRIVATE MC_LINUX)
+
+	target_compile_definitions(Alpha126CppCore PUBLIC MC_LINUX)
 endif()
 
 # Use C++17 (required for std::variant in DataWatcher)
-set_target_properties(Alpha126Cpp PROPERTIES
+set_target_properties(Alpha126CppCore PROPERTIES
 	CXX_STANDARD 17
 	CXX_STANDARD_REQUIRED YES
 	CXX_EXTENSIONS NO
@@ -1002,12 +1023,12 @@ set_target_properties(Alpha126Cpp PROPERTIES
 if(MSVC)
 	# MSVC: /O2 = maximize speed, /Ob2 = aggressive inlining, /Oi = generate intrinsic functions
 	# /GL = whole program optimization (works with LTCG)
-	target_compile_options(Alpha126Cpp PRIVATE
+	target_compile_options(Alpha126CppCore PUBLIC
 		$<$<CONFIG:Release>:/O2 /Ob2 /Oi /GL>
 		$<$<CONFIG:RelWithDebInfo>:/O2 /Ob2 /Oi /GL>
 	)
 	# Link-time optimizations (required when using /GL to avoid warning)
-	target_link_options(Alpha126Cpp PRIVATE
+	target_link_options(Alpha126CppCore PUBLIC
 		$<$<CONFIG:Release>:/LTCG>
 		$<$<CONFIG:RelWithDebInfo>:/LTCG>
 	)
@@ -1016,35 +1037,35 @@ else()
 	# -funroll-loops = unroll loops for better performance
 	# -finline-functions = aggressive function inlining
 	# -fomit-frame-pointer = omit frame pointer (frees a register, only for Release)
-	target_compile_options(Alpha126Cpp PRIVATE
+	target_compile_options(Alpha126CppCore PUBLIC
 		$<$<CONFIG:Release>:-O3 -march=native -funroll-loops -finline-functions -fomit-frame-pointer>
 		$<$<CONFIG:RelWithDebInfo>:-O3 -march=native -funroll-loops -finline-functions>
 	)
 	# Link-time optimizations
-	set_target_properties(Alpha126Cpp PROPERTIES
-		$<$<CONFIG:Release>:LINK_FLAGS> "-flto"
-		$<$<CONFIG:RelWithDebInfo>:LINK_FLAGS> "-flto"
+	target_link_options(Alpha126CppCore PUBLIC
+		$<$<CONFIG:Release>:-flto>
+		$<$<CONFIG:RelWithDebInfo>:-flto>
 	)
 endif()
 
 # Third party
 add_subdirectory("external/glad" EXCLUDE_FROM_ALL)
-target_link_libraries(Alpha126Cpp PRIVATE glad)
+target_link_libraries(Alpha126CppCore PUBLIC glad)
 
 add_subdirectory("external/SDL2" EXCLUDE_FROM_ALL)
-target_link_libraries(Alpha126Cpp PRIVATE SDL2-static)
+target_link_libraries(Alpha126CppCore PUBLIC SDL2-static)
 
 add_subdirectory("external/zlib" EXCLUDE_FROM_ALL)
 
-target_link_libraries(Alpha126Cpp PRIVATE zlibstatic)
-target_include_directories(Alpha126Cpp PRIVATE "external/zlib")
-target_include_directories(Alpha126Cpp PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/external/zlib")
+target_link_libraries(Alpha126CppCore PUBLIC zlibstatic)
+target_include_directories(Alpha126CppCore PUBLIC "external/zlib")
+target_include_directories(Alpha126CppCore PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/external/zlib")
 
-target_include_directories(Alpha126Cpp PRIVATE "external/stb")
-target_include_directories(Alpha126Cpp PRIVATE "external/gzip-hpp/include")
-target_include_directories(Alpha126Cpp PRIVATE "external/cpp-httplib")
+target_include_directories(Alpha126CppCore PUBLIC "external/stb")
+target_include_directories(Alpha126CppCore PUBLIC "external/gzip-hpp/include")
+target_include_directories(Alpha126CppCore PUBLIC "external/cpp-httplib")
 
-target_include_directories(Alpha126Cpp PRIVATE "external/miniaudio")
+target_include_directories(Alpha126CppCore PUBLIC "external/miniaudio")
 
 # OpenAL-Soft library - build from source
 # On Windows, the target is "OpenAL32", on other platforms it's "openal"
@@ -1053,32 +1074,97 @@ add_subdirectory("external/openal-soft" EXCLUDE_FROM_ALL)
 # Link against the built OpenAL library
 # OpenAL-Soft's CMakeLists.txt creates a target named ${LIBNAME}
 # which is "OpenAL32" on Windows and "openal" on other platforms
-	if(WIN32)
+if(WIN32)
 	if(TARGET OpenAL32)
-		target_link_libraries(Alpha126Cpp PRIVATE OpenAL32)
-		
-		# Copy DLL to output directory for runtime (Windows only)
-			add_custom_command(TARGET Alpha126Cpp POST_BUILD
-				COMMAND ${CMAKE_COMMAND} -E copy_if_different
-			"$<TARGET_FILE:OpenAL32>"
-				"$<TARGET_FILE_DIR:Alpha126Cpp>/OpenAL32.dll"
-				COMMENT "Copying OpenAL32.dll to output directory"
-			)
+		target_link_libraries(Alpha126CppCore PUBLIC OpenAL32)
+		# The bundled OpenAL-Soft null/wave backends call timeGetTime directly.
+		# Its old CMake target omits the Windows import library with current
+		# toolchains, so make the platform dependency explicit.
+		target_link_libraries(OpenAL32 winmm)
 	else()
 		message(WARNING "OpenAL32 target not found. Please check OpenAL-Soft CMakeLists.txt")
-		endif()
+	endif()
 else()
 	if(TARGET openal)
-		target_link_libraries(Alpha126Cpp PRIVATE openal)
+		target_link_libraries(Alpha126CppCore PUBLIC openal)
 	else()
 		message(WARNING "openal target not found. Please check OpenAL-Soft CMakeLists.txt")
 	endif()
 endif()
 
-# Output to bin/ directory
+# Client executable
+add_executable(Alpha126Cpp
+	"src/pc/Main.cpp"
+	"src/tools/SignBench.cpp"
+	"src/tools/SignBench.h"
+)
+target_link_libraries(Alpha126Cpp PRIVATE Alpha126CppCore)
+
+if(WIN32)
+	target_sources(Alpha126Cpp PRIVATE
+		"src/pc/win32/Alpha126Cpp.rc"
+	)
+
+	# Set icon file path for resource compiler
+	set_source_files_properties("src/pc/win32/Alpha126Cpp.rc" PROPERTIES
+		VS_RESOURCE_GENERATOR "rc"
+	)
+endif()
+
 set_target_properties(Alpha126Cpp PROPERTIES
+	CXX_STANDARD 17
+	CXX_STANDARD_REQUIRED YES
+	CXX_EXTENSIONS NO
+)
+
+# Headless deterministic regression suite.
+# Links the same production code as the client but never initialises SDL,
+# OpenGL, OpenAL or any input device.
+#
+# Test files are globbed on purpose: a new regression test is a single new file
+# under src/tools/headless/tests and needs no build edit. CONFIGURE_DEPENDS
+# makes the build re-glob when that directory changes.
+file(GLOB Alpha126Cpp_HEADLESS_TESTS CONFIGURE_DEPENDS
+	"src/tools/headless/tests/*.cpp"
+)
+
+add_executable(a126cpp-headless-tests
+	"src/tools/headless/TestFramework.cpp"
+	"src/tools/headless/TestFramework.h"
+	"src/tools/headless/TestWorld.cpp"
+	"src/tools/headless/TestWorld.h"
+	"src/tools/headless/HeadlessMain.cpp"
+
+	${Alpha126Cpp_HEADLESS_TESTS}
+)
+target_link_libraries(a126cpp-headless-tests PRIVATE Alpha126CppCore)
+
+set_target_properties(a126cpp-headless-tests PROPERTIES
+	CXX_STANDARD 17
+	CXX_STANDARD_REQUIRED YES
+	CXX_EXTENSIONS NO
+)
+
+# Output to bin/ directory
+set_target_properties(Alpha126Cpp a126cpp-headless-tests PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
 )
+
+if(WIN32 AND TARGET OpenAL32)
+	# Copy DLL to output directory for runtime (Windows only)
+	add_custom_command(TARGET Alpha126Cpp POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"$<TARGET_FILE:OpenAL32>"
+			"$<TARGET_FILE_DIR:Alpha126Cpp>/OpenAL32.dll"
+		COMMENT "Copying OpenAL32.dll to output directory"
+	)
+	add_custom_command(TARGET a126cpp-headless-tests POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"$<TARGET_FILE:OpenAL32>"
+			"$<TARGET_FILE_DIR:a126cpp-headless-tests>/OpenAL32.dll"
+		COMMENT "Copying OpenAL32.dll to output directory"
+	)
+endif()
 
 # Copy resource folder to output directory next to executable
 # Use copy_directory_if_different to avoid errors if directory doesn't exist
@@ -1089,3 +1175,6 @@ add_custom_command(TARGET Alpha126Cpp POST_BUILD
 		"$<TARGET_FILE_DIR:Alpha126Cpp>/resource"
 	COMMENT "Copying resource folder to output directory"
 )
+
+enable_testing()
+add_test(NAME headless COMMAND a126cpp-headless-tests --all)

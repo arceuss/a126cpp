@@ -32,9 +32,6 @@ void Packet2Handshake::processPacket(NetHandler* handler)
 int Packet2Handshake::getPacketSize()
 {
 	// Java: return 4 + this.username.length() + 4;
-	// 2 (short for string length) + username.length()*2 (UTF-16 bytes) = 2 + username.length()*2
-	// But Java formula suggests: 4 + username.length() + 4
-	// Let's match Java exactly:
 	return 4 + static_cast<int>(username.length()) + 4;
 }
 

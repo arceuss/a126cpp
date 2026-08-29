@@ -13,11 +13,11 @@ Zombie::Zombie(Level &level) : Monster(level)
 
 void Zombie::aiStep()
 {
-	if (level.isDay())
+	if (level->isDay())
 	{
 		float var1 = getBrightness(1.0f);
 		if (var1 > 0.5f
-			&& level.canSeeSky(Mth::floor(x), Mth::floor(y), Mth::floor(z))
+			&& level->canSeeSky(Mth::floor(x), Mth::floor(y), Mth::floor(z))
 			&& random.nextFloat() * 30.0f < (var1 - 0.4f) * 2.0f)
 		{
 			onFire = 300;

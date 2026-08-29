@@ -54,7 +54,7 @@ void TakeAnimationParticle::render(Tesselator &t, float a, float xa, float ya, f
 	int_t yTile = Mth::floor(yy + heightOffset / 2.0f);
 	int_t zTile = Mth::floor(zz);
 	
-	float br = level.getBrightness(xTile, yTile, zTile);
+	float br = level->getBrightness(xTile, yTile, zTile);
 	
 	xx -= Particle::xOff;
 	yy -= Particle::yOff;

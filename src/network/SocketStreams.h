@@ -12,10 +12,20 @@ typedef int SocketHandle;
 #define INVALID_SOCKET_HANDLE (-1)
 #endif
 
-#include "java/Type.h"
-#include "java/String.h"
-#include <vector>
 #include <cstring>
+#include <stdexcept>
+#include <vector>
+
+#include "java/String.h"
+#include "java/Type.h"
+
+class EOFException : public std::runtime_error
+{
+public:
+	EOFException() : std::runtime_error("EOFException: end of stream")
+	{
+	}
+};
 
 // Wrapper for DataInputStream - matches Java DataInputStream behavior exactly
 class SocketInputStream {
@@ -23,9 +33,11 @@ private:
 	SocketHandle socket;
 	std::vector<byte_t> readBuffer;
 	size_t readBufferPos;
+	bool memoryMode = false;
 
 public:
 	SocketInputStream(SocketHandle sock);
+	explicit SocketInputStream(const std::vector<byte_t> &data);
 	~SocketInputStream();
 
 	// DataInputStream methods - must match Java byte sequence exactly
@@ -49,10 +61,12 @@ private:
 	SocketHandle socket;
 	std::vector<byte_t> writeBuffer;
 	size_t writeBufferPos;
+	std::vector<byte_t> *memorySink = nullptr;
 	static const size_t BUFFER_SIZE = 5120;  // Java BufferedOutputStream default size
 
 public:
 	SocketOutputStream(SocketHandle sock);
+	explicit SocketOutputStream(std::vector<byte_t> &sink);
 	~SocketOutputStream();
 
 	// DataOutputStream methods - must match Java byte sequence exactly

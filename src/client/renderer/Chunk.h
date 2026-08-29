@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <vector>
 
 #include "client/renderer/Tesselator.h"
 #include "client/renderer/culling/Culler.h"
@@ -66,6 +67,15 @@ private:
 
 public:
 	void rebuild();
+
+	// Alpha WorldRenderer.func_1198_a reconciles the renderer-local tile
+	// entities with RenderGlobal's list after every rebuild
+	// (WorldRenderer.java:114-116,169-174). Split out only that bookkeeping so
+	// it can be tested without an OpenGL context.
+	static void reconcileRenderableTileEntities(
+		std::vector<std::shared_ptr<TileEntity>> &current,
+		std::vector<std::shared_ptr<TileEntity>> &global,
+		const std::vector<std::shared_ptr<TileEntity>> &discovered);
 
 	float distanceToSqr(Entity &player);
 	float squishedDistanceToSqr(Entity &player);

@@ -9,6 +9,7 @@ public:
 	int_t windowId;  // Note: Java uses int but reads/writes as byte
 	
 	Packet101CloseWindow();
+	explicit Packet101CloseWindow(int_t windowId);
 	
 	void readPacketData(SocketInputStream& in) override;
 	void writePacketData(SocketOutputStream& out) override;

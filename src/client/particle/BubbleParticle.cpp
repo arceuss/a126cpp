@@ -35,7 +35,7 @@ void BubbleParticle::tick()
 	zd *= 0.85f;
 	
 	// Beta: Remove if not in water (BubbleParticle.java:32-34)
-	const Material &mat = level.getMaterial(Mth::floor(x), Mth::floor(y), Mth::floor(z));
+	const Material &mat = level->getMaterial(Mth::floor(x), Mth::floor(y), Mth::floor(z));
 	const Material &waterMat = Material::water;  // Cast LiquidMaterial to Material& for comparison
 	if (&mat != &waterMat)
 	{

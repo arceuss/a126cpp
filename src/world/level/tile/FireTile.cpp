@@ -1,4 +1,5 @@
 #include "world/level/tile/FireTile.h"
+#include "world/level/tile/HellStoneTile.h"
 #include "world/level/Level.h"
 #include "world/level/LevelSource.h"
 #include "world/level/material/Material.h"
@@ -81,11 +82,8 @@ int_t FireTile::getTickDelay()
 
 void FireTile::tick(Level &level, int_t x, int_t y, int_t z, Random &random)
 {
-	// Beta: FireTile.tick() - complex fire spread logic (FireTile.java:73-115)
-	// Check if on hellRock (netherrack) - fire burns forever on hellRock
-	// TODO: Check hellRock ID when it's ported (ID 87 in Beta 1.2, bloodStone in Alpha 1.2.6)
-	bool onHellRock = false;  // Beta: var6 = var1.getTile(var2, var3 - 1, var4) == Tile.hellRock.id
-	// if (Tile::hellRock exists) onHellRock = level.getTile(x, y - 1, z) == Tile::hellRock.id;
+	// Alpha permanent-fire check: BlockFire.java:58-75.
+	const bool onHellRock = level.getTile(x, y - 1, z) == Tile::hellRock.id;
 	int_t data = level.getData(x, y, z);  // Beta: var7 = var1.getData(var2, var3, var4)
 	
 	// Increment fire age

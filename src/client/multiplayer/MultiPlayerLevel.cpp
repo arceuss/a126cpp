@@ -458,16 +458,10 @@ void MultiPlayerLevel::disconnect()
 
 void MultiPlayerLevel::markInvalid()
 {
-	// Mark as invalid without sending disconnect packet
-	// Used when switching dimensions - the connection should stay open
+	// Dimension replacement only retires the old client view. Beta installs the
+	// new MultiplayerLevel without sending Packet255; sending "Quitting" here
+	// makes the server close the socket and the client reports EndOfStream.
 	isValid = false;
-	if (connection != nullptr && !connection->isDisconnected())
-	{
-		// Queue Packet255 - matches Alpha 1.2.6 exactly
-		// Java: this.sendQueue.func_28117_a(new Packet255KickDisconnect("Quitting"));
-		// func_28117_a queues the packet AND wakes the writer thread
-		connection->func_28117_a(new Packet255KickDisconnect(u"Quitting"));
-	}
 }
 
 void MultiPlayerLevel::setChunkData(int_t x, int_t y, int_t z, int_t xSize, int_t ySize, int_t zSize, const byte_t* data)

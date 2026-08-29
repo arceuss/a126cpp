@@ -40,6 +40,10 @@ public:
 	void setPos(float x, float y, float z);
 
 	void render(float scale);
+	// Same model geometry as render(), but emitted directly.  Intended for an
+	// enclosing display-list compilation where nesting Cube lists would retain
+	// thousands of driver-side list dispatches.
+	void renderImmediate(float scale);
 	void translateTo(float scale);
 	void compile(float scale);
 };

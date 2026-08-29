@@ -102,13 +102,9 @@ protected:
 	void reallyDrop(std::shared_ptr<EntityItem> itemEntity);  // Beta: reallyDrop(ItemEntity var1) - adds entity to level (Player.java:270-272)
 	
 public:
-	// Beta: Player die() override (Player.java:199-217)
-	// Note: Mob::die() is not virtual, so this shadows it (same behavior as Beta 1.2)
-	void die(Entity *source);  // Beta: die(Entity var1) - drops inventory and changes size (Player.java:199-217)
-
-	// Beta: Player.remove() - container cleanup (Player.java:420-425)
-	// Note: Entity::remove() is not virtual, so this shadows it (same behavior as Beta 1.2)
-	void remove();  // Beta: remove() - cleans up containers and calls super.remove()
+	// Alpha EntityPlayer overrides EntityLiving.onDeath and Entity.setEntityDead.
+	void die(Entity *source) override;
+	void remove() override;
 
 	// Beta: Player helper methods (Player.java:220-232)
 	void awardKillScore(Entity &source, int_t dmg) override;  // Beta: awardKillScore(Entity var1, int var2) - adds to score (Player.java:220-222)

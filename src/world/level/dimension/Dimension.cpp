@@ -13,14 +13,17 @@
 
 Dimension::Dimension(Level &level) : level(level)
 {
-	biomeSource = Util::make_unique<BiomeSource>(level);
 
-	updateLightRamp();
 }
 
+// Alpha: WorldProvider.registerWorld() runs the two overridable setup steps
+// after the provider exists, so a subclass sees its own overrides
+// (WorldProvider.java:28-32). Calling them from the constructor would bind the
+// base versions and leave the nether with the overworld light ramp.
 void Dimension::initLevel()
 {
-
+	init();
+	updateLightRamp();
 }
 
 void Dimension::updateLightRamp()
@@ -33,9 +36,10 @@ void Dimension::updateLightRamp()
 	}
 }
 
+// Alpha: WorldProvider.registerWorldChunkManager() (WorldProvider.java:42-44)
 void Dimension::init()
 {
-
+	biomeSource = Util::make_unique<BiomeSource>(level);
 }
 
 ChunkSource *Dimension::createRandomLevelSource()
@@ -118,9 +122,14 @@ bool Dimension::mayRespawn()
 
 Dimension *Dimension::getNew(Level &level, int_t id)
 {
+	Dimension *dimension = nullptr;
 	if (id == 0)
-		return new Dimension(level);
-	if (id == -1)
-		return new HellDimension(level);
-	return nullptr;
+		dimension = new Dimension(level);
+	else if (id == -1)
+		dimension = new HellDimension(level);
+
+	if (dimension != nullptr)
+		dimension->initLevel();
+
+	return dimension;
 }

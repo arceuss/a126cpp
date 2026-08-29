@@ -1,4 +1,6 @@
 #include "world/item/ItemHoe.h"
+
+#include <memory>
 #include "world/item/ItemStack.h"
 #include "world/entity/player/Player.h"
 #include "world/level/Level.h"
@@ -16,16 +18,9 @@
 // Alpha: ItemHoe(int var1, int var2) (ItemHoe.java:4-8)
 ItemHoe::ItemHoe(int_t id, int_t tier) : Item(id), tier(tier)
 {
-	// Beta: this.maxStackSize = 1 (HoeItem.java:12)
-	setMaxStackSize(1);
-	// Alpha: this.maxDamage = 32 << var2 (ItemHoe.java:7)
-	// Beta: this.maxDamage = var2.getUses() (HoeItem.java:13)
-	// Alpha durability calculation: 32 << tier
-	// For diamond (tier 3): (32 << 3) * 4 = 1024
-	if (tier == 3)
-		setMaxDamage((32 << 3) * 4);  // Diamond gets 4x multiplier
-	else
-		setMaxDamage(32 << tier);
+	// Direct Alpha transliteration: ItemHoe.java:16-20.
+	maxStackSize = 1;
+	maxDamage = 32 << tier;
 }
 
 // Beta: useOn() - tills dirt/grass into farmland (HoeItem.java:17-54)
@@ -41,41 +36,42 @@ bool ItemHoe::useOn(ItemStack &stack, Player &player, Level &level, int_t x, int
 	if ((materialAbove.isSolid() || tileId != Tile::grass.id) && tileId != Tile::dirt.id)
 		return false;
 	
-	// Beta: Play sound (HoeItem.java:24-31)
 	Tile &farmland = Tile::farmland;
-	level.playSound(
-		(double)x + 0.5,
-		(double)y + 0.5,
-		(double)z + 0.5,
-		farmland.getSoundType()->getStepSound(),
-		(farmland.getSoundType()->getVolume() + 1.0f) / 2.0f,
-		farmland.getSoundType()->getPitch() * 0.8f
-	);
-	
-	// Beta: If online, just return true (HoeItem.java:32-34)
+	// Alpha returns before sound, block mutation, durability and RNG on a
+	// multiplayer world (ItemHoe.java:29-32).
 	if (level.isOnline)
 		return true;
-	
-	// Beta: Set tile to farmland (HoeItem.java:35)
+
+	level.playSound(
+		static_cast<double>(x) + 0.5,
+		static_cast<double>(y) + 0.5,
+		static_cast<double>(z) + 0.5,
+		farmland.getSoundType()->getStepSound(),
+		(farmland.getSoundType()->getVolume() + 1.0f) / 2.0f,
+		farmland.getSoundType()->getPitch() * 0.8f);
 	level.setTile(x, y, z, farmland.id);
-	
-	// Beta: Damage item by 1 (HoeItem.java:36)
 	stack.damageItem(1);
-	
-	// Beta: 1/8 chance to drop seeds when tilling grass (HoeItem.java:37-49)
+
 	if (level.random.nextInt(8) == 0 && tileId == Tile::grass.id)
 	{
-		// Beta: Spawn 1 seed (HoeItem.java:38-48)
-		float spread = 0.7f;
-		float offsetX = level.random.nextFloat() * spread + (1.0f - spread) * 0.5f;
-		float offsetY = 1.2f;
-		float offsetZ = level.random.nextFloat() * spread + (1.0f - spread) * 0.5f;
-		
-		// TODO: Create ItemStack and EntityItem for seeds
-		// For now, this is a placeholder - need Items::seeds to be available
-		// ItemStack seedStack(Items::seeds->getShiftedIndex(), 1);
-		// auto seedEntity = std::make_shared<EntityItem>(level, (double)x + offsetX, (double)y + offsetY, (double)z + offsetZ, seedStack);
-		// level.addEntity(seedEntity);
+		// ItemHoe.java:37-46 has a literal one-iteration loop.
+		const int_t count = 1;
+		for (int_t i = 0; i < count; ++i)
+		{
+			const float spread = 0.7f;
+			const float offsetX = level.random.nextFloat() * spread
+				+ (1.0f - spread) * 0.5f;
+			const float offsetY = 1.2f;
+			const float offsetZ = level.random.nextFloat() * spread
+				+ (1.0f - spread) * 0.5f;
+			ItemStack seeds(Items::seeds->getShiftedIndex(), 1);
+			std::shared_ptr<EntityItem> item = std::make_shared<EntityItem>(
+				level, static_cast<double>(x) + offsetX,
+				static_cast<double>(y) + offsetY,
+				static_cast<double>(z) + offsetZ, seeds);
+			item->throwTime = 10;
+			level.addEntity(item);
+		}
 	}
 	
 	return true;

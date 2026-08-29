@@ -11,22 +11,30 @@ Tesselator Tesselator::instance(MAX_FLOATS);
 
 Tesselator::Tesselator(int_t size)
 {
-	lwjgl::GLContext::instantiate();
-
-	// Initialize buffer
+	// The global Tesselator exists in the headless test executable too. Keep
+	// CPU-side buffer construction independent of SDL/OpenGL and initialise
+	// graphics state only when a batch is actually submitted.
 	this->size = size;
 
 	buffer = Util::make_unique<char[]>(size * 4);
 	buffer_p = buffer.get();
 	buffer_e = buffer.get() + (size * 4);
+}
 
-	// Setup VBO - automatically enable if hardware supports it
-	vboMode = lwjgl::GLContext::getCapabilities()["GL_ARB_vertex_buffer_object"];
+void Tesselator::ensureGraphicsReady()
+{
+	if (graphicsReady)
+		return;
+
+	lwjgl::GLContext::instantiate();
+	// Alpha 1.2.6 hard-codes Tessellator.tryVBO to false.
+	vboMode = false;
 	if (vboMode)
 	{
 		vboIds = Util::make_unique<GLuint[]>(vboCounts);
 		glGenBuffersARB(vboCounts, vboIds.get());
 	}
+	graphicsReady = true;
 }
 
 Tesselator Tesselator::getUniqueInstance(int_t size)
@@ -42,6 +50,7 @@ void Tesselator::end()
 
 	if (vertices > 0)
 	{
+		ensureGraphicsReady();
 		// Bind VBO
 		if (vboMode)
 		{

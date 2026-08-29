@@ -9,16 +9,15 @@
 #include "java/BufferedImage.h"
 #include "OpenGL.h"
 
-Font::Font(Options &options, const jstring &name, Textures &textures)
+// Alpha: FontRenderer.init - the last column with a used pixel defines the
+// advance; the space glyph is fixed at two columns (FontRenderer.java:62-89).
+std::array<int_t, 256> Font::computeCharWidths(const BufferedImage &image)
 {
-	std::unique_ptr<std::istream> is(Resource::getResource(name));
-	BufferedImage img = BufferedImage::ImageIO_read(*is);
+	std::array<int_t, 256> widths;
 
-	int_t w = img.getWidth();
-	int_t h = img.getHeight();
-	const unsigned char *rawPixels = img.getRawPixels();
+	int_t w = image.getWidth();
+	const unsigned char *rawPixels = image.getRawPixels();
 
-	// Determine character widths
 	for (int_t i = 0; i < 256; i++)
 	{
 		int_t xt = i % 16;
@@ -32,8 +31,9 @@ Font::Font(Options &options, const jstring &name, Textures &textures)
 			for (int_t y = 0; y < 8 && emptyColumn; y++)
 			{
 				int_t yPixel = (yt * 8 + y) * w;
-				int_t pixel = rawPixels[(xPixel + yPixel) * 4 + 3] & 0xFF;
-				if (pixel > 0)
+				int_t alpha = rawPixels[(xPixel + yPixel) * 4 + 3] & 0xFF;
+				// Alpha treats a pixel as used above an alpha of 16.
+				if (alpha > 16)
 					emptyColumn = false;
 			}
 			if (!emptyColumn)
@@ -41,12 +41,50 @@ Font::Font(Options &options, const jstring &name, Textures &textures)
 		}
 
 		if (i == 32) x = 2;
-		charWidths[i] = x + 2;
+		widths[i] = x + 2;
 	}
+
+	return widths;
+}
+
+// Alpha: FontRenderer.getStringWidth. A complete colour code consumes its next
+// character and adds no width; a dangling section sign contributes -1 through
+// getCharWidthFloat (FontRenderer.java:252-266,273-293).
+int_t Font::widthOf(const std::array<int_t, 256> &charWidths, const jstring &str)
+{
+	int_t len = 0;
+
+	for (int_t i = 0; i < static_cast<int_t>(str.length()); i++)
+	{
+		char_t c = str[i];
+		if (c == 167)
+		{
+			if (i + 1 < static_cast<int_t>(str.length()))
+				i++;
+			else
+				len--;
+		}
+		else
+		{
+			int_t ch = SharedConstants::letterIndex(c);
+			if (ch >= 0)
+				len += charWidths.at(ch + 32);
+		}
+	}
+
+	return len;
+}
+
+Font::Font(Options &options, const jstring &name, Textures &textures)
+{
+	std::unique_ptr<std::istream> is(Resource::getResource(name));
+	BufferedImage img = BufferedImage::ImageIO_read(*is);
+
+	charWidths = computeCharWidths(img);
 
 	fontTexture = textures.getTexture(img);
 
-	listPos = MemoryTracker::genLists(256 + 32);
+	listPos = MemoryTracker::genLists(256);
 	Tesselator &t = Tesselator::instance;
 	for (int_t j = 0; j < 256; j++)
 	{
@@ -101,20 +139,10 @@ Font::Font(Options &options, const jstring &name, Textures &textures)
 			b /= 4;
 		}
 
-		// Alpha 1.2.6: Color code display lists store RGB colors
-		// Java: this.field_22009_h[var7] = (var9 & 255) << 16 | (var10 & 255) << 8 | var11 & 255;
-		// The alpha is preserved from the original color parameter (this.alpha)
-		glNewList(listPos + 256 + j, GL_COMPILE);
-		glColor3f(r / 255.0f, g / 255.0f, b / 255.0f);  // RGB only, alpha preserved from glColor4f call
-		glEndList();
-		
-		// Store color code values for optimized sign rendering (only for non-darkened codes, j < 16)
-		if (j < 16)
-		{
-			colorCodeR[j] = r / 255.0f;
-			colorCodeG[j] = g / 255.0f;
-			colorCodeB[j] = b / 255.0f;
-		}
+		// Alpha stores the code colors and applies them with glColor4f
+		// (FontRenderer.java:112, 206-208), so the port keeps the packed value
+		// instead of querying the current GL color back on every code.
+		colorCodeRGB[j] = (r & 0xFF) << 16 | (g & 0xFF) << 8 | (b & 0xFF);
 	}
 }
 
@@ -217,29 +245,19 @@ void Font::draw(const jstring &str, int_t x, int_t y, int_t color, bool darken)
 			if (codeIndex == jstring::npos || codeIndex > 15)
 				codeIndex = 15;
 			
-			// Set color using display list (color codes are in listPos + 256 + codeIndex)
-			// For shadow, add 16 to get darker version
-			// Java: if(var2) { var5 += 16; }
-			// Java: int var7 = this.field_22009_h[var5];
-			//       GL11.glColor4f((float)(var7 >> 16) / 255.0F, (float)(var7 >> 8 & 255) / 255.0F, (float)(var7 & 255) / 255.0F, this.alpha);
-			// Java explicitly sets alpha when processing color codes, preserving this.alpha from the original color.
-			// Our display list calls glColor3f (RGB only), which preserves the current alpha.
-			// Since we already set glColor4f with alpha at the start, glColor3f will preserve it.
-			// However, to ensure alpha is correct (especially for chat fading), we restore it explicitly.
-			int_t colorListIndex = listPos + 256 + codeIndex + (darken ? 16 : 0);
-			glCallList(colorListIndex);  // This calls glColor3f, setting RGB but preserving alpha
-			// Restore alpha explicitly to ensure it's correct for fading
-			// Get current RGB from OpenGL state, then restore alpha
-			GLfloat currentColor[4];
-			glGetFloatv(GL_CURRENT_COLOR, currentColor);
-			glColor4f(currentColor[0], currentColor[1], currentColor[2], alpha);
+			// Alpha: int var7 = this.field_22009_h[var5];
+			//        GL11.glColor4f(var7 >> 16, var7 >> 8 & 255, var7 & 255, this.alpha)
+			//        (FontRenderer.java:204-208). The shadow pass uses the
+			//        darkened half of the table.
+			int_t rgb = colorCodeRGB[codeIndex + (darken ? 16 : 0)];
+			glColor4f(((rgb >> 16) & 0xFF) / 255.0f, ((rgb >> 8) & 0xFF) / 255.0f, (rgb & 0xFF) / 255.0f, alpha);
 			
 			i++;  // Skip the color code character
 		}
 		else
 		{
-			int_t chIndex = SharedConstants::acceptableLetters.find(ch);
-			if (chIndex != jstring::npos)
+			int_t chIndex = SharedConstants::letterIndex(ch);
+			if (chIndex >= 0)
 				ib.push_back(listPos + chIndex + 32);
 		}
 	}
@@ -250,28 +268,173 @@ void Font::draw(const jstring &str, int_t x, int_t y, int_t color, bool darken)
 	glPopMatrix();
 }
 
-int_t Font::width(const jstring &str)
+void Font::drawLinesBatched(const jstring *lines, const int_t *xs, const int_t *ys, int_t lineCount, int_t color)
 {
-	int_t len = 0;
+	// Colour handling is the same sequence `draw` uses.
+	if ((color & 0xFF000000) == 0 && color != 0)
+		color |= 0xFF000000;
 
-	for (int_t i = 0; i < str.length(); i++)
+	float alpha = ((color >> 24) & 0xFF) / 255.0f;
+	if (alpha == 0.0f)
+		alpha = 1.0f;
+
+	float baseR = ((color >> 16) & 0xFF) / 255.0f;
+	float baseG = ((color >> 8) & 0xFF) / 255.0f;
+	float baseB = (color & 0xFF) / 255.0f;
+
+	glBindTexture(GL_TEXTURE_2D, fontTexture);
+
+	Tesselator &t = Tesselator::instance;
+	t.begin();
+
+	static const jstring colorCodes = u"0123456789abcdef";
+	const float s = 7.99f;
+
+	for (int_t line = 0; line < lineCount; line++)
 	{
-		char_t c = str[i];
-		// Alpha 1.2.6: Skip color codes (167 = 0xA7 = §)
-		// Java: if(var4 == 167 && var3 + 1 < var1.length()) { ++var3; }
-		if (c == 167 && i + 1 < str.length())
+		const jstring &str = lines[line];
+		if (str.empty())
+			continue;
+
+		float r = baseR;
+		float g = baseG;
+		float b = baseB;
+		float x = static_cast<float>(xs[line]);
+		float y = static_cast<float>(ys[line]);
+
+		for (int_t i = 0; i < static_cast<int_t>(str.length()); i++)
 		{
-			i++;  // Skip the color code character
-		}
-		else
-		{
-			int_t ch = SharedConstants::acceptableLetters.find(c);
-			if (ch != jstring::npos)
-				len += charWidths.at(ch + 32);
+			char_t ch = str[i];
+			if (ch == 167 && i + 1 < static_cast<int_t>(str.length()))
+			{
+				char_t codeChar = str[i + 1];
+				char_t lowerCode = codeChar;
+				if (codeChar >= u'A' && codeChar <= u'F')
+					lowerCode = codeChar + (u'a' - u'A');
+
+				size_t codeIndex = colorCodes.find(static_cast<char16_t>(lowerCode));
+				if (codeIndex == jstring::npos || codeIndex > 15)
+					codeIndex = 15;
+
+				// Same table the colour-code display lists are built from.
+				int_t rgb = colorCodeRGB[codeIndex];
+				r = ((rgb >> 16) & 0xFF) / 255.0f;
+				g = ((rgb >> 8) & 0xFF) / 255.0f;
+				b = (rgb & 0xFF) / 255.0f;
+
+				i++;
+				continue;
+			}
+
+			int_t chIndex = SharedConstants::letterIndex(ch);
+			if (chIndex < 0)
+				continue;
+
+			int_t code = chIndex + 32;
+			float ix = static_cast<float>(code % 16 * 8);
+			float iy = static_cast<float>(code / 16 * 8);
+
+			// Identical quad to the compiled glyph list above.
+			t.color(r, g, b, alpha);
+			t.vertexUV(x, y + s, 0.0, ix / 128.0f, (iy + s) / 128.0f);
+			t.vertexUV(x + s, y + s, 0.0, (ix + s) / 128.0f, (iy + s) / 128.0f);
+			t.vertexUV(x + s, y, 0.0, (ix + s) / 128.0f, iy / 128.0f);
+			t.vertexUV(x, y, 0.0, ix / 128.0f, iy / 128.0f);
+
+			x += static_cast<float>(charWidths[code]);
 		}
 	}
 
-	return len;
+	t.end();
+}
+
+void Font::drawLinesImmediate(const jstring *lines, const int_t *xs, const int_t *ys, int_t lineCount, int_t color)
+{
+	// Keep this in lock-step with drawLinesBatched.  The only difference is
+	// submission: these commands are intended to be captured by a static sign
+	// display list instead of rebuilt into a GL_STREAM_DRAW buffer every frame.
+	if ((color & 0xFF000000) == 0 && color != 0)
+		color |= 0xFF000000;
+
+	float alpha = ((color >> 24) & 0xFF) / 255.0f;
+	if (alpha == 0.0f)
+		alpha = 1.0f;
+
+	float baseR = ((color >> 16) & 0xFF) / 255.0f;
+	float baseG = ((color >> 8) & 0xFF) / 255.0f;
+	float baseB = (color & 0xFF) / 255.0f;
+
+	glBindTexture(GL_TEXTURE_2D, fontTexture);
+
+	static const jstring colorCodes = u"0123456789abcdef";
+	const float s = 7.99f;
+
+	glBegin(GL_TRIANGLES);
+	for (int_t line = 0; line < lineCount; line++)
+	{
+		const jstring &str = lines[line];
+		if (str.empty())
+			continue;
+
+		float r = baseR;
+		float g = baseG;
+		float b = baseB;
+		float x = static_cast<float>(xs[line]);
+		float y = static_cast<float>(ys[line]);
+
+		for (int_t i = 0; i < static_cast<int_t>(str.length()); i++)
+		{
+			char_t ch = str[i];
+			if (ch == 167 && i + 1 < static_cast<int_t>(str.length()))
+			{
+				char_t codeChar = str[i + 1];
+				char_t lowerCode = codeChar;
+				if (codeChar >= u'A' && codeChar <= u'F')
+					lowerCode = codeChar + (u'a' - u'A');
+
+				size_t codeIndex = colorCodes.find(static_cast<char16_t>(lowerCode));
+				if (codeIndex == jstring::npos || codeIndex > 15)
+					codeIndex = 15;
+
+				int_t rgb = colorCodeRGB[codeIndex];
+				r = ((rgb >> 16) & 0xFF) / 255.0f;
+				g = ((rgb >> 8) & 0xFF) / 255.0f;
+				b = (rgb & 0xFF) / 255.0f;
+				i++;
+				continue;
+			}
+
+			int_t chIndex = SharedConstants::letterIndex(ch);
+			if (chIndex < 0)
+				continue;
+
+			int_t code = chIndex + 32;
+			float ix = static_cast<float>(code % 16 * 8);
+			float iy = static_cast<float>(code / 16 * 8);
+			float u0 = ix / 128.0f;
+			float v0 = iy / 128.0f;
+			float u1 = (ix + s) / 128.0f;
+			float v1 = (iy + s) / 128.0f;
+
+			glColor4f(r, g, b, alpha);
+			// Same A,B,C,A,C,D triangle order produced by Tesselator when its
+			// GL_QUADS compatibility path expands one glyph quad.
+			glTexCoord2f(u0, v1); glVertex3f(x, y + s, 0.0f);
+			glTexCoord2f(u1, v1); glVertex3f(x + s, y + s, 0.0f);
+			glTexCoord2f(u1, v0); glVertex3f(x + s, y, 0.0f);
+			glTexCoord2f(u0, v1); glVertex3f(x, y + s, 0.0f);
+			glTexCoord2f(u1, v0); glVertex3f(x + s, y, 0.0f);
+			glTexCoord2f(u0, v0); glVertex3f(x, y, 0.0f);
+
+			x += static_cast<float>(charWidths[code]);
+		}
+	}
+	glEnd();
+}
+
+int_t Font::width(const jstring &str)
+{
+	return widthOf(charWidths, str);
 }
 
 jstring Font::trimStringToWidth(const jstring &str, int_t width, bool reverse)
@@ -298,8 +461,8 @@ jstring Font::trimStringToWidth(const jstring &str, int_t width, bool reverse)
 			}
 			else
 			{
-				int_t ch = SharedConstants::acceptableLetters.find(c);
-				if (ch != jstring::npos)
+				int_t ch = SharedConstants::letterIndex(c);
+				if (ch >= 0)
 					charWidth = charWidths.at(ch + 32);
 			}
 			if (len + charWidth > width)
@@ -331,8 +494,8 @@ jstring Font::trimStringToWidth(const jstring &str, int_t width, bool reverse)
 			}
 			else
 			{
-				int_t ch = SharedConstants::acceptableLetters.find(c);
-				if (ch != jstring::npos)
+				int_t ch = SharedConstants::letterIndex(c);
+				if (ch >= 0)
 					charWidth = charWidths.at(ch + 32);
 			}
 			if (len + charWidth > width)
@@ -353,115 +516,10 @@ jstring Font::sanitize(const jstring &str)
 		char_t c = str[i];
 		if (c == 223)
 			i++;
-		else if (SharedConstants::acceptableLetters.find(c) != jstring::npos)
+		else if (SharedConstants::letterIndex(c) >= 0)
 			result.push_back(c);
 	}
 
 	return result;
 }
 
-// Optimized batch rendering for signs - renders all text in a single draw call
-// This significantly improves performance by batching all characters together
-void Font::drawSignTextBatched(const jstring lines[4], int_t xOffsets[4], int_t yOffsets[4], int_t baseColor)
-{
-	// Parse base color (same logic as draw())
-	int_t color = baseColor;
-	if ((color & 0xFF000000) == 0 && color != 0)
-	{
-		color |= 0xFF000000;
-	}
-	float alpha = ((color >> 24) & 0xFF) / 255.0f;
-	if (alpha == 0.0f)
-	{
-		alpha = 1.0f;
-	}
-	
-	float baseR = ((color >> 16) & 0xFF) / 255.0f;
-	float baseG = ((color >> 8) & 0xFF) / 255.0f;
-	float baseB = (color & 0xFF) / 255.0f;
-	
-	// Use pre-calculated color code RGB values (includes anaglyph3d transformation if enabled)
-	static const jstring colorCodes = u"0123456789abcdef";
-	
-	// Bind font texture
-	glBindTexture(GL_TEXTURE_2D, fontTexture);
-	
-	// Use Tesselator to batch all quads
-	Tesselator &t = Tesselator::instance;
-	t.begin();
-	
-	// Process each line
-	for (int_t lineIdx = 0; lineIdx < 4; lineIdx++)
-	{
-		const jstring &str = lines[lineIdx];
-		if (str.empty())
-			continue;
-		
-		float currentR = baseR;
-		float currentG = baseG;
-		float currentB = baseB;
-		float x = static_cast<float>(xOffsets[lineIdx]);
-		float y = static_cast<float>(yOffsets[lineIdx]);
-		
-		// Parse string and render characters
-		for (int_t i = 0; i < str.length(); i++)
-		{
-			char_t ch = str[i];
-			if (ch == 167 && i + 1 < str.length())  // Color code (167 = 0xA7 = §)
-			{
-				char_t codeChar = str[i + 1];
-				char_t lowerCode = codeChar;
-				if (codeChar >= u'A' && codeChar <= u'F')
-					lowerCode = codeChar + (u'a' - u'A');
-				else if (codeChar >= u'a' && codeChar <= u'f')
-					lowerCode = codeChar;
-				else if (codeChar >= u'0' && codeChar <= u'9')
-					lowerCode = codeChar;
-				
-				int_t codeIndex = colorCodes.find(lowerCode);
-				if (codeIndex == jstring::npos || codeIndex > 15)
-					codeIndex = 15;
-				
-				// Update current color using pre-calculated values
-				currentR = colorCodeR[codeIndex];
-				currentG = colorCodeG[codeIndex];
-				currentB = colorCodeB[codeIndex];
-				
-				i++;  // Skip the color code character
-			}
-			else
-			{
-				// Find character index
-				int_t chIndex = SharedConstants::acceptableLetters.find(ch);
-				if (chIndex != jstring::npos)
-				{
-					// Calculate texture coordinates
-					int_t charCode = chIndex + 32;
-					int_t ix = charCode % 16 * 8;
-					int_t iy = charCode / 16 * 8;
-					
-					float s = 7.99f;
-					float u0 = ix / 128.0f;
-					float u1 = (ix + s) / 128.0f;
-					float v0 = iy / 128.0f;
-					float v1 = (iy + s) / 128.0f;
-					
-					// Set color for this character
-					t.color(currentR, currentG, currentB, alpha);
-					
-					// Render character quad
-					t.vertexUV(x, y + s, 0.0, u0, v1);
-					t.vertexUV(x + s, y + s, 0.0, u1, v1);
-					t.vertexUV(x + s, y, 0.0, u1, v0);
-					t.vertexUV(x, y, 0.0, u0, v0);
-					
-					// Advance x position
-					x += static_cast<float>(charWidths[charCode]);
-				}
-			}
-		}
-	}
-	
-	// Render all batched quads in one draw call
-	t.end();
-}

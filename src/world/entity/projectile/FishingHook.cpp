@@ -20,16 +20,6 @@
 #define M_PI  3.14159265358979323846
 #endif
 
-// Simple Gaussian approximation using Box-Muller transform
-static float nextGaussian(Random &random)
-{
-	// Box-Muller transform
-	float u1 = random.nextFloat();
-	float u2 = random.nextFloat();
-	if (u1 == 0.0f) u1 = 0.0001f; // Avoid log(0)
-	return sqrt(-2.0f * log(u1)) * cos(2.0f * M_PI * u2);
-}
-
 // Beta: FishingHook(Level var1) (FishingHook.java:39-42)
 FishingHook::FishingHook(Level &level) : Entity(level)
 {
@@ -74,9 +64,10 @@ void FishingHook::shoot(double var1, double var3, double var5, float var7, float
 	var1 /= var9;
 	var3 /= var9;
 	var5 /= var9;
-	var1 += nextGaussian(random) * 0.0075f * var8;
-	var3 += nextGaussian(random) * 0.0075f * var8;
-	var5 += nextGaussian(random) * 0.0075f * var8;
+	// EntityFish.java:86-88: 0.0075f widens to double, so keep the float literal.
+	var1 += random.nextGaussian() * 0.0075f * var8;
+	var3 += random.nextGaussian() * 0.0075f * var8;
+	var5 += random.nextGaussian() * 0.0075f * var8;
 	var1 *= var7;
 	var3 *= var7;
 	var5 *= var7;
@@ -142,7 +133,7 @@ void FishingHook::tick()
 		
 		// In multiplayer, only interpolate - don't run physics (server handles it)
 		// When lSteps reaches 0, we wait for next server update via lerpTo
-		if (level.isOnline)
+		if (level->isOnline)
 		{
 			return;
 		}
@@ -151,13 +142,13 @@ void FishingHook::tick()
 	{
 		// Beta: In multiplayer, when lSteps == 0, don't run physics (server handles it)
 		// Client only interpolates based on server updates
-		if (level.isOnline)
+		if (level->isOnline)
 		{
 			return;
 		}
 		
 		// Beta: Validate player and fishing rod in single-player (FishingHook.java:141-147)
-		if (!level.isOnline)
+		if (!level->isOnline)
 		{
 			ItemStack *var1 = owner->getSelectedItem();
 			if (owner->removed || !owner->isAlive() || var1 == nullptr || var1->getItem() != Items::fishingRod || distanceToSqr(*owner) > 1024.0)
@@ -191,7 +182,7 @@ void FishingHook::tick()
 		// Beta: Handle in-ground state (FishingHook.java:165-182)
 		if (inGround)
 		{
-			int_t var19 = level.getTile(xTile, yTile, zTile);
+			int_t var19 = level->getTile(xTile, yTile, zTile);
 			if (var19 == lastTile)
 			{
 				life++;
@@ -218,7 +209,7 @@ void FishingHook::tick()
 		// Beta: Collision detection (FishingHook.java:186-227)
 		Vec3 *var20 = Vec3::newTemp(x, y, z);
 		Vec3 *var2 = Vec3::newTemp(x + xd, y + yd, z + zd);
-		HitResult var3 = level.clip(*var20, *var2);
+		HitResult var3 = level->clip(*var20, *var2);
 		var20 = Vec3::newTemp(x, y, z);
 		var2 = Vec3::newTemp(x + xd, y + yd, z + zd);
 		if (var3.type != HitResult::Type::NONE)
@@ -228,7 +219,7 @@ void FishingHook::tick()
 
 		Entity *var4 = nullptr;
 		AABB *expanded = bb.expand(xd, yd, zd)->grow(1.0, 1.0, 1.0);
-		std::vector<std::shared_ptr<Entity>> var5 = level.getEntities(this, *expanded);
+		std::vector<std::shared_ptr<Entity>> var5 = level->getEntities(this, *expanded);
 		double var6 = 0.0;
 
 		for (size_t var8 = 0; var8 < var5.size(); var8++)
@@ -319,7 +310,7 @@ void FishingHook::tick()
 				// Beta: containsLiquid check - check for water material (FishingHook.java:265)
 				// TODO: Add Level::containsLiquid(AABB, Material) helper if needed
 				// For now, use simple water material check
-				if (level.containsAnyLiquid(*var18))
+				if (level->containsAnyLiquid(*var18))
 				{
 					// Additional check to ensure it's water specifically
 					int_t x0 = Mth::floor(var18->x0);
@@ -336,10 +327,10 @@ void FishingHook::tick()
 						{
 							for (int_t zz = z0; zz < z1 && !inWater; zz++)
 							{
-								const Material &mat = level.getMaterial(xx, yy, zz);  // Beta: Use getMaterial() like FarmTile
+								const Material &mat = level->getMaterial(xx, yy, zz);  // Beta: Use getMaterial() like FarmTile
 								if (mat == Material::water)
 								{
-									int_t data = level.getData(xx, yy, zz);
+									int_t data = level->getData(xx, yy, zz);
 									double waterLevel = yy + 1;
 									if (data < 8)
 									{
@@ -372,21 +363,21 @@ void FishingHook::tick()
 				{
 					nibble = random.nextInt(30) + 10;
 					yd -= 0.2f;
-					level.playSound(this, u"random.splash", 0.25f, 1.0f + (random.nextFloat() - random.nextFloat()) * 0.4f);
+					level->playSound(this, u"random.splash", 0.25f, 1.0f + (random.nextFloat() - random.nextFloat()) * 0.4f);
 					float var31 = Mth::floor(bb.y0);
 
 					for (int_t var33 = 0; var33 < static_cast<int_t>(1.0f + bbWidth * 20.0f); var33++)
 					{
 						float var15 = (random.nextFloat() * 2.0f - 1.0f) * bbWidth;
 						float var36 = (random.nextFloat() * 2.0f - 1.0f) * bbWidth;
-						level.addParticle(u"bubble", x + var15, var31 + 1.0f, z + var36, xd, yd - random.nextFloat() * 0.2f, zd);
+						level->addParticle(u"bubble", x + var15, var31 + 1.0f, z + var36, xd, yd - random.nextFloat() * 0.2f, zd);
 					}
 
 					for (int_t var34 = 0; var34 < static_cast<int_t>(1.0f + bbWidth * 20.0f); var34++)
 					{
 						float var35 = (random.nextFloat() * 2.0f - 1.0f) * bbWidth;
 						float var37 = (random.nextFloat() * 2.0f - 1.0f) * bbWidth;
-						level.addParticle(u"splash", x + var35, var31 + 1.0f, z + var37, xd, yd, zd);
+						level->addParticle(u"splash", x + var35, var31 + 1.0f, z + var37, xd, yd, zd);
 					}
 				}
 			}
@@ -437,7 +428,7 @@ int_t FishingHook::retrieve()
 			fishId = static_cast<int_t>(Items::fishRaw->getShiftedIndex());
 		}
 		ItemStack stack(fishId, 1);
-		auto var13 = Util::make_shared<EntityItem>(level, x, y, z, stack);
+		auto var13 = Util::make_shared<EntityItem>(*level, x, y, z, stack);
 		double var3 = owner->x - x;
 		double var5 = owner->y - y;
 		double var7 = owner->z - z;
@@ -446,7 +437,7 @@ int_t FishingHook::retrieve()
 		var13->xd = var3 * var11;
 		var13->yd = var5 * var11 + Mth::sqrt(var9) * 0.08;
 		var13->zd = var7 * var11;
-		level.addEntity(var13);
+		level->addEntity(var13);
 		var1 = 1;
 	}
 

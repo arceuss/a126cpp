@@ -29,6 +29,8 @@ void ItemRenderer::render(Entity &entity, double x, double y, double z, float ro
 {
 	EntityItem &itemEntity = static_cast<EntityItem &>(entity);
 	ItemStack &item = itemEntity.item;
+	if (!itemEntity.hasValidItem())
+		return;
 	
 	random.setSeed(187L);  // Beta: this.random.setSeed(187L)
 	

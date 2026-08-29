@@ -11,6 +11,21 @@ std::map<std::type_index, int> Packet::packetClassToId;
 std::set<int> Packet::clientPacketIdList;
 std::set<int> Packet::serverPacketIdList;
 
+struct PacketCounterState
+{
+	int_t totalPackets = 0;
+	long_t totalBytes = 0;
+
+	void addPacket(int_t size)
+	{
+		++totalPackets;
+		totalBytes += static_cast<long_t>(size);
+	}
+};
+
+static std::map<int_t, PacketCounterState> packetStats;
+static int_t totalPacketsCount = 0;
+
 Packet::Packet()
 	: creationTimeMillis(System::currentTimeMillis())
 	, isChunkDataPacket(false)
@@ -44,17 +59,7 @@ void Packet::addIdClassMapping(int packetId, bool isClientPacket, bool isServerP
 
 Packet* Packet::getNewPacket(int packetId)
 {
-	// Ensure packet registry is initialized (matches Java static initializer)
-	static bool initialized = false;
-	if (!initialized)
-	{
-		// Initialize packet registry if empty (auto-initialization)
-		if (packetIdToFactory.empty())
-		{
-			initializePacketRegistry();
-		}
-		initialized = true;
-	}
+	ensurePacketRegistryInitialized();
 	
 	auto it = packetIdToFactory.find(packetId);
 	if (it == packetIdToFactory.end())
@@ -75,6 +80,7 @@ Packet* Packet::getNewPacket(int packetId)
 
 int Packet::getPacketIdForType(const std::type_info& type)
 {
+	ensurePacketRegistryInitialized();
 	std::type_index typeIdx(type);
 	auto it = packetClassToId.find(typeIdx);
 	if (it != packetClassToId.end())
@@ -85,32 +91,10 @@ int Packet::getPacketIdForType(const std::type_info& type)
 	throw std::runtime_error("Packet type not registered: " + std::string(type.name()));
 }
 
-// Register a packet type's ID mapping (called from packet class constructor or initialization)
-void registerPacketTypeId(const std::type_info& type, int packetId)
-{
-	std::type_index typeIdx(type);
-	if (Packet::packetClassToId.find(typeIdx) != Packet::packetClassToId.end())
-	{
-		throw std::invalid_argument("Duplicate packet class registration");
-	}
-	Packet::packetClassToId[typeIdx] = packetId;
-}
 
 std::unique_ptr<Packet> Packet::readPacket(SocketInputStream& in, bool isServerHandler)
 {
-	// Ensure packet registry is initialized before reading
-	// This ensures clientPacketIdList and serverPacketIdList are populated
-	static std::mutex initMutex;
-	static bool initialized = false;
-	
-	{
-		std::lock_guard<std::mutex> lock(initMutex);
-		if (!initialized || packetIdToFactory.empty())
-		{
-			initializePacketRegistry();
-			initialized = true;
-		}
-	}
+	ensurePacketRegistryInitialized();
 	
 	// Java: int var4 = var0.read();
 	int packetIdByte = in.read();
@@ -120,52 +104,35 @@ std::unique_ptr<Packet> Packet::readPacket(SocketInputStream& in, bool isServerH
 	}
 	
 	int packetId = packetIdByte & 0xFF;
-	
-	// Java: Check if packet ID is valid for handler type
-	// Note: For client handler (isServerHandler=false), we check clientPacketIdList
-	// For server handler (isServerHandler=true), we check serverPacketIdList
-	if ((isServerHandler && serverPacketIdList.find(packetId) == serverPacketIdList.end()) ||
-	    (!isServerHandler && clientPacketIdList.find(packetId) == clientPacketIdList.end()))
-	{
-		// Debug: Print registry state
-		std::cerr << "Bad packet id " << packetId << " for handler (isServerHandler=" << isServerHandler << ")" << std::endl;
-		std::cerr << "  clientPacketIdList size: " << clientPacketIdList.size() << std::endl;
-		std::cerr << "  serverPacketIdList size: " << serverPacketIdList.size() << std::endl;
-		std::cerr << "  packetIdToFactory size: " << packetIdToFactory.size() << std::endl;
-		if (packetIdToFactory.find(packetId) != packetIdToFactory.end())
-		{
-			std::cerr << "  Packet ID " << packetId << " exists in factory but not in appropriate list!" << std::endl;
-		}
+
+	// Direct Packet.java:128-133 direction and registration checks.
+	if ((isServerHandler && serverPacketIdList.find(packetId) == serverPacketIdList.end())
+		|| (!isServerHandler && clientPacketIdList.find(packetId) == clientPacketIdList.end()))
 		throw std::runtime_error("Bad packet id " + std::to_string(packetId));
-	}
-	
-	// Java: var3 = getNewPacket(var4);
-	Packet* packet = getNewPacket(packetId);
+
+	std::unique_ptr<Packet> packet(getNewPacket(packetId));
 	if (packet == nullptr)
-	{
 		throw std::runtime_error("Bad packet id " + std::to_string(packetId));
-	}
-	
-	// Java: var3.readPacketData(var0);
+
 	try
 	{
 		packet->readPacketData(in);
 	}
-	catch (const std::runtime_error& e)
+	catch (const EOFException &)
 	{
-		std::string msg = e.what();
-		if (msg.find("end of stream") != std::string::npos || 
-		    msg.find("EOF") != std::string::npos)
-		{
-			delete packet;
-			return nullptr;
-		}
-		throw;
+		// Alpha Packet.java:137-140.
+		std::cout << "Reached end of stream" << std::endl;
+		return nullptr;
 	}
-	
-	// Note: Packet stats tracking omitted for now (PacketCounter)
-	
-	return std::unique_ptr<Packet>(packet);
+
+	packetStats[packetId].addPacket(packet->getPacketSize());
+	++totalPacketsCount;
+	if (totalPacketsCount % 1000 == 0)
+	{
+		// Alpha's block is intentionally empty (Packet.java:147-149).
+	}
+
+	return packet;
 }
 
 void Packet::writePacket(Packet* packet, SocketOutputStream& out)

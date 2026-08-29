@@ -1,5 +1,36 @@
 #include "network/Packet21PickupSpawn.h"
 #include "network/NetHandler.h"
+#include "world/entity/item/EntityItem.h"
+#include <cmath>
+#include <limits>
+
+namespace
+{
+int_t javaDoubleToInt(double value)
+{
+	if (std::isnan(value))
+		return 0;
+	if (value >= static_cast<double>((std::numeric_limits<int_t>::max)()))
+		return (std::numeric_limits<int_t>::max)();
+	if (value <= static_cast<double>((std::numeric_limits<int_t>::min)()))
+		return (std::numeric_limits<int_t>::min)();
+	return static_cast<int_t>(value);
+}
+
+int_t javaFloor(double value)
+{
+	const int_t truncated = javaDoubleToInt(value);
+	if (!(value < static_cast<double>(truncated)))
+		return truncated;
+	return static_cast<int_t>(static_cast<uint_t>(truncated) - 1u);
+}
+
+byte_t narrowByte(int_t value)
+{
+	const int_t low = static_cast<int_t>(static_cast<uint_t>(value) & 0xFFu);
+	return static_cast<byte_t>(low >= 128 ? low - 256 : low);
+}
+}
 
 Packet21PickupSpawn::Packet21PickupSpawn()
 	: entityId(0)
@@ -12,6 +43,20 @@ Packet21PickupSpawn::Packet21PickupSpawn()
 	, itemId(0)
 	, count(0)
 	, itemDamage(0)
+{
+}
+
+Packet21PickupSpawn::Packet21PickupSpawn(EntityItem &entityItem)
+	: entityId(entityItem.entityId)
+	, xPosition(javaFloor(entityItem.x * 32.0))
+	, yPosition(javaFloor(entityItem.y * 32.0))
+	, zPosition(javaFloor(entityItem.z * 32.0))
+	, rotation(narrowByte(javaDoubleToInt(entityItem.xd * 128.0)))
+	, pitch(narrowByte(javaDoubleToInt(entityItem.yd * 128.0)))
+	, roll(narrowByte(javaDoubleToInt(entityItem.zd * 128.0)))
+	, itemId(entityItem.item.itemID)
+	, count(entityItem.item.stackSize)
+	, itemDamage(entityItem.item.itemDamage)
 {
 }
 
@@ -56,13 +101,13 @@ void Packet21PickupSpawn::writePacketData(SocketOutputStream& out)
 	out.writeInt(this->entityId);
 	
 	// var1.writeShort(this.itemId);
-	out.writeShort(this->itemId);
+	out.writeShort(static_cast<short_t>(this->itemId));
 	
 	// var1.writeByte(this.count);
-	out.writeByte(this->count);
+	out.writeByte(narrowByte(this->count));
 	
 	// var1.writeShort(this.itemDamage);
-	out.writeShort(this->itemDamage);
+	out.writeShort(static_cast<short_t>(this->itemDamage));
 	
 	// var1.writeInt(this.xPosition);
 	out.writeInt(this->xPosition);
@@ -91,9 +136,6 @@ void Packet21PickupSpawn::processPacket(NetHandler* handler)
 
 int Packet21PickupSpawn::getPacketSize()
 {
-	// Java: return 24;
-	// int (4) + short (2) + byte (1) + short (2) + int (4) + int (4) + int (4) + byte (1) + byte (1) + byte (1) = 26
-	// But Java says 24. The calculation might be off. Let's match Java exactly:
 	return 24;
 }
 

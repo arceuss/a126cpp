@@ -25,7 +25,7 @@ void Monster::tick()
 {
 	// Beta: Monster.tick() - removes on peaceful difficulty
 	PathfinderMob::tick();
-	if (level.difficulty == 0)
+	if (level->difficulty == 0)
 	{
 		remove();
 	}
@@ -34,7 +34,7 @@ void Monster::tick()
 std::shared_ptr<Entity> Monster::findAttackTarget()
 {
 	// Beta: Monster.findAttackTarget() - finds nearest player within 16 blocks
-	std::shared_ptr<Player> player = level.getNearestPlayer(*this, 16.0);
+	std::shared_ptr<Player> player = level->getNearestPlayer(*this, 16.0);
 	if (player != nullptr && canSee(*player))
 	{
 		return std::static_pointer_cast<Entity>(player);
@@ -69,7 +69,7 @@ void Monster::checkHurtTarget(Entity &target, float distance)
 float Monster::getWalkTargetValue(int_t x, int_t y, int_t z)
 {
 	// Beta: Monster.getWalkTargetValue() - prefers darker areas
-	return 0.5f - level.getBrightness(x, y, z);
+	return 0.5f - level->getBrightness(x, y, z);
 }
 
 bool Monster::canSpawn()
@@ -79,11 +79,11 @@ bool Monster::canSpawn()
 	int_t y = Mth::floor(bb.y0);
 	int_t z = Mth::floor(this->z);
 	
-	if (level.getBrightness(LightLayer::Sky, x, y, z) > random.nextInt(32))
+	if (level->getBrightness(LightLayer::Sky, x, y, z) > random.nextInt(32))
 	{
 		return false;
 	}
 	
-	int_t blockLight = level.getRawBrightness(x, y, z);
+	int_t blockLight = level->getRawBrightness(x, y, z);
 	return blockLight <= random.nextInt(8) && PathfinderMob::canSpawn();
 }

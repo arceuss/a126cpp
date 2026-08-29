@@ -1,5 +1,6 @@
 #include "network/Packet104WindowItems.h"
 #include "network/NetHandler.h"
+#include <stdexcept>
 
 Packet104WindowItems::Packet104WindowItems()
 	: windowId(0)
@@ -10,14 +11,15 @@ void Packet104WindowItems::readPacketData(SocketInputStream& in)
 {
 	// Java: EXACT ORDER
 	// this.windowId = var1.readByte();
-	this->windowId = static_cast<int_t>(in.read() & 0xFF);
+	this->windowId = static_cast<int_t>(in.readByte());
 	
 	// short var2 = var1.readShort();
 	short_t count = in.readShort();
 	
 	// this.itemStack = new ItemStack[var2];
-	this->itemStack.clear();
-	this->itemStack.reserve(count);
+	if (count < 0)
+		throw std::runtime_error("NegativeArraySizeException");
+	this->itemStack.assign(static_cast<size_t>(count), nullptr);
 	
 	// for(int var3 = 0; var3 < var2; ++var3) {
 	for (int_t i = 0; i < count; ++i)
@@ -35,13 +37,9 @@ void Packet104WindowItems::readPacketData(SocketInputStream& in)
 			short_t damage = in.readShort();
 			
 			// this.itemStack[var3] = new ItemStack(var4, var5, var6);
-			this->itemStack.push_back(std::make_shared<ItemStack>(itemIdShort, count, damage));
+			this->itemStack[static_cast<size_t>(i)] = std::make_shared<ItemStack>(itemIdShort, count, damage);
 		}
-		else
-		{
-			// this.itemStack[var3] = null;
-			this->itemStack.push_back(nullptr);
-		}
+		// A Java reference array is already initialized to null at this index.
 	}
 }
 
@@ -85,18 +83,8 @@ void Packet104WindowItems::processPacket(NetHandler* handler)
 
 int Packet104WindowItems::getPacketSize()
 {
-	// Java: variable size
-	// byte (1) + short (2) + items (2 per item + 3 if has item)
-	int size = 3;
-	for (const auto& stack : itemStack)
-	{
-		size += 2;  // short for item ID
-		if (stack != nullptr)
-		{
-			size += 3;  // byte + short for count + damage
-		}
-	}
-	return size;
+	// Java: return 3 + this.itemStack.length * 5;
+	return static_cast<int_t>(3U + static_cast<uint_t>(itemStack.size()) * 5U);
 }
 
 int Packet104WindowItems::getPacketId() const

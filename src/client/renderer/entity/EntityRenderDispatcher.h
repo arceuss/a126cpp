@@ -13,6 +13,7 @@
 class EntityRenderer;
 class PlayerRenderer;
 class ItemRenderer;
+class ItemInHandRenderer;
 
 // newb12: EntityRenderDispatcher - routes entities to their renderers
 // Reference: newb12/net/minecraft/client/renderer/entity/EntityRenderDispatcher.java
@@ -37,6 +38,7 @@ public:
 	static double zOff;
 
 	Textures *textures = nullptr;
+	ItemInHandRenderer *itemInHandRenderer = nullptr;
 
 	std::shared_ptr<Level> level = nullptr;
 
@@ -53,7 +55,9 @@ private:
 	EntityRenderDispatcher();
 
 public:
-	void prepare(std::shared_ptr<Level> level, Textures &textures, Font &font, std::shared_ptr<Player> player, Options &options, float a);
+	void prepare(std::shared_ptr<Level> level, Textures &textures, Font &font,
+		std::shared_ptr<Player> player, Options &options,
+		ItemInHandRenderer &itemInHandRenderer, float a);
 	void render(Entity &entity, float a);
 	void render(Entity &entity, double x, double y, double z, float rot, float a);
 

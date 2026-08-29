@@ -63,14 +63,14 @@ void PrimedTnt::tick()
 	}
 	else
 	{
-		level.addParticle(u"smoke", x, y + 0.5, z, 0.0, 0.0, 0.0);
+		level->addParticle(u"smoke", x, y + 0.5, z, 0.0, 0.0, 0.0);
 	}
 }
 
 void PrimedTnt::explode()
 {
 	float var1 = 4.0f;
-	level.explode(nullptr, x, y, z, var1);
+	level->explode(nullptr, x, y, z, var1);
 }
 
 void PrimedTnt::addAdditionalSaveData(CompoundTag &tag)

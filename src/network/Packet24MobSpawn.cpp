@@ -1,7 +1,52 @@
 #include "network/Packet24MobSpawn.h"
 #include "network/NetHandler.h"
+#include "world/entity/DataWatcher.h"
+#include "world/entity/EntityIO.h"
+#include "world/entity/Mob.h"
 #include "world/item/ItemStack.h"
 #include "world/phys/ChunkCoordinates.h"
+#include <cmath>
+#include <limits>
+#include <sstream>
+
+namespace
+{
+int_t javaFloatToInt(float value)
+{
+	if (std::isnan(value))
+		return 0;
+	if (value >= static_cast<float>((std::numeric_limits<int_t>::max)()))
+		return (std::numeric_limits<int_t>::max)();
+	if (value <= static_cast<float>((std::numeric_limits<int_t>::min)()))
+		return (std::numeric_limits<int_t>::min)();
+	return static_cast<int_t>(value);
+}
+
+int_t javaDoubleToInt(double value)
+{
+	if (std::isnan(value))
+		return 0;
+	if (value >= static_cast<double>((std::numeric_limits<int_t>::max)()))
+		return (std::numeric_limits<int_t>::max)();
+	if (value <= static_cast<double>((std::numeric_limits<int_t>::min)()))
+		return (std::numeric_limits<int_t>::min)();
+	return static_cast<int_t>(value);
+}
+
+int_t javaFloor(double value)
+{
+	const int_t truncated = javaDoubleToInt(value);
+	if (!(value < static_cast<double>(truncated)))
+		return truncated;
+	return static_cast<int_t>(static_cast<uint_t>(truncated) - 1u);
+}
+
+byte_t narrowByte(int_t value)
+{
+	const int_t low = static_cast<int_t>(static_cast<uint_t>(value) & 0xFFu);
+	return static_cast<byte_t>(low >= 128 ? low - 256 : low);
+}
+}
 
 Packet24MobSpawn::Packet24MobSpawn()
 	: entityId(0)
@@ -11,6 +56,19 @@ Packet24MobSpawn::Packet24MobSpawn()
 	, zPosition(0)
 	, yaw(0)
 	, pitch(0)
+	, metaData(nullptr)
+{
+}
+
+Packet24MobSpawn::Packet24MobSpawn(Mob &mob)
+	: entityId(mob.entityId)
+	, type(narrowByte(EntityIO::getEncodeNumericId(mob)))
+	, xPosition(javaFloor(mob.x * 32.0))
+	, yPosition(javaFloor(mob.y * 32.0))
+	, zPosition(javaFloor(mob.z * 32.0))
+	, yaw(narrowByte(javaFloatToInt(mob.yRot * 256.0f / 360.0f)))
+	, pitch(narrowByte(javaFloatToInt(mob.xRot * 256.0f / 360.0f)))
+	, metaData(&mob.getDataWatcher())
 {
 }
 
@@ -66,10 +124,7 @@ std::vector<std::shared_ptr<WatchableObject>> Packet24MobSpawn::readWatchableObj
 		}
 		}
 		
-		if (var5 != nullptr)
-		{
-			result.push_back(var5);
-		}
+		result.push_back(var5);
 		
 		// Read next byte
 		var2 = in.readByte();
@@ -80,6 +135,7 @@ std::vector<std::shared_ptr<WatchableObject>> Packet24MobSpawn::readWatchableObj
 
 void Packet24MobSpawn::readPacketData(SocketInputStream& in)
 {
+	this->metaData = nullptr;
 	// Java: EXACT ORDER
 	// this.entityId = var1.readInt();
 	this->entityId = in.readInt();
@@ -130,52 +186,55 @@ void Packet24MobSpawn::writePacketData(SocketOutputStream& out)
 	// var1.writeByte(this.pitch);
 	out.writeByte(this->pitch);
 	
-	// this.metaData.writeWatchableObjects(var1);
-	// Write metadata from receivedMetadata list (matches DataWatcher.writeObjectsInListToStream logic)
-	for (const auto& obj : receivedMetadata)
+	if (this->metaData != nullptr)
 	{
-		// Write header byte: (objectType << 5) | (dataValueId & 31)
-		int header = (obj->getObjectType() << 5) | (obj->getDataValueId() & 31);
-		out.writeByte(static_cast<byte_t>(header & 0xFF));
-		
-		// Write object value based on type
-		switch (obj->getObjectType())
+		std::ostringstream stream(std::ios::binary);
+		this->metaData->writeWatchableObjects(stream);
+		const std::string bytes = stream.str();
+		out.write(reinterpret_cast<const byte_t *>(bytes.data()), bytes.size());
+		return;
+	}
+
+	for (const auto &object : this->receivedMetadata)
+	{
+		const int_t header = (object->getObjectType() << 5 | object->getDataValueId() & 31) & 255;
+		out.writeByte(static_cast<byte_t>(header));
+		switch (object->getObjectType())
 		{
-		case 0:  // Byte
-			out.writeByte(obj->getByte());
+		case 0:
+			out.writeByte(object->getByte());
 			break;
-		case 1:  // Short
-			out.writeShort(obj->getShort());
+		case 1:
+			out.writeShort(object->getShort());
 			break;
-		case 2:  // Int
-			out.writeInt(obj->getInt());
+		case 2:
+			out.writeInt(object->getInt());
 			break;
-		case 3:  // Float
-			out.writeFloat(obj->getFloat());
+		case 3:
+			out.writeFloat(object->getFloat());
 			break;
-		case 4:  // String
-			Packet::writeString(obj->getString(), out);
+		case 4:
+			Packet::writeString(object->getString(), out);
 			break;
-		case 5:  // ItemStack
+		case 5:
 		{
-			ItemStack stack = obj->getItemStack();
+			const ItemStack stack = object->getItemStack();
 			out.writeShort(static_cast<short_t>(stack.itemID));
 			out.writeByte(static_cast<byte_t>(stack.stackSize));
 			out.writeShort(static_cast<short_t>(stack.itemDamage));
 			break;
 		}
-		case 6:  // ChunkCoordinates
+		case 6:
 		{
-			ChunkCoordinates coords = obj->getChunkCoordinates();
-			out.writeInt(coords.x);
-			out.writeInt(coords.y);
-			out.writeInt(coords.z);
+			const ChunkCoordinates coordinates = object->getChunkCoordinates();
+			out.writeInt(coordinates.x);
+			out.writeInt(coordinates.y);
+			out.writeInt(coordinates.z);
 			break;
 		}
 		}
 	}
-	// Write terminator
-	out.writeByte(127);  // 0x7F
+	out.writeByte(127);
 }
 
 void Packet24MobSpawn::processPacket(NetHandler* handler)
@@ -186,15 +245,15 @@ void Packet24MobSpawn::processPacket(NetHandler* handler)
 
 int Packet24MobSpawn::getPacketSize()
 {
-	// Java: variable size - 20 bytes + metadata
-	// int (4) + byte (1) + int (4) + int (4) + int (4) + byte (1) + byte (1) = 19 base
-	// + metadata (variable, at least 1 byte for terminator 0x7F)
-	// Actually, let's say 20 base + variable metadata
-	// For now, return a minimum size
-	return 20 + static_cast<int>(receivedMetadata.size() * 2);  // Approximate
+	return 20;
 }
 
 int Packet24MobSpawn::getPacketId() const
 {
 	return 24;
+}
+
+const std::vector<std::shared_ptr<WatchableObject>> &Packet24MobSpawn::getMetadata() const
+{
+	return this->receivedMetadata;
 }

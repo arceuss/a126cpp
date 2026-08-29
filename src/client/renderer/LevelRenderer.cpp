@@ -10,10 +10,12 @@
 #include "client/renderer/DistanceChunkSorter.h"
 #include "client/renderer/entity/EntityRenderDispatcher.h"
 #include "client/renderer/tileentity/TileEntityRenderDispatcher.h"
+#include "client/renderer/tileentity/SignRenderer.h"
 #include "client/renderer/MobSkinTextureProcessor.h"
 
 #include "world/level/tile/Tile.h"
 #include "world/level/tile/LeafTile.h"
+#include "world/level/tile/entity/SignTileEntity.h"
 #include "world/level/material/Material.h"
 #include "world/phys/AABB.h"
 
@@ -140,10 +142,26 @@ void LevelRenderer::renderStars()
 
 void LevelRenderer::setLevel(std::shared_ptr<Level> level)
 {
+	SignRenderer *signRenderer = dynamic_cast<SignRenderer *>(
+		TileEntityRenderDispatcher::instance.getRenderer<SignTileEntity>());
+	if (signRenderer != nullptr)
+		signRenderer->clearWorldCache();
+
 	this->tileRenderer.reset();
 
 	if (this->level != nullptr)
 		this->level->removeListener(*this);
+
+	// RenderGlobal.loadRenderers clears both the renderer array and its global
+	// tile-entity list when a world changes (RenderGlobal.java:240-242).
+	// The null-world path previously skipped allChanged(), leaving stale signs
+	// from the old level in renderableTileEntities.
+	for (const std::shared_ptr<Chunk> &chunk : chunks)
+		chunk->remove();
+	chunks.clear();
+	sortedChunks.clear();
+	dirtyChunks.clear();
+	renderableTileEntities.clear();
 
 	xOld = -9999.0;
 	yOld = -9999.0;
@@ -152,17 +170,21 @@ void LevelRenderer::setLevel(std::shared_ptr<Level> level)
 	EntityRenderDispatcher::instance.setLevel(level);
 
 	this->level = level;
-	this->tileRenderer = Util::make_unique<TileRenderer>(this->level.get());
+	if (level == nullptr)
+		return;
 
-	if (level != nullptr)
-	{
-		level->addListener(*this);
-		allChanged();
-	}
+	this->tileRenderer = Util::make_unique<TileRenderer>(this->level.get());
+	level->addListener(*this);
+	allChanged();
 }
 
 void LevelRenderer::allChanged()
 {
+	SignRenderer *signRenderer = dynamic_cast<SignRenderer *>(
+		TileEntityRenderDispatcher::instance.getRenderer<SignTileEntity>());
+	if (signRenderer != nullptr)
+		signRenderer->clearWorldCache();
+
 	Tile::leaves.setFancy(mc.options.fancyGraphics);
 
 	lastViewDistance = mc.options.viewDistance;
@@ -246,7 +268,8 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 	// Beta: Prepare tile entity render dispatcher (LevelRenderer.java:288)
 	TileEntityRenderDispatcher::instance.prepare(level.get(), &textures, mc.font.get(), mc.player.get(), a);
 	
-	EntityRenderDispatcher::instance.prepare(level, textures, *mc.font, mc.player, mc.options, a);
+	EntityRenderDispatcher::instance.prepare(level, textures, *mc.font, mc.player,
+		mc.options, mc.gameRenderer.itemInHandRenderer, a);
 	totalEntities = 0;
 	renderedEntities = 0;
 	culledEntities = 0;
@@ -299,8 +322,15 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);  // Beta: Restore color to white
 	
 	// Beta: Render tile entities (LevelRenderer.java:314-316)
-	// Java: Iterates through renderableTileEntities list, not level.tileEntityList
-	// Performance optimization: Add frustum culling for tile entities
+	// Java: Iterates through renderableTileEntities list, not level.tileEntityList.
+	// Signs are immutable in normal world rendering between tile-entity change
+	// notifications, so their exact board/text command streams are cached by
+	// SignRenderer.  We still perform Alpha's distance test and the port's
+	// existing per-entity frustum test here, in the same list order, then submit
+	// the approved cached sign lists together.  Non-sign tile entities flush the
+	// pending sign batch first so future renderer types retain list ordering.
+	SignRenderer *signRenderer = dynamic_cast<SignRenderer *>(
+		TileEntityRenderDispatcher::instance.getRenderer<SignTileEntity>());
 	for (int_t ix = 0; ix < static_cast<int_t>(renderableTileEntities.size()); ix++)  // newb12: for (int ix = 0; ix < this.renderableTileEntities.size(); ix++) (LevelRenderer.java:314)
 	{
 		TileEntity *tileEntity = renderableTileEntities[ix].get();
@@ -311,9 +341,28 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 		                   tileEntity->x + 1.0, tileEntity->y + 1.0, tileEntity->z + 1.0);
 		if (!culler.isVisible(tileEntityBB))
 			continue;
-		
+
+		SignTileEntity *sign = dynamic_cast<SignTileEntity *>(tileEntity);
+		if (sign != nullptr && signRenderer != nullptr)
+		{
+			// Alpha TileEntityRenderer.java:76-80.  This is duplicated here only
+			// because a queued sign bypasses TileEntityRenderDispatcher::render().
+			if (sign->distanceToSqr(TileEntityRenderDispatcher::instance.xPlayer,
+				TileEntityRenderDispatcher::instance.yPlayer,
+				TileEntityRenderDispatcher::instance.zPlayer) >= 4096.0)
+				continue;
+
+			float br = level->getBrightness(sign->x, sign->y, sign->z);
+			if (signRenderer->queueWorld(*sign, br))
+				continue;
+		}
+
+		if (signRenderer != nullptr)
+			signRenderer->flushWorldBatch();
 		TileEntityRenderDispatcher::instance.render(tileEntity, a);  // newb12: TileEntityRenderDispatcher.instance.render(this.renderableTileEntities.get(ix), a) (LevelRenderer.java:315)
 	}
+	if (signRenderer != nullptr)
+		signRenderer->flushWorldBatch();
 	
 	// Beta: Reset color after tile entity rendering (prevents dark color from affecting translucent blocks)
 	// TileEntityRenderDispatcher sets glColor3f(br, br, br) which can leave color darker than white
@@ -1208,6 +1257,10 @@ void LevelRenderer::setDirty(int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, i
 
 void LevelRenderer::tileChanged(int_t x, int_t y, int_t z)
 {
+	SignRenderer *signRenderer = dynamic_cast<SignRenderer *>(
+		TileEntityRenderDispatcher::instance.getRenderer<SignTileEntity>());
+	if (signRenderer != nullptr)
+		signRenderer->invalidateWorldSignAt(x, y, z);
 	setDirty(x - 1, y - 1, z - 1, x + 1, y + 1, z + 1);
 }
 
@@ -1377,5 +1430,14 @@ void LevelRenderer::skyColorChanged()
 
 void LevelRenderer::tileEntityChanged(int_t x, int_t y, int_t z, std::shared_ptr<TileEntity> tileEntity)
 {
+	SignRenderer *signRenderer = dynamic_cast<SignRenderer *>(
+		TileEntityRenderDispatcher::instance.getRenderer<SignTileEntity>());
+	if (signRenderer == nullptr)
+		return;
 
+	SignTileEntity *sign = dynamic_cast<SignTileEntity *>(tileEntity.get());
+	if (sign != nullptr)
+		signRenderer->invalidateWorldSign(sign);
+	else
+		signRenderer->invalidateWorldSignAt(x, y, z);
 }

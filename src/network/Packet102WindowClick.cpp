@@ -1,6 +1,6 @@
 #include "network/Packet102WindowClick.h"
 #include "network/NetHandler.h"
-#include <memory>
+#include <utility>
 
 Packet102WindowClick::Packet102WindowClick()
 	: window_Id(0)
@@ -17,7 +17,7 @@ Packet102WindowClick::Packet102WindowClick(int_t windowId, int_t inventorySlot, 
 	, inventorySlot(inventorySlot)
 	, mouseClick(mouseClick)
 	, action(action)
-	, itemStack(itemStack ? std::make_shared<ItemStack>(*itemStack) : nullptr)
+	, itemStack(std::move(itemStack))
 	, field_27050_f(shift)
 {
 }
@@ -26,13 +26,13 @@ void Packet102WindowClick::readPacketData(SocketInputStream& in)
 {
 	// Java: EXACT ORDER
 	// this.window_Id = var1.readByte();
-	this->window_Id = static_cast<int_t>(in.read() & 0xFF);
+	this->window_Id = static_cast<int_t>(in.readByte());
 	
 	// this.inventorySlot = var1.readShort();
 	this->inventorySlot = in.readShort();
 	
 	// this.mouseClick = var1.readByte();
-	this->mouseClick = static_cast<int_t>(in.read() & 0xFF);
+	this->mouseClick = static_cast<int_t>(in.readByte());
 	
 	// this.action = var1.readShort();
 	this->action = in.readShort();
@@ -107,9 +107,8 @@ void Packet102WindowClick::processPacket(NetHandler* handler)
 
 int Packet102WindowClick::getPacketSize()
 {
-	// Java: variable size - 10 bytes + 3 for item if present
-	// byte (1) + short (2) + byte (1) + short (2) + boolean (1) + short (2) [+ optional: byte(1) + short(2)]
-	return (itemStack != nullptr) ? 13 : 10;
+	// Java: return 11;
+	return 11;
 }
 
 int Packet102WindowClick::getPacketId() const

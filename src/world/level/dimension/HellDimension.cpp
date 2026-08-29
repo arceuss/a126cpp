@@ -4,8 +4,9 @@
 #include "world/level/tile/Tile.h"
 #include "world/level/tile/UnbreakableTile.h"
 #include "world/level/chunk/storage/OldChunkStorage.h"
-#include "world/level/levelgen/RandomLevelSource.h"
+#include "world/level/levelgen/HellRandomLevelSource.h"
 #include "world/level/biome/BiomeSource.h"
+#include "world/level/biome/FixedBiomeSource.h"
 #include "world/level/chunk/ChunkSource.h"
 #include "world/level/chunk/storage/ChunkStorage.h"
 
@@ -13,29 +14,20 @@
 #include "util/Memory.h"
 #include <memory>
 
-// Beta 1.2: HellDimension constructor
-// Java: public HellDimension() (implicit, init() is called separately)
+// Alpha: the provider's setup runs from Dimension::initLevel() once the object
+// exists, so this constructor stays empty (WorldProvider.java:28-32).
 HellDimension::HellDimension(Level &level) : Dimension(level)
 {
-	// Beta 1.2: init() must be called explicitly after construction
-	// Dimension constructor doesn't call init(), so we call it here
-	init();
+
 }
 
-// Beta 1.2: HellDimension.init() - initializes Nether-specific properties
-// Java: public void init() {
-//         this.biomeSource = new FixedBiomeSource(Biome.hell, 1.0, 0.0);
-//         this.foggy = true;
-//         this.ultraWarm = true;
-//         this.hasCeiling = true;
-//         this.id = -1;
-//       }
+// Alpha: WorldProviderHell.registerWorldChunkManager() binds the fixed hell
+// biome, marks the dimension foggy and ultra-warm, disables sky light and sets
+// the dimension id (WorldProviderHell.java:19-25).
 void HellDimension::init()
 {
-	// Beta 1.2: Use regular BiomeSource for now (FixedBiomeSource can be added later if needed)
-	// Java: this.biomeSource = new FixedBiomeSource(Biome.hell, 1.0, 0.0);
-	biomeSource = Util::make_unique<BiomeSource>(level);
-	
+	biomeSource = Util::make_unique<FixedBiomeSource>(level, BiomeType::HELL, 1.0, 0.0);
+
 	foggy = true;
 	ultraWarm = true;
 	hasCeiling = true;
@@ -61,14 +53,11 @@ void HellDimension::updateLightRamp()
 	}
 }
 
-// Beta 1.2: HellDimension.createRandomLevelSource() - creates Nether chunk generator
-// Java: public ChunkSource createRandomLevelSource() {
-//         return new HellRandomLevelSource(this.level, this.level.seed);
-//       }
-// Note: Using RandomLevelSource for now (HellRandomLevelSource can be added later)
+// Alpha: WorldProviderHell.getChunkProvider() returns the hell generator
+// (WorldProviderHell.java:39-41, ChunkProviderHell.java:44-54).
 ChunkSource *HellDimension::createRandomLevelSource()
 {
-	return new RandomLevelSource(level, level.seed);
+	return new HellRandomLevelSource(level, level.seed);
 }
 
 // Beta 1.2: HellDimension.createStorage() - creates storage in DIM-1 directory

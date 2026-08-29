@@ -53,16 +53,11 @@ int_t Pig::getDeathLoot()
 
 bool Pig::interact(Player &player)
 {
-	if (!hasSaddle() || level.isOnline || (rider != nullptr && rider.get() != &player))
-	{
+	// Direct Alpha transliteration: EntityPig.java:53-59.
+	if (!hasSaddle() || level->isOnline || (rider != nullptr && rider.get() != &player))
 		return false;
-	}
-	else
-	{
-		// TODO: Implement Entity.ride() - player.ride(this)
-		// For now, just return true
-		return true;
-	}
+	player.mountEntity(this);
+	return true;
 }
 
 bool Pig::hasSaddle()

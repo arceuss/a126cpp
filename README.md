@@ -38,6 +38,46 @@ to build:
 
 the executable will be in `bin/Alpha126Cpp.exe` (or just `Alpha126Cpp` on linux).
 
+## singleplayer commands
+
+Open chat and enter a slash command. These commands execute only in local
+singleplayer; multiplayer slash text is still sent to the server.
+
+```text
+/help
+/give <id|name> [count] [damage]
+/tp <x> <y> <z>
+/pos
+/set <waypoint>
+/goto <waypoint>
+/rem <waypoint>
+/listwaypoints
+/home
+/return
+/time [get|day|night|set <ticks>|add <ticks>]
+/seed
+/difficulty [0-3]
+/spawn <pig|sheep|cow|chicken|zombie|skeleton|spider|creeper|slime|pigzombie|ghast|giant> [count]
+/setspawn [x y z]
+/health [max|min|value]
+/heal [amount]
+/hurt <amount>
+/kill
+/setblock <x> <y> <z> <id|name> [data]
+/platform
+/ascend
+/descend
+/removedrops
+/clearinventory
+/extinguish
+/save
+/repeat
+```
+
+Numeric block/item IDs always work. Common names such as `stone`, `sand`,
+`tnt`, `bow`, `arrow`, `boat`, `minecart`, `painting`, and `saddle` are also
+accepted by `/give`; common block names are accepted by `/setblock`.
+
 ## resources
 
 already included so you can be lazy

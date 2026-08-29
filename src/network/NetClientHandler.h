@@ -21,7 +21,7 @@ public:
 	jstring field_1209_a;  // serverName (public to match Java access pattern)
 private:
 	Minecraft* mc;
-	MultiPlayerLevel* worldClient;
+	std::shared_ptr<MultiPlayerLevel> worldClient;
 	bool field_1210_g;
 	Random rand;
 

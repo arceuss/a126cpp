@@ -27,7 +27,10 @@ class ItemStack;
 class Entity
 {
 public:
-	virtual jstring getEncodeId() const { return u""; }
+	// Alpha: Entity.getEntityString() is final and delegates to the entity
+	// registry, so the save identity always comes from the exact runtime
+	// class rather than from a per-subclass override (Entity.java:687-689).
+	jstring getEncodeId() const;
 	
 	// Alpha 1.2.6: Entity.getDataWatcher() - returns DataWatcher for metadata synchronization
 	// Java: public DataWatcher getDataWatcher() { return this.dataWatcher; }
@@ -48,7 +51,9 @@ public:
 	std::shared_ptr<Entity> rider;
 	std::shared_ptr<Entity> riding;
 
-	Level &level;
+	// Alpha keeps entity identity while rebinding worldObj during dimension changes
+	// (Minecraft.java:1021). The pointer is non-owning; Level owns active entities.
+	Level *level;
 
 	double xo = 0.0, yo = 0.0, zo = 0.0;
 	double x = 0.0, y = 0.0, z = 0.0;
@@ -155,6 +160,10 @@ public:
 
 	Entity(Level &level);
 
+	void setLevel(Level &level) { this->level = &level; }
+	Level &getLevel() { return *level; }
+	const Level &getLevel() const { return *level; }
+
 	virtual ~Entity() {}
 
 protected:
@@ -166,7 +175,7 @@ protected:
 	virtual void resetPos();
 
 public:
-	void remove();
+	virtual void remove();
 
 protected:
 	virtual void setSize(float width, float height);

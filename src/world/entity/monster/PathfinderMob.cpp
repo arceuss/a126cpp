@@ -28,7 +28,7 @@ void PathfinderMob::updateAi()
 		attackTarget = findAttackTarget();
 		if (attackTarget != nullptr)
 		{
-			path = level.findPath(*this, *attackTarget, var1);
+			path = level->findPath(*this, *attackTarget, var1);
 		}
 	}
 	else if (!attackTarget->isAlive())
@@ -76,7 +76,7 @@ void PathfinderMob::updateAi()
 			// newb12: Create path to wander target (PathfinderMob.java:58-60)
 			if (var21)
 			{
-				path = level.findPath(*this, var3, var4, var5, 10.0F);
+				path = level->findPath(*this, var3, var4, var5, 10.0F);
 			}
 		}
 	}
@@ -84,7 +84,7 @@ void PathfinderMob::updateAi()
 	{
 		// newb12: Path to attack target (PathfinderMob.java:62-64)
 		if (attackTarget != nullptr)
-			path = level.findPath(*this, *attackTarget, var1);
+			path = level->findPath(*this, *attackTarget, var1);
 	}
 	
 	// newb12: Movement along path (PathfinderMob.java:66-135)

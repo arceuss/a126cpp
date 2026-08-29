@@ -222,24 +222,31 @@ std::shared_ptr<LevelChunk> OldChunkStorage::load(Level &level, CompoundTag &tag
 	std::shared_ptr<ListTag> entityTags = tag.getList(u"Entities");
 	if (entityTags != nullptr)
 	{
-		for (byte_t i = 0; i < entityTags->size(); i++)
+		// Alpha: ChunkLoader.loadChunkIntoWorldFromCompound() marks the chunk
+		// as having entities for every stored tag and inserts each decoded
+		// entity into the chunk (ChunkLoader.java:169-177). An 8-bit counter
+		// here also wrapped for lists of 128 entries or more.
+		for (int_t i = 0; i < entityTags->size(); i++)
 		{
 			std::shared_ptr<CompoundTag> entityTag = std::static_pointer_cast<CompoundTag>(entityTags->get(i));
 			std::shared_ptr<Entity> entity = EntityIO::loadStatic(*entityTag, level);
+			chunk->lastSaveHadEntities = true;
+			if (entity != nullptr)
+				chunk->addEntity(entity);
 		}
 	}
 
-	// Beta: Load tile entities from NBT (OldChunkStorage.java saves TileEntities tag)
+	// Alpha: tile entities are re-attached through the chunk so that the
+	// level's active list stays consistent (ChunkLoader.java:178-185)
 	std::shared_ptr<ListTag> tileEntityTags = tag.getList(u"TileEntities");
 	if (tileEntityTags != nullptr)
 	{
-		for (byte_t i = 0; i < tileEntityTags->size(); i++)
+		for (int_t i = 0; i < tileEntityTags->size(); i++)
 		{
 			std::shared_ptr<CompoundTag> tileEntityTag = std::static_pointer_cast<CompoundTag>(tileEntityTags->get(i));
 			std::shared_ptr<TileEntity> tileEntity = TileEntity::loadStatic(*tileEntityTag);
 			if (tileEntity != nullptr)
 			{
-				// Beta: Set tile entity position relative to chunk and add to chunk
 				int_t tx = tileEntity->x - chunk->x * 16;
 				int_t tz = tileEntity->z - chunk->z * 16;
 				chunk->setTileEntity(tx, tileEntity->y, tz, tileEntity);

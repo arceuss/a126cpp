@@ -21,7 +21,7 @@ Ghast::Ghast(Level &level) : FlyingMob(level)
 
 void Ghast::updateAi()
 {
-	if (level.difficulty == 0)
+	if (level->difficulty == 0)
 	{
 		remove();
 	}
@@ -62,7 +62,7 @@ void Ghast::updateAi()
 
 	if (target == nullptr || retargetTime-- <= 0)
 	{
-		std::shared_ptr<Player> player = level.getNearestPlayer(*this, 100.0);
+		std::shared_ptr<Player> player = level->getNearestPlayer(*this, 100.0);
 		if (player != nullptr)
 		{
 			target = std::static_pointer_cast<Entity>(player);
@@ -81,20 +81,20 @@ void Ghast::updateAi()
 		{
 			if (charge == 10)
 			{
-				level.playSound(this, u"mob.ghast.charge", getSoundVolume(), (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
+				level->playSound(this, u"mob.ghast.charge", getSoundVolume(), (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
 			}
 
 			charge++;
 			if (charge == 20)
 			{
-				level.playSound(this, u"mob.ghast.fireball", getSoundVolume(), (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
-				Fireball *var17 = new Fireball(level, *this, var11, var13, var15);
+				level->playSound(this, u"mob.ghast.fireball", getSoundVolume(), (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
+				Fireball *var17 = new Fireball(*level, *this, var11, var13, var15);
 				double var18 = 4.0;
 				Vec3 *var20 = getViewVector(1.0f);
 				var17->x = x + var20->x * var18;
 				var17->y = y + bbHeight / 2.0f + 0.5;
 				var17->z = z + var20->z * var18;
-				level.addEntity(std::shared_ptr<Entity>(var17));
+				level->addEntity(std::shared_ptr<Entity>(var17));
 				charge = -40;
 			}
 		}
@@ -125,7 +125,7 @@ bool Ghast::canReach(double var1, double var3, double var5, double var7)
 	for (int_t var16 = 1; var16 < var7; var16++)
 	{
 		var15.move(var9, var11, var13);
-		if (level.getCubes(*this, var15).size() > 0)
+		if (level->getCubes(*this, var15).size() > 0)
 		{
 			return false;
 		}
@@ -168,7 +168,7 @@ float Ghast::getSoundVolume()
 
 bool Ghast::canSpawn()
 {
-	return random.nextInt(20) == 0 && FlyingMob::canSpawn() && level.difficulty > 0;
+	return random.nextInt(20) == 0 && FlyingMob::canSpawn() && level->difficulty > 0;
 }
 
 int_t Ghast::getMaxSpawnClusterSize()

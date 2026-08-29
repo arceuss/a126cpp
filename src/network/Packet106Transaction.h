@@ -11,6 +11,7 @@ public:
 	bool field_20030_c;  // Accepted
 	
 	Packet106Transaction();
+	Packet106Transaction(int_t windowId, short_t action, bool accepted);
 	
 	void readPacketData(SocketInputStream& in) override;
 	void writePacketData(SocketOutputStream& out) override;

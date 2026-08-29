@@ -43,11 +43,18 @@ Tag &Tag::setName(const jstring &name)
 
 Tag *Tag::readNamedTag(std::istream &is)
 {
-	byte_t type = is.get();
-	if (type == 0)
+	// Alpha NBTBase.java:42-51 reads the id with DataInput.readByte, so a
+	// truncated stream is an EOFException instead of a silent TAG_End, and
+	// createTagOfType returning null for an unknown id makes the following
+	// readTagContents throw NullPointerException. Reject both explicitly.
+	byte_t type = IOUtil::readByte(is);
+	if (type == TAG_End)
 		return new EndTag();
 
 	std::unique_ptr<Tag> tag(newTag(type));
+	if (tag == nullptr)
+		throw std::runtime_error("Invalid NBT tag id " + std::to_string(static_cast<int_t>(type)));
+
 	tag->name = IOUtil::readUTF(is);
 	tag->load(is);
 	return tag.release();

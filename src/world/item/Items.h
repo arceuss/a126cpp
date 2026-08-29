@@ -5,6 +5,7 @@
 #include "world/item/ItemAxe.h"
 #include "world/item/ItemSword.h"
 #include "world/item/ItemFood.h"
+#include "world/item/ItemSoup.h"
 #include "world/item/ItemFlintAndSteel.h"
 #include "world/item/ItemBow.h"
 #include "world/item/ItemHoe.h"

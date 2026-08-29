@@ -1,10 +1,16 @@
 #include "world/level/tile/SaplingTile.h"
+
+#include <memory>
+
+#include "java/Random.h"
 #include "world/level/Level.h"
-#include "world/level/tile/Tile.h"
-#include "world/level/tile/GrassTile.h"
+#include "world/level/levelgen/feature/Feature.h"
+#include "world/level/levelgen/feature/TreeFeature.h"
+#include "world/level/levelgen/feature/WorldGenBigTree.h"
 #include "world/level/tile/DirtTile.h"
 #include "world/level/tile/FarmTile.h"
-#include "java/Random.h"
+#include "world/level/tile/GrassTile.h"
+#include "world/level/tile/Tile.h"
 
 // Beta: Sapling.java - extends Bush
 SaplingTile::SaplingTile(int_t id, int_t tex) : FlowerTile(id, tex)
@@ -34,6 +40,8 @@ bool SaplingTile::mayPlaceOn(int_t blockId)
 
 void SaplingTile::tick(Level &level, int_t x, int_t y, int_t z, Random &random)
 {
+	if (level.isOnline)
+		return;
 	// Beta: Bush.tick() - calls checkAlive() (Bush.java:33-35)
 	checkAlive(level, x, y, z);
 	
@@ -83,20 +91,11 @@ void SaplingTile::checkAlive(Level &level, int_t x, int_t y, int_t z)
 
 void SaplingTile::growTree(Level &level, int_t x, int_t y, int_t z, Random &random)
 {
-	// Beta: Sapling.growTree() - generates tree (Sapling.java:29-39)
-	// TODO: Implement tree generation (TreeFeature/BasicTree)
-	// For now, just remove the sapling (tree generation not implemented)
+	// Direct Alpha transliteration: BlockSapling.java:32-39.
 	level.setTileNoUpdate(x, y, z, 0);
-	
-	// Beta: Create TreeFeature or BasicTree (10% chance for BasicTree)
-	// Object var6 = new TreeFeature();
-	// if (var5.nextInt(10) == 0) {
-	//     var6 = new BasicTree();
-	// }
-	// if (!((Feature)var6).place(var1, var5, var2, var3, var4)) {
-	//     var1.setTileNoUpdate(var2, var3, var4, this.id);
-	// }
-	
-	// Placeholder: If tree generation fails, restore sapling
-	// For now, just leave it removed since tree generation isn't implemented
+	std::unique_ptr<Feature> feature = std::make_unique<TreeFeature>();
+	if (random.nextInt(10) == 0)
+		feature = std::make_unique<WorldGenBigTree>();
+	if (!feature->place(level, random, x, y, z))
+		level.setTileNoUpdate(x, y, z, id);
 }

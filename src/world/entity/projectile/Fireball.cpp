@@ -13,16 +13,6 @@
 #define M_PI  3.14159265358979323846
 #endif
 
-// Simple Gaussian approximation using Box-Muller transform
-static float nextGaussian(Random &random)
-{
-	// Box-Muller transform
-	float u1 = random.nextFloat();
-	float u2 = random.nextFloat();
-	if (u1 == 0.0f) u1 = 0.0001f; // Avoid log(0)
-	return sqrt(-2.0f * log(u1)) * cos(2.0f * M_PI * u2);
-}
-
 Fireball::Fireball(Level &level) : Entity(level)
 {
 	setSize(1.0f, 1.0f);
@@ -47,9 +37,9 @@ Fireball::Fireball(Level &level, Mob &owner, double var3, double var5, double va
 	setPos(x, y, z);
 	heightOffset = 0.0f;
 	xd = yd = zd = 0.0;
-	var3 += nextGaussian(random) * 0.4;
-	var5 += nextGaussian(random) * 0.4;
-	var7 += nextGaussian(random) * 0.4;
+	var3 += random.nextGaussian() * 0.4;
+	var5 += random.nextGaussian() * 0.4;
+	var7 += random.nextGaussian() * 0.4;
 	double var9 = Mth::sqrt(var3 * var3 + var5 * var5 + var7 * var7);
 	xPower = var3 / var9 * 0.1;
 	yPower = var5 / var9 * 0.1;
@@ -67,7 +57,7 @@ void Fireball::tick()
 
 	if (inGround)
 	{
-		int_t var1 = level.getTile(xTile, yTile, zTile);
+		int_t var1 = level->getTile(xTile, yTile, zTile);
 		if (var1 == lastTile)
 		{
 			life++;
@@ -93,7 +83,12 @@ void Fireball::tick()
 
 	Vec3 *var15 = Vec3::newTemp(x, y, z);
 	Vec3 *var2 = Vec3::newTemp(x + xd, y + yd, z + zd);
-	HitResult var3 = level.clip(*var15, *var2);
+	HitResult var3 = level->clip(*var15, *var2);
+	// Alpha recreates both endpoints because Level::clip() advances `from`
+	// while traversing blocks. Entity collision must use the original flight
+	// segment (EntityFireball.java:98-105).
+	var15 = Vec3::newTemp(x, y, z);
+	var2 = Vec3::newTemp(x + xd, y + yd, z + zd);
 	if (var3.type != HitResult::Type::NONE)
 	{
 		var2 = Vec3::newTemp(var3.pos->x, var3.pos->y, var3.pos->z);
@@ -101,7 +96,7 @@ void Fireball::tick()
 
 	Entity *var4 = nullptr;
 	AABB *expanded = bb.expand(xd, yd, zd)->grow(1.0, 1.0, 1.0);
-	std::vector<std::shared_ptr<Entity>> var5 = level.getEntities(this, *expanded);
+	std::vector<std::shared_ptr<Entity>> var5 = level->getEntities(this, *expanded);
 	double var6 = 0.0;
 
 	for (size_t var8 = 0; var8 < var5.size(); var8++)
@@ -135,7 +130,7 @@ void Fireball::tick()
 		{
 		}
 
-		level.explode(nullptr, x, y, z, 1.0f, true);
+		level->explode(nullptr, x, y, z, 1.0f, true);
 		remove();
 	}
 
@@ -174,7 +169,7 @@ void Fireball::tick()
 		for (int_t var20 = 0; var20 < 4; var20++)
 		{
 			float var21 = 0.25f;
-			level.addParticle(u"bubble", x - xd * var21, y - yd * var21, z - zd * var21, xd, yd, zd);
+			level->addParticle(u"bubble", x - xd * var21, y - yd * var21, z - zd * var21, xd, yd, zd);
 		}
 
 		var19 = 0.8f;
@@ -186,7 +181,7 @@ void Fireball::tick()
 	xd *= var19;
 	yd *= var19;
 	zd *= var19;
-	level.addParticle(u"smoke", x, y + 0.5, z, 0.0, 0.0, 0.0);
+	level->addParticle(u"smoke", x, y + 0.5, z, 0.0, 0.0, 0.0);
 	setPos(x, y, z);
 }
 
@@ -220,28 +215,32 @@ float Fireball::getPickRadius()
 	return 1.0f;
 }
 
-bool Fireball::hurt(Entity *var1, int_t var2)
+bool Fireball::hurt(Entity *source, int_t dmg)
 {
+	(void)dmg;
 	markHurt();
-	if (var1 != nullptr)
-	{
-		Vec3 *var3 = var1->getLookAngle();
-		if (var3 != nullptr)
-		{
-			xd = var3->x;
-			yd = var3->y;
-			zd = var3->z;
-			xPower = xd * 0.1;
-			yPower = yd * 0.1;
-			zPower = zd * 0.1;
-		}
-
-		return true;
-	}
-	else
-	{
+	if (source == nullptr)
 		return false;
+
+	Vec3 *look = source->getLookAngle();
+	if (look != nullptr)
+	{
+		xd = look->x;
+		yd = look->y;
+		zd = look->z;
+		xPower = xd * 0.1;
+		yPower = yd * 0.1;
+		zPower = zd * 0.1;
 	}
+
+	// Beta's working reflection path transfers projectile ownership to the
+	// deflector. Without this, the original Ghast keeps the 25-tick owner
+	// immunity and the returned fireball passes straight through it.
+	Mob *deflector = dynamic_cast<Mob *>(source);
+	if (deflector != nullptr)
+		owner = deflector;
+
+	return true;
 }
 
 float Fireball::getShadowHeightOffs()

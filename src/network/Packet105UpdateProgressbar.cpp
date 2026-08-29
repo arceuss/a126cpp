@@ -12,7 +12,7 @@ void Packet105UpdateProgressbar::readPacketData(SocketInputStream& in)
 {
 	// Java: EXACT ORDER
 	// this.windowId = var1.readByte();
-	this->windowId = static_cast<int_t>(in.read() & 0xFF);
+	this->windowId = static_cast<int_t>(in.readByte());
 	
 	// this.progressBar = var1.readShort();
 	this->progressBar = in.readShort();

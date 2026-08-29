@@ -2,11 +2,13 @@
 #include "SDL.h"
 
 #include <cstring>
+#include <cstdlib>
 #include <string>
 #include <sstream>
 #include <memory>
 
 #include "client/Minecraft.h"
+#include "tools/SignBench.h"
 
 #include "external/SDLException.h"
 
@@ -20,6 +22,19 @@ int main(int argc, char *argv[])
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO) < 0)
 		throw SDLException();
 	lwjgl::GLContext::instantiate();
+
+	// Developer fixture, not part of the game: renders a wall of signs and logs
+	// frame times. Usage: --sign-bench [frames] [signs] [blankText]
+	if (argc >= 2 && std::strcmp(argv[1], "--sign-bench") == 0)
+	{
+		int frames = (argc >= 3) ? std::atoi(argv[2]) : 0;
+		int signs = (argc >= 4) ? std::atoi(argv[3]) : 0;
+		bool blankText = (argc >= 5) && std::atoi(argv[4]) != 0;
+		return runSignBench(frames, signs, blankText);
+	}
+
+	if (argc >= 2 && std::strcmp(argv[1], "--timer-probe") == 0)
+		return runTimerProbe((argc >= 3) ? std::atoi(argv[2]) : 0);
 
 	// Try to read username from config file
 	jstring username = u"Player" + String::fromUTF8(std::to_string(System::currentTimeMillis() % 1000));

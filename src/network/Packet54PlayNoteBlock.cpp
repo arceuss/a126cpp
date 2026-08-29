@@ -12,40 +12,20 @@ Packet54PlayNoteBlock::Packet54PlayNoteBlock()
 
 void Packet54PlayNoteBlock::readPacketData(SocketInputStream& in)
 {
-	// Java: EXACT ORDER
-	// this.xLocation = var1.readInt();
-	this->xLocation = in.readInt();
-	
-	// this.yLocation = var1.readShort();
-	this->yLocation = in.readShort();
-	
-	// this.zLocation = var1.readInt();
-	this->zLocation = in.readInt();
-	
-	// this.instrumentType = var1.read();
-	this->instrumentType = static_cast<int_t>(in.read() & 0xFF);
-	
-	// this.pitch = var1.read();
-	this->pitch = static_cast<int_t>(in.read() & 0xFF);
+	xLocation = in.readInt();
+	yLocation = in.readShort();
+	zLocation = in.readInt();
+	instrumentType = in.read();
+	pitch = in.read();
 }
 
 void Packet54PlayNoteBlock::writePacketData(SocketOutputStream& out)
 {
-	// Java: EXACT ORDER
-	// var1.writeInt(this.xLocation);
-	out.writeInt(this->xLocation);
-	
-	// var1.writeShort(this.yLocation);
-	out.writeShort(static_cast<short_t>(this->yLocation));
-	
-	// var1.writeInt(this.zLocation);
-	out.writeInt(this->zLocation);
-	
-	// var1.write(this.instrumentType);
-	out.writeByte(static_cast<byte_t>(this->instrumentType));
-	
-	// var1.write(this.pitch);
-	out.writeByte(static_cast<byte_t>(this->pitch));
+	out.writeInt(xLocation);
+	out.writeShort(static_cast<short_t>(yLocation));
+	out.writeInt(zLocation);
+	out.write(instrumentType);
+	out.write(pitch);
 }
 
 void Packet54PlayNoteBlock::processPacket(NetHandler* handler)

@@ -1,5 +1,6 @@
 #include "world/item/ItemBucket.h"
 #include "world/item/ItemStack.h"
+#include "world/entity/animal/Cow.h"
 #include "world/entity/player/Player.h"
 #include "world/level/Level.h"
 #include "world/level/tile/Tile.h"
@@ -58,9 +59,8 @@ ItemStack ItemBucket::use(ItemStack &stack, Level &level, Player &player)
 		int_t hitY = hit.y;
 		int_t hitZ = hit.z;
 		
-		// Beta: Check if player can interact (BucketItem.java:47-49)
-		auto playerPtr = std::make_shared<Player>(player);
-		if (!level.mayInteract(playerPtr, hitX, hitY, hitZ))
+		// Alpha World.canMineBlock takes the existing player object.
+		if (!level.mayInteract(player, hitX, hitY, hitZ))
 			return stack;
 		
 		// Beta: Empty bucket - pick up liquid (BucketItem.java:51-60)
@@ -131,10 +131,9 @@ ItemStack ItemBucket::use(ItemStack &stack, Level &level, Player &player)
 	}
 	else if (content == 0 && hit.type == HitResult::Type::ENTITY)
 	{
-		// Beta: Milk cow (BucketItem.java:104-105)
-		// TODO: Check if entity is Cow and return milk bucket
-		// if (hit.entity instanceof Cow)
-		//     return new ItemStack(Items::bucketMilk->getShiftedIndex(), 1);
+		// Direct Alpha transliteration: ItemBucket.java:101-103.
+		if (std::dynamic_pointer_cast<Cow>(hit.entity) != nullptr)
+			return ItemStack(Items::bucketMilk->getShiftedIndex(), 1);
 	}
 	
 	return stack;

@@ -11,14 +11,14 @@ MobSpawnerTileEntity::MobSpawnerTileEntity() : entityId(u"Pig"), spawnDelay(20)
 {
 }
 
-// Beta: isNearPlayer() - checks if player is within 16 blocks (MobSpawnerTileEntity.java:29-31)
 bool MobSpawnerTileEntity::isNearPlayer()
 {
 	if (level == nullptr)
 		return false;
-	// Beta: return this.level.getNearestPlayer(this.x + 0.5, this.y + 0.5, this.z + 0.5, 16.0) != null (MobSpawnerTileEntity.java:30)
-	// TODO: Implement Level.getNearestPlayer() - for now return false
-	return false;
+	// Direct Alpha transliteration: TileEntityMobSpawner.java:19-20.
+	return level->getNearestPlayer(static_cast<double>(x) + 0.5,
+		static_cast<double>(y) + 0.5,
+		static_cast<double>(z) + 0.5, 16.0) != nullptr;
 }
 
 // Beta: tick() - handles spawning logic (MobSpawnerTileEntity.java:34-97)
@@ -48,24 +48,19 @@ void MobSpawnerTileEntity::tick()
 			spin -= 360.0;
 		}
 		
-		// Beta: if (this.spawnDelay == -1) this.delay() (MobSpawnerTileEntity.java:47-49)
+		if (level->isOnline)
+			return;
 		if (spawnDelay == -1)
-		{
 			delay();
-		}
-		
-		// Beta: if (this.spawnDelay > 0) this.spawnDelay-- (MobSpawnerTileEntity.java:51-53)
 		if (spawnDelay > 0)
 		{
-			spawnDelay--;
+			--spawnDelay;
+			return;
 		}
 		else
 		{
-			// Beta: byte var7 = 4 (MobSpawnerTileEntity.java:54)
-			byte_t attempts = 4;
-			
-			// Beta: for (int var8 = 0; var8 < var7; var8++) (MobSpawnerTileEntity.java:56)
-			for (int_t i = 0; i < attempts; i++)
+			const int_t attempts = 4;
+			for (int_t i = 0; i < attempts; ++i)
 			{
 				// Beta: Mob var9 = (Mob)EntityIO.newEntity(this.entityId, this.level) (MobSpawnerTileEntity.java:57)
 				std::shared_ptr<Entity> entity = EntityIO::newEntity(entityId, *level);
@@ -76,15 +71,22 @@ void MobSpawnerTileEntity::tick()
 					return;
 				}
 				
-				// Beta: int var10 = this.level.getEntitiesOfClass(...).size() (MobSpawnerTileEntity.java:62-66)
-				// TODO: Implement Level.getEntitiesOfClass() - for now skip entity count check
-				// AABB *spawnBox = AABB::newTemp(x, y, z, x + 1, y + 1, z + 1)->grow(8.0, 4.0, 8.0);
-				// int_t entityCount = level->getEntitiesOfClass<Mob>(*spawnBox).size();
-				// if (entityCount >= 6)
-				// {
-				//	delay();
-				//	return;
-				// }
+				// Alpha TileEntityMobSpawner.java:51-55 counts this exact
+				// runtime class inside [x,y,z..x+1,y+1,z+1] grown by 8,4,8.
+				const AABB spawnBox(x - 8.0, y - 4.0, z - 8.0,
+					x + 9.0, y + 5.0, z + 9.0);
+				int_t entityCount = 0;
+				for (const std::shared_ptr<Entity> &nearby : level->entities)
+				{
+					if (typeid(*nearby) == typeid(*mob)
+						&& nearby->bb.intersects(spawnBox))
+						++entityCount;
+				}
+				if (entityCount >= 6)
+				{
+					delay();
+					return;
+				}
 				
 				// Beta: double var11 = this.x + (this.level.random.nextDouble() - this.level.random.nextDouble()) * 4.0 (MobSpawnerTileEntity.java:73-75)
 				double spawnX = x + (level->random.nextDouble() - level->random.nextDouble()) * 4.0;
@@ -94,32 +96,21 @@ void MobSpawnerTileEntity::tick()
 				// Beta: var9.moveTo(var11, var13, var15, this.level.random.nextFloat() * 360.0F, 0.0F) (MobSpawnerTileEntity.java:76)
 				mob->moveTo(spawnX, spawnY, spawnZ, level->random.nextFloat() * 360.0f, 0.0f);
 				
-				// Beta: if (var9.canSpawn()) (MobSpawnerTileEntity.java:77)
-				// TODO: Implement Mob.canSpawn() - for now assume true
-				if (true)  // mob->canSpawn())
+				if (mob->canSpawn())
 				{
-					// Beta: this.level.addEntity(var9) (MobSpawnerTileEntity.java:78)
 					level->addEntity(mob);
-					
-					// Beta: for (int var17 = 0; var17 < 20; var17++) (MobSpawnerTileEntity.java:80)
-					for (int_t j = 0; j < 20; j++)
+					for (int_t j = 0; j < 20; ++j)
 					{
-						// Beta: var1 = this.x + 0.5 + (this.level.random.nextFloat() - 0.5) * 2.0 (MobSpawnerTileEntity.java:81-83)
-						double fx = x + 0.5 + (level->random.nextFloat() - 0.5) * 2.0;
-						double fy = y + 0.5 + (level->random.nextFloat() - 0.5) * 2.0;
-						double fz = z + 0.5 + (level->random.nextFloat() - 0.5) * 2.0;
-						
-						// Beta: this.level.addParticle("smoke", var1, var3, var5, 0.0, 0.0, 0.0) (MobSpawnerTileEntity.java:84)
+						double fx = x + 0.5
+							+ (level->random.nextFloat() - 0.5) * 2.0;
+						double fy = y + 0.5
+							+ (level->random.nextFloat() - 0.5) * 2.0;
+						double fz = z + 0.5
+							+ (level->random.nextFloat() - 0.5) * 2.0;
 						level->addParticle(u"smoke", fx, fy, fz, 0.0, 0.0, 0.0);
-						// Beta: this.level.addParticle("flame", var1, var3, var5, 0.0, 0.0, 0.0) (MobSpawnerTileEntity.java:85)
 						level->addParticle(u"flame", fx, fy, fz, 0.0, 0.0, 0.0);
 					}
-					
-					// Beta: var9.spawnAnim() (MobSpawnerTileEntity.java:88)
-					// TODO: Implement Mob.spawnAnim()
-					// mob->spawnAnim();
-					
-					// Beta: this.delay() (MobSpawnerTileEntity.java:89)
+					mob->spawnAnim();
 					delay();
 				}
 			}

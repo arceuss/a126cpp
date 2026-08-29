@@ -47,9 +47,9 @@ void FallingTile::tick()
 		int_t var1 = Mth::floor(x);
 		int_t var2 = Mth::floor(y);
 		int_t var3 = Mth::floor(z);
-		if (level.getTile(var1, var2, var3) == tile)
+		if (level->getTile(var1, var2, var3) == tile)
 		{
-			level.setTile(var1, var2, var3, 0);
+			level->setTile(var1, var2, var3, 0);
 		}
 		
 		xo = x;
@@ -68,12 +68,12 @@ void FallingTile::tick()
 			zd *= 0.7f;
 			yd *= -0.5;
 			remove();
-			if ((!level.mayPlace(tile, var1, var2, var3, true) || !level.setTile(var1, var2, var3, tile)) && !level.isOnline)
+			if ((!level->mayPlace(tile, var1, var2, var3, true) || !level->setTile(var1, var2, var3, tile)) && !level->isOnline)
 			{
 				spawnAtLocation(tile, 1);
 			}
 		}
-		else if (time > 100 && !level.isOnline)
+		else if (time > 100 && !level->isOnline)
 		{
 			spawnAtLocation(tile, 1);
 			remove();

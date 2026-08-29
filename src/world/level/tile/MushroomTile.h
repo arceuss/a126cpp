@@ -14,9 +14,10 @@ public:
 	virtual void tick(Level &level, int_t x, int_t y, int_t z, Random &random) override;
 	
 protected:
-	// Alpha: BlockMushroom.canThisPlantGrowOnThisBlockID() returns true for any opaque block (BlockMushroom.java:10-11)
-	bool canThisPlantGrowOnThisBlockID(int_t blockId);  // Not virtual in base, so no override
-	
-	// Alpha: BlockMushroom.canBlockStay() - light <= 13 and opaque block below (BlockMushroom.java:14-15)
-	bool canBlockStay(Level &level, int_t x, int_t y, int_t z);  // Not virtual in base, so no override
+	// Alpha: BlockMushroom.canThisPlantGrowOnThisBlockID() returns true for any opaque block (BlockMushroom.java:18-20)
+	bool canThisPlantGrowOnThisBlockID(int_t blockId) override;
+
+public:
+	// Alpha: BlockMushroom.canBlockStay() - light <= 13 and opaque block below (BlockMushroom.java:22-24)
+	bool canBlockStay(Level &level, int_t x, int_t y, int_t z) override;
 };

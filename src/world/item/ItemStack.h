@@ -43,6 +43,7 @@ public:
 	// Durability consumption (Alpha: hitBlock=1, hitEntity=2)
 	void damageItem(int_t amount);
 	void hitEntity(Mob &entity);  // Alpha: EntityLiving -> Mob
+	void interactEnemy(Mob &entity);
 	void hitBlock(int_t blockID, int_t x, int_t y, int_t z);
 	
 	// Properties
@@ -51,6 +52,7 @@ public:
 	bool isItemStackDamageable() const;
 	bool isItemDamaged() const;
 	bool isStackable() const;  // Beta: ItemInstance.isStackable() (ItemInstance.java:93-95)
+	bool getHasSubtypes() const;  // Alpha: ItemStack.getHasSubtypes() (ItemStack.java:175-177)
 	
 	bool isEmpty() const { return stackSize <= 0 || itemID == 0; }
 	

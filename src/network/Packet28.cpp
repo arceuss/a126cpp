@@ -1,9 +1,22 @@
 #include "network/Packet28.h"
 #include "network/NetHandler.h"
-#include <algorithm>
-#ifdef _WIN32
-#define NOMINMAX  // Prevent Windows.h from defining min/max macros
-#endif
+#include "world/entity/Entity.h"
+#include <cmath>
+#include <limits>
+
+namespace
+{
+int_t javaDoubleToInt(double value)
+{
+	if (std::isnan(value))
+		return 0;
+	if (value >= static_cast<double>((std::numeric_limits<int_t>::max)()))
+		return (std::numeric_limits<int_t>::max)();
+	if (value <= static_cast<double>((std::numeric_limits<int_t>::min)()))
+		return (std::numeric_limits<int_t>::min)();
+	return static_cast<int_t>(value);
+}
+}
 
 Packet28::Packet28()
 	: entityId(0)
@@ -16,18 +29,28 @@ Packet28::Packet28()
 Packet28::Packet28(int_t entityId, double motionX, double motionY, double motionZ)
 	: entityId(entityId)
 {
-	// Java: double var8 = 3.9D;
-	//       if(var2 < -var8) var2 = -var8;
-	//       ... clamp to [-3.9, 3.9]
-	double maxVel = 3.9;
-	motionX = (std::max)(-maxVel, (std::min)(maxVel, motionX));
-	motionY = (std::max)(-maxVel, (std::min)(maxVel, motionY));
-	motionZ = (std::max)(-maxVel, (std::min)(maxVel, motionZ));
-	
-	// Java: this.field_6366_b = (int)(var2 * 8000.0D);
-	this->motionX = static_cast<short_t>(static_cast<int_t>(motionX * 8000.0));
-	this->motionY = static_cast<short_t>(static_cast<int_t>(motionY * 8000.0));
-	this->motionZ = static_cast<short_t>(static_cast<int_t>(motionZ * 8000.0));
+	const double maxVelocity = 3.9;
+	if (motionX < -maxVelocity)
+		motionX = -maxVelocity;
+	if (motionY < -maxVelocity)
+		motionY = -maxVelocity;
+	if (motionZ < -maxVelocity)
+		motionZ = -maxVelocity;
+	if (motionX > maxVelocity)
+		motionX = maxVelocity;
+	if (motionY > maxVelocity)
+		motionY = maxVelocity;
+	if (motionZ > maxVelocity)
+		motionZ = maxVelocity;
+
+	this->motionX = javaDoubleToInt(motionX * 8000.0);
+	this->motionY = javaDoubleToInt(motionY * 8000.0);
+	this->motionZ = javaDoubleToInt(motionZ * 8000.0);
+}
+
+Packet28::Packet28(Entity &entity)
+	: Packet28(entity.entityId, entity.xd, entity.yd, entity.zd)
+{
 }
 
 void Packet28::readPacketData(SocketInputStream& in)
@@ -53,13 +76,13 @@ void Packet28::writePacketData(SocketOutputStream& out)
 	out.writeInt(this->entityId);
 	
 	// var1.writeShort(this.field_6366_b);
-	out.writeShort(this->motionX);
+	out.writeShort(static_cast<short_t>(this->motionX));
 	
 	// var1.writeShort(this.field_6369_c);
-	out.writeShort(this->motionY);
+	out.writeShort(static_cast<short_t>(this->motionY));
 	
 	// var1.writeShort(this.field_6368_d);
-	out.writeShort(this->motionZ);
+	out.writeShort(static_cast<short_t>(this->motionZ));
 }
 
 void Packet28::processPacket(NetHandler* handler)

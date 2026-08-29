@@ -30,12 +30,12 @@ void Creeper::readAdditionalSaveData(CompoundTag &tag)
 void Creeper::tick()
 {
 	oldSwell = swell;
-	if (level.isOnline)
+	if (level->isOnline)
 	{
 		int_t var1 = getSwellDir();
 		if (var1 > 0 && swell == 0)
 		{
-			level.playSound(this, u"random.fuse", 1.0f, 0.5f);
+			level->playSound(this, u"random.fuse", 1.0f, 0.5f);
 		}
 
 		swell += var1;
@@ -84,14 +84,14 @@ void Creeper::checkHurtTarget(Entity &target, float distance)
 	{
 		if (swell == 0)
 		{
-			level.playSound(this, u"random.fuse", 1.0f, 0.5f);
+			level->playSound(this, u"random.fuse", 1.0f, 0.5f);
 		}
 
 		setSwellDir(1);
 		swell++;
 		if (swell >= MAX_SWELL)
 		{
-			level.explode(this, x, y, z, 3.0f);
+			level->explode(this, x, y, z, 3.0f);
 			remove();
 		}
 

@@ -261,7 +261,7 @@ namespace Items
 		bowlEmpty = new Item(25);
 		bowlEmpty->setMaxStackSize(64);
 		bowlEmpty->setIconIndex(71);  // Alpha: Item.java:33
-		bowlSoup = new ItemFood(26, 10);  // ItemSoup extends ItemFood
+		bowlSoup = new ItemSoup(26, 10);
 		bowlSoup->setMaxStackSize(1);
 		bowlSoup->setIconIndex(72);  // Alpha: Item.java:34
 		

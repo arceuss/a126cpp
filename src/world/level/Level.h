@@ -279,7 +279,10 @@ public:
 
 	void tickEntities();
 	void tick(std::shared_ptr<Entity> entity);
-	void tick(std::shared_ptr<Entity> entity, bool ai);
+	// Alpha: World.updateEntityWithOptionalForce(entity, force). force==true is
+	// the ordinary path and always runs; force==false only refreshes position
+	// and chunk membership, gated on a loaded region (World.java:1011-1066).
+	void tick(std::shared_ptr<Entity> entity, bool force);
 
 	bool isUnobstructed(AABB &bb);
 	bool containsAnyLiquid(AABB &bb);
@@ -372,7 +375,7 @@ public:
 
 	void ensureAdded(std::shared_ptr<Entity> entity);
 
-	bool mayInteract(std::shared_ptr<Player> player, int_t x, int_t y, int_t z);
+	bool mayInteract(Player &player, int_t x, int_t y, int_t z);
 
 	void broadcastEntityEvent(std::shared_ptr<Entity> entity, byte_t event);
 

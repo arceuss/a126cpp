@@ -54,7 +54,7 @@ void LavaParticle::tick()
 	float odds = (float)age / lifetime;  // newb12: float odds = (float)this.age / this.lifetime
 	if (random.nextFloat() > odds)  // newb12: if (this.random.nextFloat() > odds)
 	{
-		level.addParticle(u"smoke", x, y, z, xd, yd, zd);  // newb12: this.level.addParticle("smoke", this.x, this.y, this.z, this.xd, this.yd, this.zd)
+		level->addParticle(u"smoke", x, y, z, xd, yd, zd);  // newb12: this.level.addParticle("smoke", this.x, this.y, this.z, this.xd, this.yd, this.zd)
 	}
 	
 	yd -= 0.03;  // newb12: this.yd -= 0.03

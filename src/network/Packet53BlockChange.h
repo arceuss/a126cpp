@@ -6,10 +6,10 @@
 class Packet53BlockChange : public Packet {
 public:
 	int_t xPosition;
-	byte_t yPosition;  // Note: Java uses byte for yPosition
+	int_t yPosition;
 	int_t zPosition;
-	byte_t type;
-	byte_t metadata;
+	int_t type;
+	int_t metadata;
 	
 	Packet53BlockChange();
 	

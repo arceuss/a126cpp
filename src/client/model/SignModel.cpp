@@ -17,3 +17,10 @@ void SignModel::render()
 	cube.render(scale);     // Beta: this.cube.render(0.0625F) (SignModel.java:14)
 	cube2.render(scale);    // Beta: this.cube2.render(0.0625F) (SignModel.java:15)
 }
+
+void SignModel::renderImmediate()
+{
+	float scale = 0.0625f;
+	cube.renderImmediate(scale);
+	cube2.renderImmediate(scale);
+}

@@ -8,9 +8,7 @@ Packet70Bed::Packet70Bed()
 
 void Packet70Bed::readPacketData(SocketInputStream& in)
 {
-	// Java: EXACT ORDER
-	// this.field_25019_b = var1.readByte();
-	this->field_25019_b = static_cast<int_t>(in.read() & 0xFF);
+	field_25019_b = in.readByte();
 }
 
 void Packet70Bed::writePacketData(SocketOutputStream& out)

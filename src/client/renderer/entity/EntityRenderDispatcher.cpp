@@ -18,6 +18,7 @@
 #include "client/renderer/entity/GiantMobRenderer.h"
 #include "client/renderer/entity/SlimeRenderer.h"
 #include "client/renderer/entity/GhastRenderer.h"
+#include "client/renderer/entity/FireballRenderer.h"
 #include "client/renderer/entity/SpiderRenderer.h"
 #include "client/model/PigModel.h"
 #include "client/model/CowModel.h"
@@ -50,6 +51,7 @@
 #include "world/entity/monster/Slime.h"
 #include "world/entity/monster/Ghast.h"
 #include "world/entity/monster/Spider.h"
+#include "world/entity/projectile/Fireball.h"
 #include "world/entity/monster/PigZombie.h"
 #include "world/entity/monster/Monster.h"
 #include "client/renderer/entity/MobRenderer.h"
@@ -117,6 +119,11 @@ EntityRenderDispatcher::EntityRenderDispatcher()
 	
 	static FishingHookRenderer fishingHookRenderer(*this);
 	registerRenderer(typeid(FishingHook), &fishingHookRenderer);
+
+	// Alpha: RenderManager registers RenderFireball for EntityFireball
+	// (RenderManager.java:31, RenderFireball.java:13-43)
+	static FireballRenderer fireballRenderer(*this);
+	registerRenderer(typeid(Fireball), &fireballRenderer);
 	
 	// Register monster renderers
 	static CreeperRenderer creeperRenderer(*this);
@@ -149,14 +156,15 @@ EntityRenderDispatcher::EntityRenderDispatcher()
 	static MobRenderer monsterRenderer(*this, Util::make_shared<HumanoidModel>(), 0.5f);
 	registerRenderer(typeid(Monster), &monsterRenderer);
 	
-	// TODO: Register MobRenderer for Mob (fallback for unregistered mobs)
-	// TODO: Register DefaultRenderer for Entity (fallback for all entities)
 }
 
-void EntityRenderDispatcher::prepare(std::shared_ptr<Level> level, Textures &textures, Font &font, std::shared_ptr<Player> player, Options &options, float a)
+void EntityRenderDispatcher::prepare(std::shared_ptr<Level> level, Textures &textures,
+	Font &font, std::shared_ptr<Player> player, Options &options,
+	ItemInHandRenderer &itemInHandRenderer, float a)
 {
 	this->level = level;
 	this->textures = &textures;
+	this->itemInHandRenderer = &itemInHandRenderer;
 	this->options = &options;
 	this->player = player;
 	this->font = &font;
@@ -184,13 +192,13 @@ void EntityRenderDispatcher::render(Entity &entity, float a)
 // Reference: newb12/net/minecraft/client/renderer/entity/EntityRenderDispatcher.java:139-145
 void EntityRenderDispatcher::render(Entity &entity, double x, double y, double z, float rot, float a)
 {
+	// Alpha: an entity with no registered renderer is skipped; there is no
+	// fallback renderer (RenderManager.java:157-161). Falling back to the player
+	// renderer bound the entity's empty texture name and killed the client.
 	EntityRenderer *renderer = getRenderer(entity);
 	if (renderer == nullptr)
-	{
-		// Fallback: use playerRenderer for unregistered entities (temporary until all renderers are registered)
-		// This maintains backward compatibility
-		renderer = &playerRenderer;
-	}
+		return;
+
 	renderer->render(entity, x, y, z, rot, a);  // Beta: var10.render(...) (EntityRenderDispatcher.java:142)
 	renderer->postRender(entity, x, y, z, rot, a);  // Beta: var10.postRender(...) (EntityRenderDispatcher.java:143)
 }

@@ -19,6 +19,9 @@ void writeFloat(std::ostream &os, float f);
 void writeDouble(std::ostream &os, double d);
 void writeUTF(std::ostream &os, const jstring &str);
 
+// Java: DataInput.readFully - fills the whole buffer or throws EOFException.
+void readFully(std::istream &is, char *dst, size_t len);
+
 bool readBoolean(std::istream &is);
 byte_t readByte(std::istream &is);
 char_t readChar(std::istream &is);

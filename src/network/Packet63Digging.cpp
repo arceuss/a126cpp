@@ -14,27 +14,15 @@ Packet63Digging::Packet63Digging()
 
 void Packet63Digging::readPacketData(SocketInputStream& in)
 {
-	// Java: EXACT ORDER
-	// this.x = var1.readInt();
-	this->x = in.readInt();
-	
-	// this.y = var1.readInt();
-	this->y = in.readInt();
-	
-	// this.z = var1.readInt();
-	this->z = in.readInt();
-	
-	// this.face = var1.readByte();
-	this->face = in.readByte();
-	
-	// this.progress = var1.readFloat();
-	this->progress = in.readFloat();
-	
-	// this.timestamp = System.currentTimeMillis();
-	// Note: timestamp is set on read, not from packet
+	x = in.readInt();
+	y = in.readInt();
+	z = in.readInt();
+	face = in.readByte();
+	progress = in.readFloat();
+
 	auto now = std::chrono::system_clock::now();
 	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
-	this->timestamp = static_cast<long_t>(ms.count());
+	timestamp = static_cast<long_t>(ms.count());
 }
 
 void Packet63Digging::writePacketData(SocketOutputStream& out)

@@ -15,10 +15,6 @@
 #include <cmath>
 #include <cstdlib>
 
-#ifndef M_PI
-#define M_PI  3.14159265358979323846f
-#endif
-
 Mob::Mob(Level &level) : Entity(level)
 {
 	// Beta: Mob constructor sets footSize = 0.5F (Mob.java:78)
@@ -39,18 +35,18 @@ void Mob::defineSynchedData()
 
 bool Mob::canSee(const Entity &entity)
 {
-	// newb12: Mob.canSee() - checks line of sight using level.clip() (Mob.java:85-87)
+	// newb12: Mob.canSee() - checks line of sight using level->clip() (Mob.java:85-87)
 	// Note: Using const_cast temporarily - getHeadHeight() should ideally be const
 	float myHeadHeight = getHeadHeight();
 	float entityHeadHeight = const_cast<Entity&>(entity).getHeadHeight();
 	
-	// Copy Vec3 values before passing to level.clip() - it modifies the from Vec3
+	// Copy Vec3 values before passing to level->clip() - it modifies the from Vec3
 	Vec3 *fromPtr = Vec3::newTemp(x, y + myHeadHeight, z);
 	Vec3 from = *fromPtr;  // Copy the value
 	Vec3 *toPtr = Vec3::newTemp(entity.x, entity.y + entityHeadHeight, entity.z);
 	Vec3 to = *toPtr;  // Copy the value
 	
-	HitResult result = level.clip(from, to);
+	HitResult result = level->clip(from, to);
 	return result.type == HitResult::Type::NONE;
 }
 
@@ -97,13 +93,13 @@ void Mob::baseTick()
 		ambientSoundTime = -getAmbientSoundInterval();
 		jstring sound = getAmbientSound();
 		if (!sound.empty())
-			level.playSound(this, sound, getSoundVolume(), (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
+			level->playSound(this, sound, getSoundVolume(), (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
 	}
 	
 	if (isAlive() && isInWall())
 		hurt(nullptr, 1);
 
-	if (fireImmune || level.isOnline)
+	if (fireImmune || level->isOnline)
 		onFire = 0;
 
 	// newb12: Water damage logic (Mob.java:133-151)
@@ -121,7 +117,7 @@ void Mob::baseTick()
 				float var2 = random.nextFloat() - random.nextFloat();
 				float var3 = random.nextFloat() - random.nextFloat();
 				float var4 = random.nextFloat() - random.nextFloat();
-				level.addParticle(u"bubble", x + var2, y + var3, z + var4, xd, yd, zd);
+				level->addParticle(u"bubble", x + var2, y + var3, z + var4, xd, yd, zd);
 			}
 			
 			hurt(nullptr, 2);
@@ -150,29 +146,16 @@ void Mob::baseTick()
 			for (int_t var9 = 0; var9 < 20; var9++)
 			{
 				// newb12: Three independent calls to nextGaussian() (Mob.java:173-175)
-				// Box-Muller transform to replicate Java's nextGaussian()
-				double u1 = random.nextDouble();
-				if (u1 < 1e-10) u1 = 1e-10;  // Avoid log(0)
-				double u2 = random.nextDouble();
-				double var10 = std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2) * 0.02;
+				double var10 = random.nextGaussian() * 0.02;
+				double var11 = random.nextGaussian() * 0.02;
+				double var6 = random.nextGaussian() * 0.02;
 				
-				u1 = random.nextDouble();
-				if (u1 < 1e-10) u1 = 1e-10;
-				u2 = random.nextDouble();
-				double var11 = std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2) * 0.02;
-				
-				u1 = random.nextDouble();
-				if (u1 < 1e-10) u1 = 1e-10;
-				u2 = random.nextDouble();
-				double var6 = std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2) * 0.02;
-				
-				level.addParticle(
-					u"explode",
-					x + random.nextFloat() * bbWidth * 2.0F - bbWidth,
-					y + random.nextFloat() * bbHeight,
-					z + random.nextFloat() * bbWidth * 2.0F - bbWidth,
-					var10, var11, var6
-				);
+				// Java evaluates the three nextFloat calls in argument order; C++
+				// leaves argument evaluation order unspecified, so hoist them.
+				double px = x + random.nextFloat() * bbWidth * 2.0F - bbWidth;
+				double py = y + random.nextFloat() * bbHeight;
+				double pz = z + random.nextFloat() * bbWidth * 2.0F - bbWidth;
+				level->addParticle(u"explode", px, py, pz, var10, var11, var6);
 			}
 		}
 	}
@@ -188,27 +171,16 @@ void Mob::spawnAnim()
 	// newb12: Mob.spawnAnim() - spawn particles (Mob.java:196-213)
 	for (int_t i = 0; i < 20; i++)
 	{
-		// Box-Muller transform for Gaussian distribution (replaces nextGaussian())
-		double u1 = random.nextDouble();
-		if (u1 < 1e-10) u1 = 1e-10;  // Avoid log(0)
-		double u2 = random.nextDouble();
-		double z0 = std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2);
-		double z1 = std::sqrt(-2.0 * std::log(u1)) * std::sin(2.0 * M_PI * u2);
-		double var2 = z0 * 0.02;
-		double var4 = z1 * 0.02;
-		u1 = random.nextDouble();
-		if (u1 < 1e-10) u1 = 1e-10;
-		u2 = random.nextDouble();
-		z0 = std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2);
-		double var6 = z0 * 0.02;
+		double var2 = random.nextGaussian() * 0.02;
+		double var4 = random.nextGaussian() * 0.02;
+		double var6 = random.nextGaussian() * 0.02;
 		double var8 = 10.0;
-		level.addParticle(
-			u"explode",
-			x + random.nextFloat() * bbWidth * 2.0f - bbWidth - var2 * var8,
-			y + random.nextFloat() * bbHeight - var4 * var8,
-			z + random.nextFloat() * bbWidth * 2.0f - bbWidth - var6 * var8,
-			var2, var4, var6
-		);
+		// Java evaluates the three nextFloat calls in argument order; C++ leaves
+		// argument evaluation order unspecified, so hoist them.
+		double px = x + random.nextFloat() * bbWidth * 2.0f - bbWidth - var2 * var8;
+		double py = y + random.nextFloat() * bbHeight - var4 * var8;
+		double pz = z + random.nextFloat() * bbWidth * 2.0f - bbWidth - var6 * var8;
+		level->addParticle(u"explode", px, py, pz, var2, var4, var6);
 	}
 }
 
@@ -412,7 +384,7 @@ void Mob::heal(int_t heal)
 bool Mob::hurt(Entity *source, int_t dmg)
 {
 	// Beta: Mob.hurt(Entity var1, int var2) - handles damage with invulnerability (Mob.java:316-374)
-	if (level.isOnline)  // Beta: if (this.level.isOnline) (Mob.java:317)
+	if (level->isOnline)  // Beta: if (this.level.isOnline) (Mob.java:317)
 		return false;  // Beta: return false (Mob.java:318)
 	
 	noActionTime = 0;  // Beta: this.noActionTime = 0 (Mob.java:320)
@@ -445,9 +417,9 @@ bool Mob::hurt(Entity *source, int_t dmg)
 	if (playEffects)  // Beta: if (var3) (Mob.java:343)
 	{
 		// Beta: Broadcast hurt event (Mob.java:344)
-		// TODO: Find this entity in level.entities to get shared_ptr for broadcastEntityEvent
+		// TODO: Find this entity in level->entities to get shared_ptr for broadcastEntityEvent
 		// For now, skip since broadcastEntityEvent is empty
-		// level.broadcastEntityEvent(shared_from_this(), 2);
+		// level->broadcastEntityEvent(shared_from_this(), 2);
 		markHurt();  // Beta: this.markHurt() (Mob.java:345)
 		
 		if (source != nullptr)  // Beta: if (var1 != null) (Mob.java:346)
@@ -475,7 +447,7 @@ bool Mob::hurt(Entity *source, int_t dmg)
 		{
 			jstring deathSound = getDeathSound();  // Beta: this.getDeathSound() (Mob.java:393)
 			if (!deathSound.empty())  // Beta: Check if sound exists
-				level.playSound(this, deathSound, getSoundVolume(), (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);  // Beta: this.level.playSound(this, this.getDeathSound(), this.getSoundVolume(), (this.random.nextFloat() - this.random.nextFloat()) * 0.2F + 1.0F) (Mob.java:393)
+				level->playSound(this, deathSound, getSoundVolume(), (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);  // Beta: this.level.playSound(this, this.getDeathSound(), this.getSoundVolume(), (this.random.nextFloat() - this.random.nextFloat()) * 0.2F + 1.0F) (Mob.java:393)
 		}
 		
 		die(source);  // Beta: this.die(var1) (Mob.java:396)
@@ -484,7 +456,7 @@ bool Mob::hurt(Entity *source, int_t dmg)
 	{
 		jstring hurtSound = getHurtSound();  // Beta: this.getHurtSound() (Mob.java:398)
 		if (!hurtSound.empty())  // Beta: Check if sound exists
-			level.playSound(this, hurtSound, getSoundVolume(), (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);  // Beta: this.level.playSound(this, this.getHurtSound(), this.getSoundVolume(), (this.random.nextFloat() - this.random.nextFloat()) * 0.2F + 1.0F) (Mob.java:398)
+			level->playSound(this, hurtSound, getSoundVolume(), (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);  // Beta: this.level.playSound(this, this.getHurtSound(), this.getSoundVolume(), (this.random.nextFloat() - this.random.nextFloat()) * 0.2F + 1.0F) (Mob.java:398)
 	}
 	
 	return true;  // Beta: return true (Mob.java:401)
@@ -551,13 +523,13 @@ void Mob::die(Entity *source)
 		source->awardKillScore(*this, deathScore);  // Beta: var1.awardKillScore(this, this.deathScore) (Mob.java:448)
 	
 	dead = true;  // Beta: this.dead = true (Mob.java:451)
-	if (!level.isOnline)  // Beta: if (!this.level.isOnline) (Mob.java:452)
+	if (!level->isOnline)  // Beta: if (!this.level.isOnline) (Mob.java:452)
 		dropDeathLoot();  // Beta: this.dropDeathLoot() (Mob.java:453)
 	
 	// Beta: Broadcast death event (Mob.java:456)
-	// TODO: Find this entity in level.entities to get shared_ptr for broadcastEntityEvent
+	// TODO: Find this entity in level->entities to get shared_ptr for broadcastEntityEvent
 	// For now, skip since broadcastEntityEvent is empty
-	// level.broadcastEntityEvent(shared_from_this(), 3);
+	// level->broadcastEntityEvent(shared_from_this(), 3);
 }
 
 void Mob::dropDeathLoot()
@@ -579,8 +551,8 @@ void Mob::dropDeathLoot()
 			double entityX = x + offsetX;
 			double entityY = y + offsetY;
 			double entityZ = z + offsetZ;
-			auto itemEntity = std::make_shared<EntityItem>(level, entityX, entityY, entityZ, dropStack);
-			level.addEntity(itemEntity);
+			auto itemEntity = std::make_shared<EntityItem>(*level, entityX, entityY, entityZ, dropStack);
+			level->addEntity(itemEntity);
 		}
 	}
 }
@@ -599,11 +571,11 @@ void Mob::causeFallDamage(float distance)
 		hurt(nullptr, dmg);  // Beta: this.hurt((Entity)null, var2) (Mob.java:448)
 		
 		// Beta: Play step sound on fall damage (Mob.java:449-453)
-		int_t tile = level.getTile(Mth::floor(x), Mth::floor(y - 0.2f - heightOffset), Mth::floor(z));  // Beta: int var3 = this.level.getTile(Mth.floor(this.x), Mth.floor(this.y - (double)0.2F - (double)this.heightOffset), Mth.floor(this.z)) (Mob.java:449)
+		int_t tile = level->getTile(Mth::floor(x), Mth::floor(y - 0.2f - heightOffset), Mth::floor(z));  // Beta: int var3 = this.level.getTile(Mth.floor(this.x), Mth.floor(this.y - (double)0.2F - (double)this.heightOffset), Mth.floor(this.z)) (Mob.java:449)
 		if (tile > 0)  // Beta: if (var3 > 0) (Mob.java:450)
 		{
 			const Tile::SoundType *soundType = Tile::tiles[tile]->getSoundType();  // Beta: Tile.SoundType var4 = Tile.tiles[var3].soundType (Mob.java:451)
-			level.playSound(this, soundType->getStepSound(), soundType->getVolume() * 0.5f, soundType->getPitch() * 0.75f);  // newb12: this.level.playSound(this, var4.getStepSound(), var4.getVolume() * 0.5F, var4.getPitch() * 0.75F) (Mob.java:482)
+			level->playSound(this, soundType->getStepSound(), soundType->getVolume() * 0.5f, soundType->getPitch() * 0.75f);  // newb12: this.level.playSound(this, var4.getStepSound(), var4.getVolume() * 0.5F, var4.getPitch() * 0.75F) (Mob.java:482)
 		}
 	}
 }
@@ -647,7 +619,7 @@ void Mob::travel(float x, float z)
 		if (onGround)
 		{
 			friction = 0.546f;
-			int_t tile = level.getTile(Mth::floor(x), Mth::floor(bb.y0) - 1, Mth::floor(z));
+			int_t tile = level->getTile(Mth::floor(x), Mth::floor(bb.y0) - 1, Mth::floor(z));
 			if (tile > 0)
 				friction = Tile::tiles[tile]->friction * 0.91f;
 		}
@@ -659,7 +631,7 @@ void Mob::travel(float x, float z)
 		if (onGround)
 		{
 			friction = 0.546f;
-			int_t tile = level.getTile(Mth::floor(x), Mth::floor(bb.y0) - 1, Mth::floor(z));
+			int_t tile = level->getTile(Mth::floor(x), Mth::floor(bb.y0) - 1, Mth::floor(z));
 			if (tile > 0)
 				friction = Tile::tiles[tile]->friction * 0.91f;
 		}
@@ -698,7 +670,7 @@ bool Mob::onLadder()
 	int_t var3 = Mth::floor(z);  // Beta: int var3 = Mth.floor(this.z) (Mob.java:564)
 	
 	// Beta: Check if tile at current position or one block above is a ladder (Mob.java:565)
-	return level.getTile(var1, var2, var3) == Tile::ladder.id || level.getTile(var1, var2 + 1, var3) == Tile::ladder.id;
+	return level->getTile(var1, var2, var3) == Tile::ladder.id || level->getTile(var1, var2 + 1, var3) == Tile::ladder.id;
 }
 
 bool Mob::isShootable()
@@ -880,7 +852,7 @@ void Mob::aiStep()
 	travel(xxa, yya);
 	
 	// newb12: Entity collision (Mob.java:649-657)
-	const auto &entities = level.getEntities(this, *bb.grow(0.2F, 0.0, 0.2F));
+	const auto &entities = level->getEntities(this, *bb.grow(0.2F, 0.0, 0.2F));
 	if (!entities.empty())
 	{
 		for (const auto &entity : entities)
@@ -903,7 +875,7 @@ void Mob::updateAi()
 	noActionTime++;
 	
 	// newb12: Get nearest player (Mob.java:666)
-	std::shared_ptr<Player> player = level.getNearestPlayer(*this, -1.0);
+	std::shared_ptr<Player> player = level->getNearestPlayer(*this, -1.0);
 	if (player != nullptr)
 	{
 		double dx = player->x - x;
@@ -939,7 +911,7 @@ void Mob::updateAi()
 	float var11 = 8.0F;
 	if (random.nextFloat() < 0.02F)
 	{
-		player = level.getNearestPlayer(*this, var11);
+		player = level->getNearestPlayer(*this, var11);
 		if (player != nullptr)
 		{
 			lookingAt = std::static_pointer_cast<Entity>(player);
@@ -1036,7 +1008,7 @@ bool Mob::canSpawn()
 {
 	// newb12: Mob.canSpawn() - checks if mob can spawn at current position
 	// Reference: newb12/net/minecraft/world/entity/Mob.java:762-764
-	return level.isUnobstructed(bb) && level.getCubes(*this, bb).size() == 0 && !level.containsAnyLiquid(bb);
+	return level->isUnobstructed(bb) && level->getCubes(*this, bb).size() == 0 && !level->containsAnyLiquid(bb);
 }
 
 void Mob::outOfWorld()
@@ -1094,7 +1066,7 @@ HitResult Mob::pick(float length, float a)
 	Vec3 *pos = getPos(a);
 	Vec3 *look = getLookAngle();
 	Vec3 *to = pos->add(look->x * length, look->y * length, look->z * length);
-	return level.clip(*pos, *to);
+	return level->clip(*pos, *to);
 }
 
 int_t Mob::getMaxSpawnClusterSize()

@@ -14,9 +14,9 @@ Packet15Place::Packet15Place()
 
 Packet15Place::Packet15Place(int_t x, int_t y, int_t z, int_t direction, std::shared_ptr<ItemStack> itemStack)
 	: xPosition(x)
-	, yPosition(static_cast<byte_t>(y))
+	, yPosition(y)
 	, zPosition(z)
-	, direction(static_cast<byte_t>(direction))
+	, direction(direction)
 	, itemStack(itemStack)
 {
 }
@@ -28,13 +28,13 @@ void Packet15Place::readPacketData(SocketInputStream& in)
 	this->xPosition = in.readInt();
 	
 	// this.yPosition = var1.read();
-	this->yPosition = static_cast<byte_t>(in.read() & 0xFF);
+	this->yPosition = in.read();
 	
 	// this.zPosition = var1.readInt();
 	this->zPosition = in.readInt();
 	
 	// this.direction = var1.read();
-	this->direction = static_cast<byte_t>(in.read() & 0xFF);
+	this->direction = in.read();
 	
 	// short var2 = var1.readShort();
 	short_t itemIdShort = in.readShort();
@@ -65,13 +65,13 @@ void Packet15Place::writePacketData(SocketOutputStream& out)
 	out.writeInt(this->xPosition);
 	
 	// var1.write(this.yPosition);
-	out.writeByte(this->yPosition);
+	out.write(this->yPosition);
 	
 	// var1.writeInt(this.zPosition);
 	out.writeInt(this->zPosition);
 	
 	// var1.write(this.direction);
-	out.writeByte(this->direction);
+	out.write(this->direction);
 	
 	// if(this.itemStack == null) {
 	if (this->itemStack == nullptr)

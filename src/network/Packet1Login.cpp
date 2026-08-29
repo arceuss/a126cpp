@@ -58,19 +58,6 @@ void Packet1Login::processPacket(NetHandler* handler)
 int Packet1Login::getPacketSize()
 {
 	// Java: return 4 + this.username.length() + 4 + 5;
-	// Note: username.length() is in characters (UTF-16), so 2 bytes per char
-	// String: 2 bytes for length + (length * 2) bytes for UTF-16 chars = 2 + length*2
-	// int = 4, long = 8, byte = 1
-	// Java calculation: 4 (int) + (2 + username.length()*2) (string) + 8 (long) + 1 (byte) = 15 + username.length()*2
-	// But Java says: 4 + username.length() + 4 + 5 = 13 + username.length()
-	// Looking at Java code, it seems to count: 4 (protocolVersion) + 2 (string length short) + username.length()*2 (UTF-16 chars) + 8 (long) + 1 (byte)
-	// But the formula suggests they're counting differently. Let's match Java exactly:
-	// Java formula: 4 + this.username.length() + 4 + 5 = 13 + username.length()
-	// This suggests: 4 (protocolVersion) + username.length() (treating as UTF-16 code units, so 2 bytes each?) + 4 (maybe long is counted as 4?) + 5
-	// Actually, wait - Java String.length() returns number of characters, and each char is 2 bytes in UTF-16
-	// So: 4 (int) + 2 (short for string length) + username.length()*2 (UTF-16 bytes) + 8 (long) + 1 (byte) = 15 + username.length()*2
-	// But Java says 4 + username.length() + 4 + 5. This is confusing.
-	// Let me trust the Java calculation exactly as written:
 	return 4 + static_cast<int>(username.length()) + 4 + 5;
 }
 

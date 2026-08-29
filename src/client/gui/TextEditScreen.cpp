@@ -3,6 +3,7 @@
 #include "client/Minecraft.h"
 #include "client/gui/Button.h"
 #include "client/renderer/tileentity/TileEntityRenderDispatcher.h"
+#include "client/renderer/tileentity/SignRenderer.h"
 #include "world/level/tile/Tile.h"
 #include "world/level/tile/SignTile.h"
 #include "network/Packet130UpdateSign.h"
@@ -92,11 +93,14 @@ void TextEditScreen::keyPressed(char_t eventCharacter, int_t eventKey)
 	{
 		line = (line + 1) & 3;
 	}
+
+	bool textChanged = false;
 	
 	// Beta: if (eventKey == 14 && this.sign.messages[this.line].length() > 0) { ... } (TextEditScreen.java:64-66)
 	if (eventKey == 14 && sign->messages[line].length() > 0)  // Backspace
 	{
 		sign->messages[line] = sign->messages[line].substr(0, sign->messages[line].length() - 1);
+		textChanged = true;
 	}
 	
 	// Beta: if (allowedChars.indexOf(ch) >= 0 && this.sign.messages[this.line].length() < 15) { ... } (TextEditScreen.java:68-70)
@@ -104,6 +108,19 @@ void TextEditScreen::keyPressed(char_t eventCharacter, int_t eventKey)
 	if (allowedChars.find(static_cast<char16_t>(eventCharacter)) != jstring::npos && sign->messages[line].length() < 15)
 	{
 		sign->messages[line] += static_cast<char16_t>(eventCharacter);
+		textChanged = true;
+	}
+
+	// The edit screen mutates its local SignTileEntity before the final
+	// setChanged() call. Drop only this sign's cached world list when a character
+	// actually changes so the world behind the GUI remains visually live without
+	// adding steady-state string comparisons to normal sign rendering.
+	if (textChanged)
+	{
+		SignRenderer *signRenderer = dynamic_cast<SignRenderer *>(
+			TileEntityRenderDispatcher::instance.getRenderer(sign.get()));
+		if (signRenderer != nullptr)
+			signRenderer->invalidateWorldSign(sign.get());
 	}
 }
 

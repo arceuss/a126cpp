@@ -1,5 +1,6 @@
 #include "world/entity/Entity.h"
 #include "world/entity/item/EntityItem.h"
+#include "world/entity/EntityIO.h"
 #include "world/item/ItemStack.h"
 
 #include "world/level/Level.h"
@@ -14,7 +15,7 @@
 
 int_t Entity::entityCounter = 0;
 
-Entity::Entity(Level &level) : level(level), dataWatcher()
+Entity::Entity(Level &level) : level(&level), dataWatcher()
 {
 	// Alpha 1.2.6: Entity constructor - initialize DataWatcher with shared flags
 	// Java: this.dataWatcher.addObject(0, Byte.valueOf((byte)0));
@@ -32,7 +33,7 @@ void Entity::resetPos()
 	while (y > 0.0)
 	{
 		setPos(x, y, z);
-		if (level.getCubes(*this, bb).empty())
+		if (level->getCubes(*this, bb).empty())
 			break;
 		y++;
 	}
@@ -165,7 +166,7 @@ void Entity::baseTick()
 				splashVolume = 1.0f;
 			
 			// Beta: Play splash sound (Entity.java:229)
-			level.playSound(this, u"random.splash", splashVolume, 1.0f + (random.nextFloat() - random.nextFloat()) * 0.4f);
+			level->playSound(this, u"random.splash", splashVolume, 1.0f + (random.nextFloat() - random.nextFloat()) * 0.4f);
 			
 			// Beta: Add bubble and splash particles (Entity.java:230-242)
 			float waterY = Mth::floor(bb.y0);
@@ -173,14 +174,14 @@ void Entity::baseTick()
 			{
 				float offsetX = (random.nextFloat() * 2.0f - 1.0f) * bbWidth;
 				float offsetZ = (random.nextFloat() * 2.0f - 1.0f) * bbWidth;
-				level.addParticle(u"bubble", x + offsetX, waterY + 1.0f, z + offsetZ, xd, yd - random.nextFloat() * 0.2f, zd);
+				level->addParticle(u"bubble", x + offsetX, waterY + 1.0f, z + offsetZ, xd, yd - random.nextFloat() * 0.2f, zd);
 			}
 			
 			for (int_t i = 0; i < 1.0f + bbWidth * 20.0f; i++)
 			{
 				float offsetX = (random.nextFloat() * 2.0f - 1.0f) * bbWidth;
 				float offsetZ = (random.nextFloat() * 2.0f - 1.0f) * bbWidth;
-				level.addParticle(u"splash", x + offsetX, waterY + 1.0f, z + offsetZ, xd, yd, zd);
+				level->addParticle(u"splash", x + offsetX, waterY + 1.0f, z + offsetZ, xd, yd, zd);
 			}
 		}
 
@@ -194,7 +195,7 @@ void Entity::baseTick()
 	}
 
 	// Beta: Fire check (Entity.java:252-267)
-	if (level.isOnline)
+	if (level->isOnline)
 	{
 		onFire = 0;
 	}
@@ -218,7 +219,7 @@ void Entity::baseTick()
 
 	// Beta: Check for fire tiles and apply damage (Entity.java:499-514)
 	bool inWater = isInWater();
-	if (level.containsFireTile(bb))
+	if (level->containsFireTile(bb))
 	{
 		burn(1);  // Beta: this.burn(1) (line 500)
 		if (!inWater)
@@ -238,7 +239,7 @@ void Entity::baseTick()
 	// Beta: Extinguish fire in water (Entity.java:511-514)
 	if (inWater && onFire > 0)
 	{
-		level.playSound(this, u"random.fizz", 0.7f, 1.6f + (random.nextFloat() - random.nextFloat()) * 0.4f);
+		level->playSound(this, u"random.fizz", 0.7f, 1.6f + (random.nextFloat() - random.nextFloat()) * 0.4f);
 		onFire = -flameTime;  // Beta: this.onFire = -this.flameTime (line 513)
 	}
 
@@ -251,7 +252,7 @@ void Entity::baseTick()
 		outOfWorld();
 
 	// Flag check
-	if (!level.isOnline)
+	if (!level->isOnline)
 	{
 		setSharedFlag(FLAG_ONFIRE, onFire > 0);
 		setSharedFlag(FLAG_RIDING, riding != nullptr);
@@ -286,15 +287,15 @@ void Entity::outOfWorld()
 bool Entity::isFree(double xd, double yd, double zd, double skin)
 {
 	AABB *tbb = bb.grow(skin, skin, skin)->cloneMove(xd, yd, zd);
-	auto cubes = level.getCubes(*this, *tbb);
-	return !cubes.empty() ? false : !level.containsAnyLiquid(*tbb);
+	auto cubes = level->getCubes(*this, *tbb);
+	return !cubes.empty() ? false : !level->containsAnyLiquid(*tbb);
 }
 
 bool Entity::isFree(double xd, double yd, double zd)
 {
 	AABB *tbb = bb.cloneMove(xd, yd, zd);
-	auto cubes = level.getCubes(*this, *tbb);
-	return !cubes.empty() ? false : !level.containsAnyLiquid(*tbb);
+	auto cubes = level->getCubes(*this, *tbb);
+	return !cubes.empty() ? false : !level->containsAnyLiquid(*tbb);
 }
 
 void Entity::move(double xd, double yd, double zd)
@@ -326,7 +327,7 @@ void Entity::move(double xd, double yd, double zd)
 	{
 		double safeStep = 0.05;
 
-		while (xd != 0.0 && level.getCubes(*this, *bb.cloneMove(xd, -1.0, 0.0)).empty())
+		while (xd != 0.0 && level->getCubes(*this, *bb.cloneMove(xd, -1.0, 0.0)).empty())
 		{
 			if (xd < safeStep && xd >= -safeStep)
 				xd = 0.0;
@@ -337,7 +338,7 @@ void Entity::move(double xd, double yd, double zd)
 			oxd = xd;
 		}
 
-		while (zd != 0.0 && level.getCubes(*this, *bb.cloneMove(0.0, -1.0, zd)).empty())
+		while (zd != 0.0 && level->getCubes(*this, *bb.cloneMove(0.0, -1.0, zd)).empty())
 		{
 			if (zd < safeStep && zd >= -safeStep)
 				zd = 0.0;
@@ -350,7 +351,7 @@ void Entity::move(double xd, double yd, double zd)
 	}
 
 	// Clip against collisions
-	const auto &cubes = level.getCubes(*this, *bb.expand(xd, yd, zd));
+	const auto &cubes = level->getCubes(*this, *bb.expand(xd, yd, zd));
 
 	for (auto &cube : cubes)
 		yd = cube->clipYCollide(bb, yd);
@@ -385,7 +386,7 @@ void Entity::move(double xd, double yd, double zd)
 		AABB *obb = bb.copy();  // Save current bb for comparison later
 		bb.set(*oldBb);  // Beta: Reset to original bb before any movement (Entity.java:390: this.bb.set(var17))
 
-		const auto &cubes = level.getCubes(*this, *bb.expand(xd, yd, zd));
+		const auto &cubes = level->getCubes(*this, *bb.expand(xd, yd, zd));
 
 		for (auto &cube : cubes)
 			yd = cube->clipYCollide(bb, yd);
@@ -450,7 +451,7 @@ void Entity::move(double xd, double yd, double zd)
 		int_t sy = Mth::floor(y - 0.2 - heightOffset);
 		int_t sz = Mth::floor(z);
 
-		int_t stile = level.getTile(sx, sy, sz);
+		int_t stile = level->getTile(sx, sy, sz);
 		if (walkDist > nextStep && stile > 0)
 		{
 			nextStep++;
@@ -463,7 +464,7 @@ void Entity::move(double xd, double yd, double zd)
 				
 				// Beta: Check for top snow (snow layer) (Entity.java:467-469)
 				// Note: topSnow might not exist yet in Alpha 1.2.6, so check if it exists first
-				int_t tileAbove = level.getTile(sx, sy + 1, sz);
+				int_t tileAbove = level->getTile(sx, sy + 1, sz);
 				if (tileAbove > 0 && tileAbove < 256 && Tile::tiles[tileAbove] != nullptr)
 				{
 					Tile *aboveTile = Tile::tiles[tileAbove];
@@ -475,14 +476,14 @@ void Entity::move(double xd, double yd, double zd)
 				{
 					// Alpha 1.2.6: Only play step sounds in single-player (Entity.java:433-440)
 					// In multiplayer, the server sends step sounds via Packet62Sound
-					if (!level.isOnline)
+					if (!level->isOnline)
 					{
 						jstring stepSoundName = soundType->getStepSound();
-						level.playSound(this, stepSoundName, soundType->getVolume() * 0.15f, soundType->getPitch());
+						level->playSound(this, stepSoundName, soundType->getVolume() * 0.15f, soundType->getPitch());
 					}
 				}
 
-				tile->stepOn(level, sx, sy, sz, *this);
+				tile->stepOn(*level, sx, sy, sz, *this);
 			}
 		}
 	}
@@ -495,7 +496,7 @@ void Entity::move(double xd, double yd, double zd)
 	int_t z0 = Mth::floor(bb.z0);
 	int_t z1 = Mth::floor(bb.z1);
 
-	if (level.hasChunksAt(x0, y0, z0, x1, y1, z1))
+	if (level->hasChunksAt(x0, y0, z0, x1, y1, z1))
 	{
 		for (int_t x = x0; x <= x1; x++)
 		{
@@ -503,9 +504,9 @@ void Entity::move(double xd, double yd, double zd)
 			{
 				for (int_t z = z0; z <= z1; z++)
 				{
-					int_t tile = level.getTile(x, y, z);
+					int_t tile = level->getTile(x, y, z);
 					if (tile > 0)
-						Tile::tiles[tile]->entityInside(level, x, y, z, *this);
+						Tile::tiles[tile]->entityInside(*level, x, y, z, *this);
 				}
 			}
 		}
@@ -553,7 +554,7 @@ bool Entity::isInWater()
 	// Beta: Entity.isInWater() - checks if entity is in water (Entity.java:542-544)
 	AABB *checkBb = bb.grow(0.0, -0.4, 0.0);
 	const Material &waterMat = Material::water;
-	return level.checkAndHandleWater(*checkBb, waterMat, this);
+	return level->checkAndHandleWater(*checkBb, waterMat, this);
 }
 
 bool Entity::isUnderLiquid(const Material &material)
@@ -564,7 +565,7 @@ bool Entity::isUnderLiquid(const Material &material)
 	int_t blockY = Mth::floor((float)Mth::floor(headY));  // Beta: Mth.floor((float)Mth.floor(var2)) (Entity.java:549)
 	int_t blockZ = Mth::floor(this->z);
 	
-	int_t tile = level.getTile(blockX, blockY, blockZ);
+	int_t tile = level->getTile(blockX, blockY, blockZ);
 	if (tile == 0)
 		return false;
 	
@@ -573,7 +574,7 @@ bool Entity::isUnderLiquid(const Material &material)
 		return false;
 	
 	// Beta: Check if head is below water surface (Entity.java:553-555)
-	float liquidHeight = FluidTile::getHeight(level.getData(blockX, blockY, blockZ)) - 0.11111111f;  // Beta: -0.11111111F
+	float liquidHeight = FluidTile::getHeight(level->getData(blockX, blockY, blockZ)) - 0.11111111f;  // Beta: -0.11111111F
 	float surfaceY = blockY + 1 - liquidHeight;  // Beta: var5 + 1 - var8
 	return headY < surfaceY;  // Beta: return var2 < var9 (Entity.java:555)
 }
@@ -588,7 +589,7 @@ bool Entity::isInLava()
 	// Beta: Entity.isInLava() - checks if entity is in lava (similar to isInWater)
 	AABB *checkBb = bb.grow(0.0, -0.4, 0.0);
 	const Material &lavaMat = Material::lava;
-	return level.checkAndHandleWater(*checkBb, lavaMat, this);
+	return level->checkAndHandleWater(*checkBb, lavaMat, this);
 }
 
 bool Entity::isFullySubmerged()
@@ -596,7 +597,7 @@ bool Entity::isFullySubmerged()
 	// Check if the player's entire bounding box is in water (fully submerged)
 	// This is stricter than isInWater() which shrinks the bounding box
 	const Material &waterMat = Material::water;
-	return level.checkAndHandleWater(bb, waterMat, this);
+	return level->checkAndHandleWater(bb, waterMat, this);
 }
 
 void Entity::moveRelative(float x, float z, float acc)
@@ -623,7 +624,7 @@ float Entity::getBrightness(float a)
 	double byo = (bb.y1 - bb.y0) * 0.66;
 	int_t y = Mth::floor(this->y - heightOffset + byo);
 	int_t z = Mth::floor(this->z);
-	return level.hasChunksAt(Mth::floor(bb.x0), Mth::floor(bb.y0), Mth::floor(bb.z0), Mth::floor(bb.x1), Mth::floor(bb.y1), Mth::floor(bb.z1)) ? level.getBrightness(x, y, z) : 0.0f;
+	return level->hasChunksAt(Mth::floor(bb.x0), Mth::floor(bb.y0), Mth::floor(bb.z0), Mth::floor(bb.x1), Mth::floor(bb.y1), Mth::floor(bb.z1)) ? level->getBrightness(x, y, z) : 0.0f;
 }
 
 void Entity::absMoveTo(double x, double y, double z, float yRot, float xRot)
@@ -650,7 +651,11 @@ void Entity::absMoveTo(double x, double y, double z, float yRot, float xRot)
 	if (dxRot >= 180.0)
 		xRotO -= 360.0;
 
-	setPos(x, y, z);
+	// Alpha: setPosition() receives the already-offset posY, so the bounding box
+	// bottom lands on the requested y (Entity.java:538-545). Passing the raw
+	// parameter here re-assigned this->y without the offset and sank the entity
+	// by heightOffset, which put a teleporting player inside the floor.
+	setPos(this->x, this->y, this->z);
 	setRot(yRot, xRot);
 }
 
@@ -805,6 +810,11 @@ bool Entity::isCreativeModeAllowed()
 	return false;
 }
 
+jstring Entity::getEncodeId() const
+{
+	return EntityIO::getEncodeId(*this);
+}
+
 bool Entity::save(CompoundTag &tag)
 {
 	jstring id = getEncodeId();
@@ -897,9 +907,9 @@ EntityItem *Entity::spawnAtLocation(int_t itemId, int_t count, float offset)
 
 EntityItem *Entity::spawnAtLocation(ItemStack &stack, float offset)
 {
-	EntityItem *item = new EntityItem(level, x, y + offset, z, stack);
+	EntityItem *item = new EntityItem(*level, x, y + offset, z, stack);
 	item->throwTime = 10;
-	level.addEntity(std::shared_ptr<Entity>(item));
+	level->addEntity(std::shared_ptr<Entity>(item));
 	return item;
 }
 
@@ -995,7 +1005,7 @@ void Entity::mountEntity(Entity* vehicle)
 		// Find the actual shared_ptr for vehicle from level's entities
 		// Search through level entities to find matching entity
 		std::shared_ptr<Entity> vehiclePtr = nullptr;
-		for (const auto& entity : level.entities)
+		for (const auto& entity : level->entities)
 		{
 			if (entity.get() == vehicle)
 			{
@@ -1006,7 +1016,7 @@ void Entity::mountEntity(Entity* vehicle)
 		
 		// Find the actual shared_ptr for this entity (rider) from level's entities
 		std::shared_ptr<Entity> riderPtr = nullptr;
-		for (const auto& entity : level.entities)
+		for (const auto& entity : level->entities)
 		{
 			if (entity.get() == this)
 			{
@@ -1362,7 +1372,7 @@ bool Entity::getSharedFlag(int_t flag) const
 // In multiplayer, also check DataWatcher flag since onFire is reset to 0 in baseTick()
 bool Entity::isOnFire() const
 {
-	if (level.isOnline)
+	if (level->isOnline)
 	{
 		// In multiplayer, check DataWatcher flag (server controls this)
 		return getSharedFlag(FLAG_ONFIRE);

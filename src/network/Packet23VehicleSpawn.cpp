@@ -21,7 +21,7 @@ void Packet23VehicleSpawn::readPacketData(SocketInputStream& in)
 	this->entityId = in.readInt();
 	
 	// this.type = var1.readByte();
-	this->type = static_cast<int_t>(in.read() & 0xFF);
+	this->type = in.readByte();
 	
 	// this.xPosition = var1.readInt();
 	this->xPosition = in.readInt();
@@ -90,11 +90,8 @@ void Packet23VehicleSpawn::processPacket(NetHandler* handler)
 
 int Packet23VehicleSpawn::getPacketSize()
 {
-	// Java: variable size - 22 or 28 bytes
-	// int (4) + byte (1) + int (4) + int (4) + int (4) + int (4) = 21 base
-	// + 3 * short (6) if field_28044_i > 0 = 27 total
-	// Actually, let's say 22 base + 6 conditional = 28 max
-	return (this->field_28044_i > 0) ? 28 : 22;
+	const uint_t sum = static_cast<uint_t>(this->field_28044_i) + 21u;
+	return sum != 0u && (sum & 0x80000000u) == 0u ? 6 : 0;
 }
 
 int Packet23VehicleSpawn::getPacketId() const

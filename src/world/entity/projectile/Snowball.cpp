@@ -16,16 +16,6 @@
 #define M_PI  3.14159265358979323846
 #endif
 
-// Simple Gaussian approximation using Box-Muller transform
-static float nextGaussian(Random &random)
-{
-	// Box-Muller transform
-	float u1 = random.nextFloat();
-	float u2 = random.nextFloat();
-	if (u1 == 0.0f) u1 = 0.0001f; // Avoid log(0)
-	return sqrt(-2.0f * log(u1)) * cos(2.0f * M_PI * u2);
-}
-
 Snowball::Snowball(Level &level) : Entity(level)
 {
 	setSize(0.25f, 0.25f);
@@ -73,9 +63,10 @@ void Snowball::shoot(double var1, double var3, double var5, float var7, float va
 	var1 /= var9;
 	var3 /= var9;
 	var5 /= var9;
-	var1 += nextGaussian(random) * 0.0075f * var8;
-	var3 += nextGaussian(random) * 0.0075f * var8;
-	var5 += nextGaussian(random) * 0.0075f * var8;
+	// EntitySnowball.java:76-78: 0.0075f widens to double, so keep the float literal.
+	var1 += random.nextGaussian() * 0.0075f * var8;
+	var3 += random.nextGaussian() * 0.0075f * var8;
+	var5 += random.nextGaussian() * 0.0075f * var8;
 	var1 *= var7;
 	var3 *= var7;
 	var5 *= var7;
@@ -106,7 +97,7 @@ void Snowball::tick()
 
 	if (inGround)
 	{
-		int_t var1 = level.getTile(xTile, yTile, zTile);
+		int_t var1 = level->getTile(xTile, yTile, zTile);
 		if (var1 == lastTile)
 		{
 			life++;
@@ -132,17 +123,17 @@ void Snowball::tick()
 
 	Vec3 *var15 = Vec3::newTemp(x, y, z);
 	Vec3 *var2 = Vec3::newTemp(x + xd, y + yd, z + zd);
-	HitResult var3 = level.clip(*var15, *var2);
+	HitResult var3 = level->clip(*var15, *var2);
 	if (var3.type != HitResult::Type::NONE)
 	{
 		var2 = Vec3::newTemp(var3.pos->x, var3.pos->y, var3.pos->z);
 	}
 
-	if (!level.isOnline)
+	if (!level->isOnline)
 	{
 		Entity *var4 = nullptr;
 		AABB *expanded = bb.expand(xd, yd, zd)->grow(1.0, 1.0, 1.0);
-		std::vector<std::shared_ptr<Entity>> var5 = level.getEntities(this, *expanded);
+		std::vector<std::shared_ptr<Entity>> var5 = level->getEntities(this, *expanded);
 		double var6 = 0.0;
 
 		for (size_t var8 = 0; var8 < var5.size(); var8++)
@@ -179,7 +170,7 @@ void Snowball::tick()
 
 		for (int_t var18 = 0; var18 < 8; var18++)
 		{
-			level.addParticle(u"snowballpoof", x, y, z, 0.0, 0.0, 0.0);
+			level->addParticle(u"snowballpoof", x, y, z, 0.0, 0.0, 0.0);
 		}
 
 		remove();
@@ -221,7 +212,7 @@ void Snowball::tick()
 		for (int_t var7 = 0; var7 < 4; var7++)
 		{
 			float var22 = 0.25f;
-			level.addParticle(u"bubble", x - xd * var22, y - yd * var22, z - zd * var22, xd, yd, zd);
+			level->addParticle(u"bubble", x - xd * var22, y - yd * var22, z - zd * var22, xd, yd, zd);
 		}
 
 		var20 = 0.8f;
@@ -263,7 +254,7 @@ void Snowball::playerTouch(Player &player)
 			ItemStack stack(static_cast<int_t>(Items::snowball->getShiftedIndex()), static_cast<int_t>(1));
 			if (player.inventory.add(stack))
 			{
-				level.playSound(this, u"random.pop", 0.2f, ((random.nextFloat() - random.nextFloat()) * 0.7f + 1.0f) * 2.0f);
+				level->playSound(this, u"random.pop", 0.2f, ((random.nextFloat() - random.nextFloat()) * 0.7f + 1.0f) * 2.0f);
 				player.take(*this, 1);
 				remove();
 			}
