@@ -1038,6 +1038,10 @@ else()
 	# -finline-functions = aggressive function inlining
 	# -fomit-frame-pointer = omit frame pointer (frees a register, only for Release)
 	target_compile_options(Alpha126CppCore PUBLIC
+		# -ffp-contract=off keeps Java bit-parity: with -march=native GCC's
+		# default -ffp-contract=fast fuses multiply-adds inside StrictMath's
+		# fdlibm log transcription and shifts nextGaussian by one ULP.
+		-ffp-contract=off
 		$<$<CONFIG:Release>:-O3 -march=native -funroll-loops -finline-functions -fomit-frame-pointer>
 		$<$<CONFIG:RelWithDebInfo>:-O3 -march=native -funroll-loops -finline-functions>
 	)
@@ -1055,6 +1059,9 @@ target_link_libraries(Alpha126CppCore PUBLIC glad)
 add_subdirectory("external/SDL2" EXCLUDE_FROM_ALL)
 target_link_libraries(Alpha126CppCore PUBLIC SDL2-static)
 
+# zlib ships add_test(example ...) hooks whose executables we do not build;
+# disable the example targets so ctest does not report them as missing tests.
+set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "Build zlib examples" FORCE)
 add_subdirectory("external/zlib" EXCLUDE_FROM_ALL)
 
 target_link_libraries(Alpha126CppCore PUBLIC zlibstatic)

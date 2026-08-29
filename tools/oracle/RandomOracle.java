@@ -99,7 +99,11 @@ public final class RandomOracle
 			System.out.println("};");
 			System.out.println();
 
-			groups.append("\t{ ").append(SEEDS[index]).append("LL, randomOracleSteps").append(index)
+			final long seed = SEEDS[index];
+			final String seedLiteral = seed == Long.MIN_VALUE
+				? "(-9223372036854775807LL - 1LL)"
+				: seed + "LL";
+			groups.append("\t{ ").append(seedLiteral).append(", randomOracleSteps").append(index)
 				.append(", ").append(stepCount).append(" },\n");
 		}
 

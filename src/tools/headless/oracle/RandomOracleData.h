@@ -2549,7 +2549,7 @@ static const RandomOracleGroup randomOracleGroups[] = {
 	{ -987654321LL, randomOracleSteps6, 225 },
 	{ 8682522807148012LL, randomOracleSteps7, 225 },
 	{ 1024LL, randomOracleSteps8, 225 },
-	{ -9223372036854775808LL, randomOracleSteps9, 225 },
+	{ (-9223372036854775807LL - 1LL), randomOracleSteps9, 225 },
 	{ 9223372036854775807LL, randomOracleSteps10, 225 },
 };
 
