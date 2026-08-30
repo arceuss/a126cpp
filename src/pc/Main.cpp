@@ -1,6 +1,3 @@
-#define SDL_MAIN_HANDLED
-#include "SDL.h"
-
 #include <cstring>
 #include <cstdlib>
 #include <string>
@@ -9,8 +6,7 @@
 
 #include "client/Minecraft.h"
 #include "tools/SignBench.h"
-
-#include "external/SDLException.h"
+#include "tools/SceneCapture.h"
 
 #include "lwjgl/GLContext.h"
 #include "java/File.h"
@@ -19,8 +15,6 @@
 
 int main(int argc, char *argv[])
 {
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO) < 0)
-		throw SDLException();
 	lwjgl::GLContext::instantiate();
 
 	// Developer fixture, not part of the game: renders a wall of signs and logs
@@ -35,6 +29,12 @@ int main(int argc, char *argv[])
 
 	if (argc >= 2 && std::strcmp(argv[1], "--timer-probe") == 0)
 		return runTimerProbe((argc >= 3) ? std::atoi(argv[2]) : 0);
+
+	// Developer fixture, not part of the game: renders one deterministic frame
+	// at a requested resolution and writes it to a PNG. This is the framebuffer
+	// side of the parity harness. Usage: --capture [--help]
+	if (argc >= 2 && std::strcmp(argv[1], "--capture") == 0)
+		return runSceneCapture(argc, argv, 2);
 
 	// Try to read username from config file
 	jstring username = u"Player" + String::fromUTF8(std::to_string(System::currentTimeMillis() % 1000));

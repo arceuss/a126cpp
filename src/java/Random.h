@@ -20,6 +20,9 @@ private:
 public:
 	Random();
 	Random(long_t set_seed);
+	// Scene capture is one process with no later gameplay. This makes every
+	// subsequent no-argument Random reproducible without changing the default.
+	static void setDefaultSeedForCapture(long_t seed);
 
 	void setSeed(long_t set_seed);
 

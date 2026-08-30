@@ -308,7 +308,7 @@ void GameRenderer::renderItemInHand(float a, int_t eye)
 
 void GameRenderer::render(float a)
 {
-	if (!lwjgl::Display::isActive())
+	if (!mc.unattended && !lwjgl::Display::isActive())
 	{
 		if (System::currentTimeMillis() - lastActiveTime > 500)
 			mc.pauseGame();

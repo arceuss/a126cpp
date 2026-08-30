@@ -2,7 +2,7 @@
 
 #include <queue>
 
-#include "lwjgl/GLContext.h"
+#include "backends/Platform/Platform.h"
 #include "lwjgl/Display.h"
 
 #include "external/SDLException.h"
@@ -73,7 +73,7 @@ void pushEvent(const SDL_Event &e)
 
 void setCursorPosition(int_t x, int_t y)
 {
-	SDL_WarpMouseInWindow(GLContext::detail::getWindow(), x, y);
+	platform::setCursorPosition(x, y);
 }
 
 // Event handling
@@ -173,8 +173,6 @@ bool isButtonDown(int_t button)
 bool isGrabbed()
 {
 	return SDL_GetRelativeMouseMode() == SDL_TRUE;
-	// return SDL_GetWindowFlags(GLContext::detail::getWindow()) & SDL_WINDOW_MOUSE_CAPTURE;
-	// return SDL_GetWindowGrab(GLContext::detail::getWindow()) == SDL_TRUE;
 }
 
 void setGrabbed(bool grabbed)
@@ -186,7 +184,6 @@ void setGrabbed(bool grabbed)
 		throw SDLException();
 	SDL_SetRelativeMouseMode(grabbed ? SDL_TRUE : SDL_FALSE);
 	// SDL_CaptureMouse(grabbed ? SDL_TRUE : SDL_FALSE);
-	// SDL_SetWindowMouseGrab(GLContext::detail::getWindow(), grabbed ? SDL_TRUE : SDL_FALSE);
 }
 
 }

@@ -1,10 +1,6 @@
 #pragma once
 
 #include <string>
-#include <set>
-
-#include "SDL.h"
-#include "glad/glad.h"
 
 namespace lwjgl
 {
@@ -18,28 +14,13 @@ namespace detail
 // GL capabilities
 struct GLCapabilities
 {
-private:
-	std::set<std::string> caps;
-
-public:
-	void add(const std::string &cap)
-	{
-		caps.insert(cap);
-	}
-
-	bool operator[](const std::string &cap) const
-	{
-		return caps.find(cap) != caps.end();
-	}
+	bool operator[](const std::string &capability) const;
 };
-
-// Context singletons
-SDL_Window *getWindow();
-SDL_GLContext getGLContext();
 
 }
 
 // Context functions
+// Idempotent. The backend is selected when the executable is linked.
 void instantiate();
 const detail::GLCapabilities &getCapabilities();
 

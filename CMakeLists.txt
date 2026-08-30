@@ -958,12 +958,45 @@ set(Alpha126Cpp_SOURCES
 # An OBJECT library (not STATIC) is used deliberately: every translation unit is
 # always linked, so registries relying on translation-unit initialisation cannot
 # be silently discarded by the linker.
+set(A126_PLATFORM_BACKEND "SDL2" CACHE STRING "Platform backend: SDL2")
+set_property(CACHE A126_PLATFORM_BACKEND PROPERTY STRINGS SDL2)
+set(A126_PLATFORM_BACKEND_SOURCES)
+if(A126_PLATFORM_BACKEND STREQUAL "SDL2")
+	list(APPEND A126_PLATFORM_BACKEND_SOURCES
+		"src/backends/Platform/SDL2/Platform.cpp"
+		"src/backends/Platform/SDL2/Platform.h"
+	)
+	add_subdirectory("external/SDL2" EXCLUDE_FROM_ALL)
+	set(A126_PLATFORM_BACKEND_TARGET SDL2-static)
+else()
+	message(FATAL_ERROR "A126_PLATFORM_BACKEND must be SDL2")
+endif()
+
 add_library(Alpha126CppCore OBJECT
 	${Alpha126Cpp_SOURCES}
+	${A126_PLATFORM_BACKEND_SOURCES}
 
 	"src/pc/CrashHandler.cpp"
 	"src/pc/CrashHandler.h"
 	"src/pc/OpenGL.h"
+
+	"src/backends/Backend.h"
+	"src/backends/Platform/Platform.h"
+	"src/legacygl/Context.cpp"
+	"src/legacygl/Context.h"
+	"src/legacygl/Facade.cpp"
+	"src/legacygl/Geometry.h"
+	"src/legacygl/LegacyGL.h"
+	"src/legacygl/Matrix.cpp"
+	"src/legacygl/Matrix.h"
+	"src/legacygl/Primitive.cpp"
+	"src/legacygl/Primitive.h"
+	"src/legacygl/ResolvedCommands.h"
+	"src/legacygl/Sink.h"
+	"src/legacygl/Startup.cpp"
+	"src/legacygl/Startup.h"
+	"src/legacygl/Trace.cpp"
+	"src/legacygl/Trace.h"
 
 	"src/pc/external/miniaudio.cpp"
 	"src/pc/external/SDLException.h"
@@ -1053,11 +1086,175 @@ else()
 endif()
 
 # Third party
-add_subdirectory("external/glad" EXCLUDE_FROM_ALL)
-target_link_libraries(Alpha126CppCore PUBLIC glad)
+target_link_libraries(Alpha126CppCore PUBLIC ${A126_PLATFORM_BACKEND_TARGET})
 
-add_subdirectory("external/SDL2" EXCLUDE_FROM_ALL)
-target_link_libraries(Alpha126CppCore PUBLIC SDL2-static)
+add_subdirectory("external/glad" EXCLUDE_FROM_ALL)
+
+set(A126_RENDER_BACKEND "NativeGL" CACHE STRING "Renderer backend: NativeGL, OpenGL46, or Vulkan")
+set_property(CACHE A126_RENDER_BACKEND PROPERTY STRINGS NativeGL OpenGL46 Vulkan)
+option(A126_ENABLE_GL_GPU_TESTS "Enable serialized LegacyGL GPU parity tests" OFF)
+
+add_library(a126cpp-render-backend-nativegl STATIC EXCLUDE_FROM_ALL
+	"src/backends/NativeGL/Backend.cpp"
+	"src/backends/OpenGL/Context.cpp"
+	"src/backends/OpenGL/Context.h"
+)
+target_include_directories(a126cpp-render-backend-nativegl PRIVATE "src")
+target_link_libraries(a126cpp-render-backend-nativegl PRIVATE glad ${A126_PLATFORM_BACKEND_TARGET})
+set_target_properties(a126cpp-render-backend-nativegl PROPERTIES
+	CXX_STANDARD 17
+	CXX_STANDARD_REQUIRED YES
+	CXX_EXTENSIONS NO
+)
+
+add_library(a126cpp-render-backend-opengl46 STATIC EXCLUDE_FROM_ALL
+	"src/backends/OpenGL/Context.cpp"
+	"src/backends/OpenGL/Context.h"
+	"src/backends/OpenGL46/Backend.cpp"
+	"src/backends/OpenGL46/Shaders.cpp"
+	"src/backends/OpenGL46/Shaders.h"
+)
+target_include_directories(a126cpp-render-backend-opengl46 PRIVATE "src")
+target_link_libraries(a126cpp-render-backend-opengl46 PRIVATE glad ${A126_PLATFORM_BACKEND_TARGET})
+set_target_properties(a126cpp-render-backend-opengl46 PROPERTIES
+	CXX_STANDARD 17
+	CXX_STANDARD_REQUIRED YES
+	CXX_EXTENSIONS NO
+)
+
+if(A126_RENDER_BACKEND STREQUAL "Vulkan" OR A126_ENABLE_GL_GPU_TESTS)
+	set(A126_VULKAN_SDK_ROOT "" CACHE PATH "Vulkan SDK root override")
+	set(A126_VULKAN_SDK_CANDIDATES)
+	if(A126_VULKAN_SDK_ROOT)
+		list(APPEND A126_VULKAN_SDK_CANDIDATES "${A126_VULKAN_SDK_ROOT}")
+	endif()
+	if(DEFINED ENV{VULKAN_SDK} AND NOT "$ENV{VULKAN_SDK}" STREQUAL "")
+		file(TO_CMAKE_PATH "$ENV{VULKAN_SDK}" A126_VULKAN_SDK_FROM_ENV)
+		list(APPEND A126_VULKAN_SDK_CANDIDATES "${A126_VULKAN_SDK_FROM_ENV}")
+	endif()
+	if(WIN32)
+		file(GLOB A126_VULKAN_STANDARD_ROOTS LIST_DIRECTORIES true "C:/VulkanSDK/*")
+		list(SORT A126_VULKAN_STANDARD_ROOTS ORDER DESCENDING)
+		list(APPEND A126_VULKAN_SDK_CANDIDATES ${A126_VULKAN_STANDARD_ROOTS})
+	endif()
+	list(REMOVE_DUPLICATES A126_VULKAN_SDK_CANDIDATES)
+
+	if(NOT A126_VULKAN_SDK_ROOT)
+		find_package(Vulkan QUIET)
+	endif()
+	if(NOT Vulkan_FOUND AND WIN32)
+		# LunarG's installer does not update an already-running process's
+		# environment. Fall back to the versioned install roots so a fresh
+		# configure works from that process without hand-editing VULKAN_SDK.
+		if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+			set(A126_VULKAN_LIBRARY_DIR "Lib")
+		else()
+			set(A126_VULKAN_LIBRARY_DIR "Lib32")
+		endif()
+		foreach(A126_VULKAN_SDK_CANDIDATE IN LISTS A126_VULKAN_SDK_CANDIDATES)
+			if(EXISTS "${A126_VULKAN_SDK_CANDIDATE}/Include/vulkan/vulkan.h" AND
+				EXISTS "${A126_VULKAN_SDK_CANDIDATE}/${A126_VULKAN_LIBRARY_DIR}/vulkan-1.lib")
+				add_library(Vulkan::Vulkan UNKNOWN IMPORTED)
+				set_target_properties(Vulkan::Vulkan PROPERTIES
+					IMPORTED_LOCATION "${A126_VULKAN_SDK_CANDIDATE}/${A126_VULKAN_LIBRARY_DIR}/vulkan-1.lib"
+					INTERFACE_INCLUDE_DIRECTORIES "${A126_VULKAN_SDK_CANDIDATE}/Include"
+				)
+				set(Vulkan_FOUND TRUE)
+				message(STATUS "Found Vulkan SDK fallback: ${A126_VULKAN_SDK_CANDIDATE}")
+				break()
+			endif()
+		endforeach()
+	endif()
+	if(NOT Vulkan_FOUND)
+		message(FATAL_ERROR "A126_RENDER_BACKEND=Vulkan requires the Vulkan SDK")
+	endif()
+
+	set(A126_VULKAN_TOOL_HINTS)
+	foreach(A126_VULKAN_SDK_CANDIDATE IN LISTS A126_VULKAN_SDK_CANDIDATES)
+		list(APPEND A126_VULKAN_TOOL_HINTS
+			"${A126_VULKAN_SDK_CANDIDATE}/Bin"
+			"${A126_VULKAN_SDK_CANDIDATE}/bin"
+		)
+	endforeach()
+	find_program(A126_VULKAN_GLSLC_EXECUTABLE
+		NAMES glslc glslc.exe
+		HINTS ${A126_VULKAN_TOOL_HINTS}
+	)
+	if(NOT A126_VULKAN_GLSLC_EXECUTABLE)
+		message(FATAL_ERROR "The Vulkan backend requires glslc from the Vulkan SDK")
+	endif()
+	find_program(A126_VULKAN_SPIRV_VAL_EXECUTABLE
+		NAMES spirv-val spirv-val.exe
+		HINTS ${A126_VULKAN_TOOL_HINTS}
+	)
+
+	set(A126_VULKAN_GENERATED_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/vulkan")
+	set(A126_VULKAN_SHADER_OUTPUTS)
+	function(a126_add_vulkan_shader source name)
+		set(shader_spv "${A126_VULKAN_GENERATED_SHADER_DIR}/${name}.spv")
+		set(shader_inc "${A126_VULKAN_GENERATED_SHADER_DIR}/${name}.inc")
+		if(A126_VULKAN_SPIRV_VAL_EXECUTABLE)
+			add_custom_command(
+				OUTPUT "${shader_spv}" "${shader_inc}"
+				COMMAND ${CMAKE_COMMAND} -E make_directory "${A126_VULKAN_GENERATED_SHADER_DIR}"
+				COMMAND "${A126_VULKAN_GLSLC_EXECUTABLE}" --target-env=vulkan1.1 "${source}" -o "${shader_spv}"
+				COMMAND "${A126_VULKAN_SPIRV_VAL_EXECUTABLE}" --target-env vulkan1.1 "${shader_spv}"
+				COMMAND "${A126_VULKAN_GLSLC_EXECUTABLE}" --target-env=vulkan1.1 -mfmt=c "${source}" -o "${shader_inc}"
+				DEPENDS "${source}"
+				COMMENT "Compiling and validating Vulkan shader ${name}"
+				VERBATIM
+			)
+		else()
+			add_custom_command(
+				OUTPUT "${shader_spv}" "${shader_inc}"
+				COMMAND ${CMAKE_COMMAND} -E make_directory "${A126_VULKAN_GENERATED_SHADER_DIR}"
+				COMMAND "${A126_VULKAN_GLSLC_EXECUTABLE}" --target-env=vulkan1.1 "${source}" -o "${shader_spv}"
+				COMMAND "${A126_VULKAN_GLSLC_EXECUTABLE}" --target-env=vulkan1.1 -mfmt=c "${source}" -o "${shader_inc}"
+				DEPENDS "${source}"
+				COMMENT "Compiling Vulkan shader ${name}"
+				VERBATIM
+			)
+		endif()
+		set(A126_VULKAN_SHADER_OUTPUTS ${A126_VULKAN_SHADER_OUTPUTS} "${shader_spv}" "${shader_inc}" PARENT_SCOPE)
+	endfunction()
+
+	a126_add_vulkan_shader("${CMAKE_CURRENT_SOURCE_DIR}/src/backends/Vulkan/shaders/LegacyFFP.vert" "LegacyFFP.vert")
+	a126_add_vulkan_shader("${CMAKE_CURRENT_SOURCE_DIR}/src/backends/Vulkan/shaders/LegacyFFP.frag" "LegacyFFP.frag")
+	a126_add_vulkan_shader("${CMAKE_CURRENT_SOURCE_DIR}/src/backends/Vulkan/shaders/Clear.vert" "Clear.vert")
+	a126_add_vulkan_shader("${CMAKE_CURRENT_SOURCE_DIR}/src/backends/Vulkan/shaders/Clear.frag" "Clear.frag")
+	a126_add_vulkan_shader("${CMAKE_CURRENT_SOURCE_DIR}/src/backends/Vulkan/shaders/Present.vert" "Present.vert")
+	a126_add_vulkan_shader("${CMAKE_CURRENT_SOURCE_DIR}/src/backends/Vulkan/shaders/Present.frag" "Present.frag")
+	set_source_files_properties(${A126_VULKAN_SHADER_OUTPUTS} PROPERTIES GENERATED TRUE HEADER_FILE_ONLY TRUE)
+	add_custom_target(a126cpp-vulkan-shaders DEPENDS ${A126_VULKAN_SHADER_OUTPUTS})
+
+	add_library(a126cpp-render-backend-vulkan STATIC EXCLUDE_FROM_ALL
+		"src/backends/Vulkan/Backend.cpp"
+		"src/backends/Vulkan/Shaders.cpp"
+		"src/backends/Vulkan/Shaders.h"
+		${A126_VULKAN_SHADER_OUTPUTS}
+	)
+	add_dependencies(a126cpp-render-backend-vulkan a126cpp-vulkan-shaders)
+	target_include_directories(a126cpp-render-backend-vulkan PRIVATE
+		"src"
+		"${A126_VULKAN_GENERATED_SHADER_DIR}"
+	)
+	target_link_libraries(a126cpp-render-backend-vulkan PRIVATE Vulkan::Vulkan)
+	set_target_properties(a126cpp-render-backend-vulkan PROPERTIES
+		CXX_STANDARD 17
+		CXX_STANDARD_REQUIRED YES
+		CXX_EXTENSIONS NO
+	)
+endif()
+
+if(A126_RENDER_BACKEND STREQUAL "NativeGL")
+	set(A126_RENDER_BACKEND_TARGET a126cpp-render-backend-nativegl)
+elseif(A126_RENDER_BACKEND STREQUAL "OpenGL46")
+	set(A126_RENDER_BACKEND_TARGET a126cpp-render-backend-opengl46)
+elseif(A126_RENDER_BACKEND STREQUAL "Vulkan")
+	set(A126_RENDER_BACKEND_TARGET a126cpp-render-backend-vulkan)
+else()
+	message(FATAL_ERROR "A126_RENDER_BACKEND must be NativeGL, OpenGL46, or Vulkan")
+endif()
 
 # zlib ships add_test(example ...) hooks whose executables we do not build;
 # disable the example targets so ctest does not report them as missing tests.
@@ -1102,10 +1299,12 @@ endif()
 # Client executable
 add_executable(Alpha126Cpp
 	"src/pc/Main.cpp"
+	"src/tools/SceneCapture.cpp"
+	"src/tools/SceneCapture.h"
 	"src/tools/SignBench.cpp"
 	"src/tools/SignBench.h"
 )
-target_link_libraries(Alpha126Cpp PRIVATE Alpha126CppCore)
+target_link_libraries(Alpha126Cpp PRIVATE Alpha126CppCore ${A126_RENDER_BACKEND_TARGET})
 
 if(WIN32)
 	target_sources(Alpha126Cpp PRIVATE
@@ -1144,7 +1343,7 @@ add_executable(a126cpp-headless-tests
 
 	${Alpha126Cpp_HEADLESS_TESTS}
 )
-target_link_libraries(a126cpp-headless-tests PRIVATE Alpha126CppCore)
+target_link_libraries(a126cpp-headless-tests PRIVATE Alpha126CppCore ${A126_RENDER_BACKEND_TARGET})
 
 set_target_properties(a126cpp-headless-tests PROPERTIES
 	CXX_STANDARD 17
@@ -1152,8 +1351,55 @@ set_target_properties(a126cpp-headless-tests PROPERTIES
 	CXX_EXTENSIONS NO
 )
 
+# GL inventory checker. Standalone on purpose: it only reads source text, so it
+# does not link the game and stays fast enough to run on every build.
+add_executable(a126cpp-gl-inventory
+	"src/tools/GlInventory.cpp"
+)
+target_compile_definitions(a126cpp-gl-inventory PRIVATE
+	A126_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+set_target_properties(a126cpp-gl-inventory PROPERTIES
+	CXX_STANDARD 17
+	CXX_STANDARD_REQUIRED YES
+	CXX_EXTENSIONS NO
+)
+
+if(A126_ENABLE_GL_GPU_TESTS)
+	# Each fixture process links exactly one backend. Comparison does not create
+	# a context, so either executable can compare the two text records.
+	add_executable(a126cpp-legacygl-gpu-parity-native
+		"src/tools/LegacyGLGpuParity.cpp"
+	)
+	target_link_libraries(a126cpp-legacygl-gpu-parity-native PRIVATE
+		Alpha126CppCore a126cpp-render-backend-nativegl
+	)
+
+	add_executable(a126cpp-legacygl-gpu-parity-gl46
+		"src/tools/LegacyGLGpuParity.cpp"
+	)
+	target_link_libraries(a126cpp-legacygl-gpu-parity-gl46 PRIVATE
+		Alpha126CppCore a126cpp-render-backend-opengl46
+	)
+
+	add_executable(a126cpp-legacygl-gpu-parity-vulkan
+		"src/tools/LegacyGLGpuParity.cpp"
+	)
+	target_link_libraries(a126cpp-legacygl-gpu-parity-vulkan PRIVATE
+		Alpha126CppCore a126cpp-render-backend-vulkan
+	)
+
+	set_target_properties(a126cpp-legacygl-gpu-parity-native a126cpp-legacygl-gpu-parity-gl46
+		a126cpp-legacygl-gpu-parity-vulkan PROPERTIES
+		CXX_STANDARD 17
+		CXX_STANDARD_REQUIRED YES
+		CXX_EXTENSIONS NO
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
+	)
+endif()
+
 # Output to bin/ directory
-set_target_properties(Alpha126Cpp a126cpp-headless-tests PROPERTIES
+set_target_properties(Alpha126Cpp a126cpp-headless-tests a126cpp-gl-inventory PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
 )
 
@@ -1171,6 +1417,26 @@ if(WIN32 AND TARGET OpenAL32)
 			"$<TARGET_FILE_DIR:a126cpp-headless-tests>/OpenAL32.dll"
 		COMMENT "Copying OpenAL32.dll to output directory"
 	)
+	if(A126_ENABLE_GL_GPU_TESTS)
+		add_custom_command(TARGET a126cpp-legacygl-gpu-parity-native POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				"$<TARGET_FILE:OpenAL32>"
+				"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-native>/OpenAL32.dll"
+			COMMENT "Copying OpenAL32.dll to output directory"
+		)
+		add_custom_command(TARGET a126cpp-legacygl-gpu-parity-gl46 POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				"$<TARGET_FILE:OpenAL32>"
+				"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-gl46>/OpenAL32.dll"
+			COMMENT "Copying OpenAL32.dll to output directory"
+		)
+		add_custom_command(TARGET a126cpp-legacygl-gpu-parity-vulkan POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				"$<TARGET_FILE:OpenAL32>"
+				"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-vulkan>/OpenAL32.dll"
+			COMMENT "Copying OpenAL32.dll to output directory"
+		)
+	endif()
 endif()
 
 # Copy resource folder to output directory next to executable
@@ -1185,3 +1451,53 @@ add_custom_command(TARGET Alpha126Cpp POST_BUILD
 
 enable_testing()
 add_test(NAME headless COMMAND a126cpp-headless-tests --all)
+
+# The frontend surface must keep matching what the renderer issues. A new GL
+# call without a semantic implementation fails this test.
+add_test(NAME gl-inventory COMMAND a126cpp-gl-inventory)
+
+if(A126_ENABLE_GL_GPU_TESTS)
+	set(A126_GL_GPU_NATIVE_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-native.txt")
+	set(A126_GL_GPU_GL46_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-gl46.txt")
+	set(A126_GL_GPU_VULKAN_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-vulkan.txt")
+
+	add_test(NAME legacygl-gpu-record-native
+		COMMAND a126cpp-legacygl-gpu-parity-native --record "${A126_GL_GPU_NATIVE_RECORD}"
+	)
+	set_tests_properties(legacygl-gpu-record-native PROPERTIES
+		FIXTURES_SETUP legacygl-gpu-records
+		RESOURCE_LOCK legacygl-gpu
+	)
+
+	add_test(NAME legacygl-gpu-record-gl46
+		COMMAND a126cpp-legacygl-gpu-parity-gl46 --record "${A126_GL_GPU_GL46_RECORD}"
+	)
+	set_tests_properties(legacygl-gpu-record-gl46 PROPERTIES
+		FIXTURES_SETUP legacygl-gpu-records
+		RESOURCE_LOCK legacygl-gpu
+	)
+
+	add_test(NAME legacygl-gpu-record-vulkan
+		COMMAND a126cpp-legacygl-gpu-parity-vulkan --record "${A126_GL_GPU_VULKAN_RECORD}"
+	)
+	set_tests_properties(legacygl-gpu-record-vulkan PROPERTIES
+		FIXTURES_SETUP legacygl-gpu-records
+		RESOURCE_LOCK legacygl-gpu
+	)
+
+	add_test(NAME legacygl-gpu-compare
+		COMMAND a126cpp-legacygl-gpu-parity-native --compare "${A126_GL_GPU_NATIVE_RECORD}" "${A126_GL_GPU_GL46_RECORD}"
+	)
+	set_tests_properties(legacygl-gpu-compare PROPERTIES
+		FIXTURES_REQUIRED legacygl-gpu-records
+		RESOURCE_LOCK legacygl-gpu
+	)
+
+	add_test(NAME legacygl-gpu-compare-vulkan
+		COMMAND a126cpp-legacygl-gpu-parity-native --compare "${A126_GL_GPU_NATIVE_RECORD}" "${A126_GL_GPU_VULKAN_RECORD}"
+	)
+	set_tests_properties(legacygl-gpu-compare-vulkan PROPERTIES
+		FIXTURES_REQUIRED legacygl-gpu-records
+		RESOURCE_LOCK legacygl-gpu
+	)
+endif()

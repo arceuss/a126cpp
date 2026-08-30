@@ -11,6 +11,9 @@ static constexpr ulong_t RANDOM_MUL = 0x5DEECE66DULL;
 static constexpr ulong_t RANDOM_ADD = 0xBULL;
 static constexpr ulong_t RANDOM_AND = (1ULL << 48) - 1;
 
+static bool useCaptureDefaultSeed = false;
+static long_t captureDefaultSeed = 0;
+
 // Reinterpret the low 32 bits as a Java int. A plain conversion of a value
 // above INT_MAX is implementation defined before C++20, so go through the
 // object representation.
@@ -30,6 +33,12 @@ static long_t toJavaLong(ulong_t bits)
 
 Random::Random()
 {
+	if (useCaptureDefaultSeed)
+	{
+		setSeed(captureDefaultSeed);
+		return;
+	}
+
 	// Java seeds the no-argument constructor from a uniquifier combined with
 	// System.nanoTime(), which is not reproducible by design. Only the seeded
 	// constructor carries a parity guarantee.
@@ -41,6 +50,12 @@ Random::Random()
 Random::Random(long_t set_seed)
 {
 	setSeed(set_seed);
+}
+
+void Random::setDefaultSeedForCapture(long_t seed)
+{
+	captureDefaultSeed = seed;
+	useCaptureDefaultSeed = true;
 }
 
 void Random::setSeed(long_t set_seed)
