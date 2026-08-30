@@ -83,26 +83,31 @@ rather than something to hide behind a global epsilon.
 
 ### Translated-backend measurements
 
-OpenGL 4.6 and Vulkan were exercised on the same RTX 5070. The GL46 startup log
-reported NVIDIA driver 610.88, OpenGL 4.6 and `profile=core`; compatibility
-fallback is explicitly rejected. Vulkan reported loader 1.4.357 and device API
-1.4.341, plus `line rasterization=bresenham, subpixelBits=8`. Its Debug runs
-enabled `VK_LAYER_KHRONOS_validation` and shut down with zero validation errors.
+OpenGL 4.6, Vulkan and D3D12 were exercised on the same RTX 5070. The GL46
+startup log reported NVIDIA driver 610.88, OpenGL 4.6 and `profile=core`;
+compatibility fallback is explicitly rejected. Vulkan reported loader 1.4.357
+and device API 1.4.341, plus `line rasterization=bresenham, subpixelBits=8`.
+Vulkan Debug runs enabled `VK_LAYER_KHRONOS_validation` and shut down with zero
+validation errors. A full Debug D3D12 capture also reported zero validation
+errors; its 463 messages were performance-only clear warning ID 820.
 
-The backend-specific GPU fixture records 82 alpha, texture, clamp, clear,
-readback, polygon, line, shader and logical-object cases. On this machine every
-GL46 and every Vulkan case payload matched the native oracle byte for byte,
-including all four line masks. The comparison still retains its documented
-per-case tolerance and fallback classifications for other implementations; an
-exact result on one device is evidence, not a reason to erase those classes.
+Each backend-specific GPU fixture records the same 129 alpha, texture, clamp,
+clear, readback, polygon, line, cull, depth, blend, logic-op, transform, shader,
+array, frame-lifetime and logical-object cases. All six pairwise comparisons
+pass on this machine. That includes distinct none/rescale/normalize signatures,
+all 16 logic operations, client- and buffer-backed 32-byte interleaved arrays,
+texture redefinition across asynchronous frame-slot reuse and deleting texture
+name zero without changing its default object. Exact cases remain exact;
+documented interpolation allowances and the width-2 line fallback remain
+case-specific classifications rather than a global tolerance.
 
-The deterministic 1920x1080 capture produced byte-identical PNGs on repeated
-runs of each backend. Native and GL46 differed at 510 of 2,073,600 pixels
-(0.024594907%). GL46 and Vulkan differed at 55 pixels (0.002652391975%), with
-identical alpha. Both are sparse rasterization/interpolation edge differences,
-not a state or scene divergence and not a license for a global epsilon. The
-final-render traces were byte-identical across NativeGL, GL46 and Vulkan; the
-complete measurements and hashes are in `parity-testing.md`.
+The deterministic 1920x1080 captures produced byte-identical PNGs on repeated
+runs of each backend. The six pairwise mismatch counts range from 55 pixels for
+GL46-to-Vulkan to 2,211 for NativeGL-to-D3D12, and alpha is exact in every pair.
+D3D12's differences are sparse edge/line components, including its classified
+width-2-to-width-1 fallback; they are not a state divergence or a reason to
+widen a tolerance. The final-render traces are byte-identical across all four
+backends; the complete measurements and hashes are in `parity-testing.md`.
 
 ## Specification decisions
 
@@ -158,12 +163,12 @@ with linear filtering, legacy clamping blends against the border colour at the
 edge, and edge clamping repeats the edge texel instead. `Textures.cpp` selects it
 for `%clamp%` resources.
 
-Both translated backends represent this with a one-texel gutter around level
+All three translated backends represent this with a one-texel gutter around level
 zero and remap a clamped source coordinate with
 `(u * width + 1) / (width + 2)` (and the corresponding height expression). The
 upper endpoint is biased down by one ulp so nearest filtering still selects the
 last source texel. Repeat and clamp can be selected independently per axis. This
-matched the focused native fixture in both backends; using
+matched the focused native fixture in all three backends; using
 `GL_CLAMP_TO_EDGE`, or remapping to a half-texel range without a gutter, did
 not.
 
@@ -180,7 +185,10 @@ silently sample level zero of an incomplete texture.
 Names have three states: unused, reserved by `glGenTextures`, and an object
 created by the first bind. Binding an unused nonzero name also creates an object.
 Deleting the bound object rebinds zero; deleting zero or an unknown name is
-ignored.
+ignored. The GPU case `texture.zero-delete-preserves-default` was added after it
+caught a translated-backend regression that released the physical default
+texture for name zero; all four recorders now preserve the same texel before and
+after that delete.
 
 ### Matrix stack depths
 
@@ -212,10 +220,15 @@ does.
 - Immediate-mode commands are compiled individually, not captured as finished
   geometry, so vertices read the current attributes the list installs while it
   runs.
-- `glTexImage2D`/`glTexSubImage2D` inside a list raise `GL_INVALID_OPERATION`.
-  They are list-compilable in OpenGL, but no path in the renderer does it, and
-  the alternative would be capturing an image whose size the core does not track
-  byte-for-byte. This is a deliberate narrowing, not an oversight.
+- `glTexImage2D` and `glTexSubImage2D` are list-compilable. Their pixel bytes and
+  issue-time unpack alignment are copied into the list; no caller pointer is
+  retained. The copy includes padding between rows but not padding after the
+  final row: `(height - 1) * alignedRowStride + rowBytes`.
+- Texture binding, level definition and sub-image bounds are resolved when the
+  list executes. This lets a list bind a first-use texture, define its image and
+  then patch it in command order. `GL_COMPILE` changes no texture state;
+  `GL_COMPILE_AND_EXECUTE` applies the upload once immediately and records it for
+  later calls.
 - Nesting is capped at the OpenGL minimum of 64; exceeding it sets
   `GL_STACK_OVERFLOW` instead of recursing without bound.
 - `glCallLists` decodes the six integer element types. `GL_2_BYTES`,
@@ -228,13 +241,20 @@ does.
 Capturing vertices costs memory that mirrors what the driver already stores. A
 chunk list holds up to 4680 vertices, and a far render distance keeps thousands
 of chunk lists alive, so capture is conditional on the active backend asking for
-canonical geometry. The native oracle does not, and pays nothing; both
+canonical geometry. The native oracle does not, and pays nothing; all three
 translated backends do, and get the data the specification requires.
 
 The consequence is that the backend has to be installed before display lists are
 built. `GLContext::instantiate()` does that before any renderer code runs. The
-backend is chosen at configure time with `A126_RENDER_BACKEND`, and exactly one
-is linked into a production executable; switching at run time is not supported.
+provider is selected by `--backend` before that call; switching after startup is
+not supported.
+
+Captured geometry may omit colour, normal or texture coordinates and resolve
+those attributes from current state at list execution. A resident backend cache
+must therefore key each geometry variant by the execution-time values of every
+missing attribute as well as the residency identity. The
+`list.execution-current-color-variants` GPU case directly checks this by drawing
+one colourless list under red and then green current colour.
 
 ### Deterministic capture timing
 
@@ -249,22 +269,22 @@ frozen clock. This is capture-fixture control, not a renderer behaviour change.
 Legacy GL enables dithering by default, the facade tracks that state, and the
 renderer never changes it. NativeGL and GL46 preserve the driver's behaviour.
 Vulkan receives the enabled state in resolved draws, but the verified RTX 5070
-does not expose `VK_EXT_legacy_dithering`, so there is no supported pipeline
-state with which to reproduce it. The backend does not invent a shader dither or
-silently disable the oracle's dither. The chosen parity policy is to preserve
-the native behaviour and classify the resulting sparse framebuffer differences.
-Every future golden manifest must record the API/device capability and this
-policy; current Gate D evidence remains preliminary rather than a widened
-tolerance.
+does not expose `VK_EXT_legacy_dithering`; D3D12 likewise has no equivalent
+fixed-function pipeline switch. Neither backend invents a shader dither.
+The parity policy is still unresolved, so current Gate D measurements record
+the API/device behaviour without treating sparse differences as a widened
+tolerance. The choices that must be settled before framebuffer goldens are
+listed in `parity-testing.md`.
 
 ### Polygon offset and line width
 
 The OpenGL 4.6 backend applies the canonical polygon-offset factor and units at
 draw lowering. Vulkan maps the canonical units to `depthBiasConstantFactor`, the
-factor to `depthBiasSlopeFactor`, and uses a zero clamp. All ten coplanar GPU
-fixture cases matched the native oracle exactly on the tested NVIDIA
-configuration. A future API/device combination still has to pass that
-calibration; this result is not a portable constant asserted without evidence.
+factor to `depthBiasSlopeFactor`, and uses a zero clamp. D3D12 lowers the same
+canonical values into its rasterizer state. All ten coplanar cases pass all six
+backend comparisons on the tested NVIDIA configuration. A future API/device
+combination still has to pass that calibration; this result is not a portable
+constant asserted without evidence.
 
 For Vulkan lines, device creation prefers `VK_KHR_line_rasterization`, then
 `VK_EXT_line_rasterization`, and enables explicit Bresenham rasterization only
@@ -278,10 +298,11 @@ device.
 The line-rasterization extension is optional. If neither spelling supplies the
 Bresenham feature, Vulkan logs `default-fallback`; Gate B still requires the
 width-1 masks to match exactly and only permits the existing width-2
-width-one-fallback or one-pixel-boundary classifications. Both translated
-backends use a requested wide line when the device range supports it, otherwise
-report the limitation once and fall back to width 1. Line smoothing is not
-emulated and is unused by Alpha.
+width-one-fallback or one-pixel-boundary classifications. OpenGL 4.6 and Vulkan
+use a requested wide line when the device range supports it. D3D12 has no line-
+width rasterizer state, reports a requested width greater than 1 once and uses
+the explicitly classified width-1 fallback. Line smoothing is not emulated and
+is unused by Alpha.
 
 ### Rejected rather than approximated
 
@@ -303,9 +324,19 @@ renderer path that starts using one fails loudly at the `gl-inventory` test or a
   distinct legacy internal formats. Alpha has `Textures::MIPMAP=false` and its
   exercised uploads use the supported RGBA representation, so neither limitation
   affects the verified scene or fixture.
+- **Scissor rectangle.** The call stream contains no `glScissor` call, and the
+  resolved ABI therefore carries only the enable plus the context's default
+  box. Non-default scissor rectangles need an inventoried call and resolved
+  state before any translated backend can claim them.
+- **Out-of-bounds readback.** Vulkan and D3D12 readback is verified for in-bounds
+  rectangles. A future out-of-bounds `glReadPixels` call needs explicit GL
+  clipping and untouched destination regions before an image-to-buffer copy.
+- **Dithering policy.** The translated explicit APIs have no verified equivalent
+  for the oracle's default-enabled state. The golden policy remains to be
+  selected; current sparse image differences do not decide it implicitly.
 - **Coverage breadth.** Framebuffer comparison currently covers one deterministic
   scene, one NVIDIA GPU/driver and no authoritative golden corpus. Sparse
   rasterization differences are classified, not promoted into a broad tolerance.
 - **Translated query validation.** `A126_LEGACYGL_VALIDATE=1` is an oracle tool
-  for the native backend. GL46 and Vulkan do not expose compatibility-driver
-  query hooks; game queries are still answered only from the shared core.
+  for the native backend. GL46, Vulkan and D3D12 do not expose compatibility-
+  driver query hooks; game queries are still answered only from the shared core.

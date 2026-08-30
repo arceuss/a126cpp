@@ -1090,17 +1090,37 @@ target_link_libraries(Alpha126CppCore PUBLIC ${A126_PLATFORM_BACKEND_TARGET})
 
 add_subdirectory("external/glad" EXCLUDE_FROM_ALL)
 
-set(A126_RENDER_BACKEND "NativeGL" CACHE STRING "Renderer backend: NativeGL, OpenGL46, or Vulkan")
-set_property(CACHE A126_RENDER_BACKEND PROPERTY STRINGS NativeGL OpenGL46 Vulkan)
+if(DEFINED A126_RENDER_BACKEND)
+	message(STATUS "Ignoring deprecated A126_RENDER_BACKEND=${A126_RENDER_BACKEND}; select the renderer at runtime")
+	unset(A126_RENDER_BACKEND CACHE)
+	unset(A126_RENDER_BACKEND)
+endif()
+
+option(A126_ENABLE_VULKAN_BACKEND "Build the Vulkan renderer backend" ON)
+if(WIN32)
+	option(A126_ENABLE_D3D12_BACKEND "Build the Direct3D 12 renderer backend" ON)
+else()
+	set(A126_ENABLE_D3D12_BACKEND OFF)
+endif()
 option(A126_ENABLE_GL_GPU_TESTS "Enable serialized LegacyGL GPU parity tests" OFF)
 
-add_library(a126cpp-render-backend-nativegl STATIC EXCLUDE_FROM_ALL
-	"src/backends/NativeGL/Backend.cpp"
+add_library(a126cpp-render-backend-opengl-context STATIC EXCLUDE_FROM_ALL
 	"src/backends/OpenGL/Context.cpp"
 	"src/backends/OpenGL/Context.h"
 )
+target_include_directories(a126cpp-render-backend-opengl-context PRIVATE "src")
+target_link_libraries(a126cpp-render-backend-opengl-context PUBLIC glad ${A126_PLATFORM_BACKEND_TARGET})
+set_target_properties(a126cpp-render-backend-opengl-context PROPERTIES
+	CXX_STANDARD 17
+	CXX_STANDARD_REQUIRED YES
+	CXX_EXTENSIONS NO
+)
+
+add_library(a126cpp-render-backend-nativegl STATIC EXCLUDE_FROM_ALL
+	"src/backends/NativeGL/Backend.cpp"
+)
 target_include_directories(a126cpp-render-backend-nativegl PRIVATE "src")
-target_link_libraries(a126cpp-render-backend-nativegl PRIVATE glad ${A126_PLATFORM_BACKEND_TARGET})
+target_link_libraries(a126cpp-render-backend-nativegl PRIVATE a126cpp-render-backend-opengl-context)
 set_target_properties(a126cpp-render-backend-nativegl PROPERTIES
 	CXX_STANDARD 17
 	CXX_STANDARD_REQUIRED YES
@@ -1108,21 +1128,19 @@ set_target_properties(a126cpp-render-backend-nativegl PROPERTIES
 )
 
 add_library(a126cpp-render-backend-opengl46 STATIC EXCLUDE_FROM_ALL
-	"src/backends/OpenGL/Context.cpp"
-	"src/backends/OpenGL/Context.h"
 	"src/backends/OpenGL46/Backend.cpp"
 	"src/backends/OpenGL46/Shaders.cpp"
 	"src/backends/OpenGL46/Shaders.h"
 )
 target_include_directories(a126cpp-render-backend-opengl46 PRIVATE "src")
-target_link_libraries(a126cpp-render-backend-opengl46 PRIVATE glad ${A126_PLATFORM_BACKEND_TARGET})
+target_link_libraries(a126cpp-render-backend-opengl46 PRIVATE a126cpp-render-backend-opengl-context)
 set_target_properties(a126cpp-render-backend-opengl46 PROPERTIES
 	CXX_STANDARD 17
 	CXX_STANDARD_REQUIRED YES
 	CXX_EXTENSIONS NO
 )
 
-if(A126_RENDER_BACKEND STREQUAL "Vulkan" OR A126_ENABLE_GL_GPU_TESTS)
+if(A126_ENABLE_VULKAN_BACKEND)
 	set(A126_VULKAN_SDK_ROOT "" CACHE PATH "Vulkan SDK root override")
 	set(A126_VULKAN_SDK_CANDIDATES)
 	if(A126_VULKAN_SDK_ROOT)
@@ -1139,9 +1157,10 @@ if(A126_RENDER_BACKEND STREQUAL "Vulkan" OR A126_ENABLE_GL_GPU_TESTS)
 	endif()
 	list(REMOVE_DUPLICATES A126_VULKAN_SDK_CANDIDATES)
 
-	if(NOT A126_VULKAN_SDK_ROOT)
-		find_package(Vulkan QUIET)
+	if(A126_VULKAN_SDK_ROOT)
+		set(Vulkan_ROOT "${A126_VULKAN_SDK_ROOT}")
 	endif()
+	find_package(Vulkan QUIET)
 	if(NOT Vulkan_FOUND AND WIN32)
 		# LunarG's installer does not update an already-running process's
 		# environment. Fall back to the versioned install roots so a fresh
@@ -1166,7 +1185,7 @@ if(A126_RENDER_BACKEND STREQUAL "Vulkan" OR A126_ENABLE_GL_GPU_TESTS)
 		endforeach()
 	endif()
 	if(NOT Vulkan_FOUND)
-		message(FATAL_ERROR "A126_RENDER_BACKEND=Vulkan requires the Vulkan SDK")
+		message(FATAL_ERROR "A126_ENABLE_VULKAN_BACKEND=ON requires the Vulkan SDK")
 	endif()
 
 	set(A126_VULKAN_TOOL_HINTS)
@@ -1237,8 +1256,8 @@ if(A126_RENDER_BACKEND STREQUAL "Vulkan" OR A126_ENABLE_GL_GPU_TESTS)
 	target_include_directories(a126cpp-render-backend-vulkan PRIVATE
 		"src"
 		"${A126_VULKAN_GENERATED_SHADER_DIR}"
+		"$<TARGET_PROPERTY:Vulkan::Vulkan,INTERFACE_INCLUDE_DIRECTORIES>"
 	)
-	target_link_libraries(a126cpp-render-backend-vulkan PRIVATE Vulkan::Vulkan)
 	set_target_properties(a126cpp-render-backend-vulkan PROPERTIES
 		CXX_STANDARD 17
 		CXX_STANDARD_REQUIRED YES
@@ -1246,14 +1265,19 @@ if(A126_RENDER_BACKEND STREQUAL "Vulkan" OR A126_ENABLE_GL_GPU_TESTS)
 	)
 endif()
 
-if(A126_RENDER_BACKEND STREQUAL "NativeGL")
-	set(A126_RENDER_BACKEND_TARGET a126cpp-render-backend-nativegl)
-elseif(A126_RENDER_BACKEND STREQUAL "OpenGL46")
-	set(A126_RENDER_BACKEND_TARGET a126cpp-render-backend-opengl46)
-elseif(A126_RENDER_BACKEND STREQUAL "Vulkan")
-	set(A126_RENDER_BACKEND_TARGET a126cpp-render-backend-vulkan)
-else()
-	message(FATAL_ERROR "A126_RENDER_BACKEND must be NativeGL, OpenGL46, or Vulkan")
+if(WIN32 AND A126_ENABLE_D3D12_BACKEND)
+	add_library(a126cpp-render-backend-d3d12 STATIC EXCLUDE_FROM_ALL
+		"src/backends/D3D12/Backend.cpp"
+		"src/backends/D3D12/Shaders.cpp"
+		"src/backends/D3D12/Shaders.h"
+	)
+	target_include_directories(a126cpp-render-backend-d3d12 PRIVATE "src")
+	target_link_libraries(a126cpp-render-backend-d3d12 PRIVATE d3d12 dxgi d3dcompiler)
+	set_target_properties(a126cpp-render-backend-d3d12 PROPERTIES
+		CXX_STANDARD 17
+		CXX_STANDARD_REQUIRED YES
+		CXX_EXTENSIONS NO
+	)
 endif()
 
 # zlib ships add_test(example ...) hooks whose executables we do not build;
@@ -1298,13 +1322,30 @@ endif()
 
 # Client executable
 add_executable(Alpha126Cpp
+	"src/backends/Backend.cpp"
 	"src/pc/Main.cpp"
 	"src/tools/SceneCapture.cpp"
 	"src/tools/SceneCapture.h"
 	"src/tools/SignBench.cpp"
 	"src/tools/SignBench.h"
 )
-target_link_libraries(Alpha126Cpp PRIVATE Alpha126CppCore ${A126_RENDER_BACKEND_TARGET})
+target_compile_definitions(Alpha126Cpp PRIVATE
+	A126_HAS_BACKEND_NATIVEGL=1
+	A126_HAS_BACKEND_OPENGL46=1
+)
+target_link_libraries(Alpha126Cpp PRIVATE
+	Alpha126CppCore
+	a126cpp-render-backend-nativegl
+	a126cpp-render-backend-opengl46
+)
+if(A126_ENABLE_VULKAN_BACKEND)
+	target_compile_definitions(Alpha126Cpp PRIVATE A126_HAS_BACKEND_VULKAN=1)
+	target_link_libraries(Alpha126Cpp PRIVATE a126cpp-render-backend-vulkan)
+endif()
+if(A126_ENABLE_D3D12_BACKEND)
+	target_compile_definitions(Alpha126Cpp PRIVATE A126_HAS_BACKEND_D3D12=1)
+	target_link_libraries(Alpha126Cpp PRIVATE a126cpp-render-backend-d3d12)
+endif()
 
 if(WIN32)
 	target_sources(Alpha126Cpp PRIVATE
@@ -1335,6 +1376,7 @@ file(GLOB Alpha126Cpp_HEADLESS_TESTS CONFIGURE_DEPENDS
 )
 
 add_executable(a126cpp-headless-tests
+	"src/backends/Backend.cpp"
 	"src/tools/headless/TestFramework.cpp"
 	"src/tools/headless/TestFramework.h"
 	"src/tools/headless/TestWorld.cpp"
@@ -1343,7 +1385,8 @@ add_executable(a126cpp-headless-tests
 
 	${Alpha126Cpp_HEADLESS_TESTS}
 )
-target_link_libraries(a126cpp-headless-tests PRIVATE Alpha126CppCore ${A126_RENDER_BACKEND_TARGET})
+target_compile_definitions(a126cpp-headless-tests PRIVATE A126_HAS_BACKEND_NATIVEGL=1)
+target_link_libraries(a126cpp-headless-tests PRIVATE Alpha126CppCore a126cpp-render-backend-nativegl)
 
 set_target_properties(a126cpp-headless-tests PROPERTIES
 	CXX_STANDARD 17
@@ -1369,28 +1412,51 @@ if(A126_ENABLE_GL_GPU_TESTS)
 	# Each fixture process links exactly one backend. Comparison does not create
 	# a context, so either executable can compare the two text records.
 	add_executable(a126cpp-legacygl-gpu-parity-native
+		"src/backends/Backend.cpp"
 		"src/tools/LegacyGLGpuParity.cpp"
 	)
+	target_compile_definitions(a126cpp-legacygl-gpu-parity-native PRIVATE A126_HAS_BACKEND_NATIVEGL=1)
 	target_link_libraries(a126cpp-legacygl-gpu-parity-native PRIVATE
 		Alpha126CppCore a126cpp-render-backend-nativegl
 	)
 
 	add_executable(a126cpp-legacygl-gpu-parity-gl46
+		"src/backends/Backend.cpp"
 		"src/tools/LegacyGLGpuParity.cpp"
 	)
+	target_compile_definitions(a126cpp-legacygl-gpu-parity-gl46 PRIVATE A126_HAS_BACKEND_OPENGL46=1)
 	target_link_libraries(a126cpp-legacygl-gpu-parity-gl46 PRIVATE
 		Alpha126CppCore a126cpp-render-backend-opengl46
 	)
 
-	add_executable(a126cpp-legacygl-gpu-parity-vulkan
-		"src/tools/LegacyGLGpuParity.cpp"
+	set(A126_GL_GPU_PARITY_TARGETS
+		a126cpp-legacygl-gpu-parity-native
+		a126cpp-legacygl-gpu-parity-gl46
 	)
-	target_link_libraries(a126cpp-legacygl-gpu-parity-vulkan PRIVATE
-		Alpha126CppCore a126cpp-render-backend-vulkan
-	)
+	if(A126_ENABLE_VULKAN_BACKEND)
+		add_executable(a126cpp-legacygl-gpu-parity-vulkan
+			"src/backends/Backend.cpp"
+			"src/tools/LegacyGLGpuParity.cpp"
+		)
+		target_compile_definitions(a126cpp-legacygl-gpu-parity-vulkan PRIVATE A126_HAS_BACKEND_VULKAN=1)
+		target_link_libraries(a126cpp-legacygl-gpu-parity-vulkan PRIVATE
+			Alpha126CppCore a126cpp-render-backend-vulkan
+		)
+		list(APPEND A126_GL_GPU_PARITY_TARGETS a126cpp-legacygl-gpu-parity-vulkan)
+	endif()
+	if(A126_ENABLE_D3D12_BACKEND)
+		add_executable(a126cpp-legacygl-gpu-parity-d3d12
+			"src/backends/Backend.cpp"
+			"src/tools/LegacyGLGpuParity.cpp"
+		)
+		target_compile_definitions(a126cpp-legacygl-gpu-parity-d3d12 PRIVATE A126_HAS_BACKEND_D3D12=1)
+		target_link_libraries(a126cpp-legacygl-gpu-parity-d3d12 PRIVATE
+			Alpha126CppCore a126cpp-render-backend-d3d12
+		)
+		list(APPEND A126_GL_GPU_PARITY_TARGETS a126cpp-legacygl-gpu-parity-d3d12)
+	endif()
 
-	set_target_properties(a126cpp-legacygl-gpu-parity-native a126cpp-legacygl-gpu-parity-gl46
-		a126cpp-legacygl-gpu-parity-vulkan PROPERTIES
+	set_target_properties(${A126_GL_GPU_PARITY_TARGETS} PROPERTIES
 		CXX_STANDARD 17
 		CXX_STANDARD_REQUIRED YES
 		CXX_EXTENSIONS NO
@@ -1430,12 +1496,22 @@ if(WIN32 AND TARGET OpenAL32)
 				"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-gl46>/OpenAL32.dll"
 			COMMENT "Copying OpenAL32.dll to output directory"
 		)
-		add_custom_command(TARGET a126cpp-legacygl-gpu-parity-vulkan POST_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different
-				"$<TARGET_FILE:OpenAL32>"
-				"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-vulkan>/OpenAL32.dll"
-			COMMENT "Copying OpenAL32.dll to output directory"
-		)
+		if(A126_ENABLE_VULKAN_BACKEND)
+			add_custom_command(TARGET a126cpp-legacygl-gpu-parity-vulkan POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different
+					"$<TARGET_FILE:OpenAL32>"
+					"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-vulkan>/OpenAL32.dll"
+				COMMENT "Copying OpenAL32.dll to output directory"
+			)
+		endif()
+		if(A126_ENABLE_D3D12_BACKEND)
+			add_custom_command(TARGET a126cpp-legacygl-gpu-parity-d3d12 POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different
+					"$<TARGET_FILE:OpenAL32>"
+					"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-d3d12>/OpenAL32.dll"
+				COMMENT "Copying OpenAL32.dll to output directory"
+			)
+		endif()
 	endif()
 endif()
 
@@ -1459,7 +1535,11 @@ add_test(NAME gl-inventory COMMAND a126cpp-gl-inventory)
 if(A126_ENABLE_GL_GPU_TESTS)
 	set(A126_GL_GPU_NATIVE_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-native.txt")
 	set(A126_GL_GPU_GL46_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-gl46.txt")
-	set(A126_GL_GPU_VULKAN_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-vulkan.txt")
+	set(A126_GL_GPU_TESTS
+		legacygl-gpu-record-native
+		legacygl-gpu-record-gl46
+		legacygl-gpu-compare
+	)
 
 	add_test(NAME legacygl-gpu-record-native
 		COMMAND a126cpp-legacygl-gpu-parity-native --record "${A126_GL_GPU_NATIVE_RECORD}"
@@ -1477,14 +1557,6 @@ if(A126_ENABLE_GL_GPU_TESTS)
 		RESOURCE_LOCK legacygl-gpu
 	)
 
-	add_test(NAME legacygl-gpu-record-vulkan
-		COMMAND a126cpp-legacygl-gpu-parity-vulkan --record "${A126_GL_GPU_VULKAN_RECORD}"
-	)
-	set_tests_properties(legacygl-gpu-record-vulkan PROPERTIES
-		FIXTURES_SETUP legacygl-gpu-records
-		RESOURCE_LOCK legacygl-gpu
-	)
-
 	add_test(NAME legacygl-gpu-compare
 		COMMAND a126cpp-legacygl-gpu-parity-native --compare "${A126_GL_GPU_NATIVE_RECORD}" "${A126_GL_GPU_GL46_RECORD}"
 	)
@@ -1493,11 +1565,83 @@ if(A126_ENABLE_GL_GPU_TESTS)
 		RESOURCE_LOCK legacygl-gpu
 	)
 
-	add_test(NAME legacygl-gpu-compare-vulkan
-		COMMAND a126cpp-legacygl-gpu-parity-native --compare "${A126_GL_GPU_NATIVE_RECORD}" "${A126_GL_GPU_VULKAN_RECORD}"
-	)
-	set_tests_properties(legacygl-gpu-compare-vulkan PROPERTIES
-		FIXTURES_REQUIRED legacygl-gpu-records
-		RESOURCE_LOCK legacygl-gpu
+	if(A126_ENABLE_VULKAN_BACKEND)
+		set(A126_GL_GPU_VULKAN_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-vulkan.txt")
+		add_test(NAME legacygl-gpu-record-vulkan
+			COMMAND a126cpp-legacygl-gpu-parity-vulkan --record "${A126_GL_GPU_VULKAN_RECORD}"
+		)
+		set_tests_properties(legacygl-gpu-record-vulkan PROPERTIES
+			FIXTURES_SETUP legacygl-gpu-records
+			RESOURCE_LOCK legacygl-gpu
+		)
+
+		add_test(NAME legacygl-gpu-compare-vulkan
+			COMMAND a126cpp-legacygl-gpu-parity-native --compare "${A126_GL_GPU_NATIVE_RECORD}" "${A126_GL_GPU_VULKAN_RECORD}"
+		)
+		set_tests_properties(legacygl-gpu-compare-vulkan PROPERTIES
+			FIXTURES_REQUIRED legacygl-gpu-records
+			RESOURCE_LOCK legacygl-gpu
+		)
+
+		add_test(NAME legacygl-gpu-compare-gl46-vulkan
+			COMMAND a126cpp-legacygl-gpu-parity-gl46 --compare "${A126_GL_GPU_GL46_RECORD}" "${A126_GL_GPU_VULKAN_RECORD}"
+		)
+		set_tests_properties(legacygl-gpu-compare-gl46-vulkan PROPERTIES
+			FIXTURES_REQUIRED legacygl-gpu-records
+			RESOURCE_LOCK legacygl-gpu
+		)
+		list(APPEND A126_GL_GPU_TESTS
+			legacygl-gpu-record-vulkan
+			legacygl-gpu-compare-vulkan
+			legacygl-gpu-compare-gl46-vulkan
+		)
+	endif()
+
+	if(A126_ENABLE_D3D12_BACKEND)
+		set(A126_GL_GPU_D3D12_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-d3d12.txt")
+		add_test(NAME legacygl-gpu-record-d3d12
+			COMMAND a126cpp-legacygl-gpu-parity-d3d12 --record "${A126_GL_GPU_D3D12_RECORD}"
+		)
+		set_tests_properties(legacygl-gpu-record-d3d12 PROPERTIES
+			FIXTURES_SETUP legacygl-gpu-records
+			RESOURCE_LOCK legacygl-gpu
+		)
+
+		add_test(NAME legacygl-gpu-compare-d3d12
+			COMMAND a126cpp-legacygl-gpu-parity-native --compare "${A126_GL_GPU_NATIVE_RECORD}" "${A126_GL_GPU_D3D12_RECORD}"
+		)
+		set_tests_properties(legacygl-gpu-compare-d3d12 PROPERTIES
+			FIXTURES_REQUIRED legacygl-gpu-records
+			RESOURCE_LOCK legacygl-gpu
+		)
+
+		add_test(NAME legacygl-gpu-compare-gl46-d3d12
+			COMMAND a126cpp-legacygl-gpu-parity-gl46 --compare "${A126_GL_GPU_GL46_RECORD}" "${A126_GL_GPU_D3D12_RECORD}"
+		)
+		set_tests_properties(legacygl-gpu-compare-gl46-d3d12 PROPERTIES
+			FIXTURES_REQUIRED legacygl-gpu-records
+			RESOURCE_LOCK legacygl-gpu
+		)
+
+		list(APPEND A126_GL_GPU_TESTS
+			legacygl-gpu-record-d3d12
+			legacygl-gpu-compare-d3d12
+			legacygl-gpu-compare-gl46-d3d12
+		)
+
+		if(A126_ENABLE_VULKAN_BACKEND)
+			add_test(NAME legacygl-gpu-compare-vulkan-d3d12
+				COMMAND a126cpp-legacygl-gpu-parity-vulkan --compare "${A126_GL_GPU_VULKAN_RECORD}" "${A126_GL_GPU_D3D12_RECORD}"
+			)
+			set_tests_properties(legacygl-gpu-compare-vulkan-d3d12 PROPERTIES
+				FIXTURES_REQUIRED legacygl-gpu-records
+				RESOURCE_LOCK legacygl-gpu
+			)
+			list(APPEND A126_GL_GPU_TESTS legacygl-gpu-compare-vulkan-d3d12)
+		endif()
+	endif()
+
+	set_tests_properties(${A126_GL_GPU_TESTS}
+		PROPERTIES LABELS "headless;renderer-parity"
 	)
 endif()

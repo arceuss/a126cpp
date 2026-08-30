@@ -28,6 +28,7 @@ legacygl/Context                              one semantic core
              +-- src/backends/NativeGL         compatibility GL oracle
              +-- src/backends/OpenGL46         translated GL 4.6 Core
              +-- src/backends/Vulkan           translated Vulkan 1.1+
+             +-- src/backends/D3D12            translated Direct3D 12
              +-- test-only null/recording sinks
 
 renderbackend lifecycle
@@ -43,27 +44,33 @@ No renderer file changed to make this work. `src/pc/OpenGL.h` used to include
 `glad/glad.h`; it now includes the frontend header, and the 49 translation units
 that include it compile unmodified. Loader headers are confined below the
 backend boundary because a loader defines `gl*` as macros, which would bypass
-the frontend. `GLContext::instantiate()` initializes the linked platform, then
-the linked renderer backend, and finally installs that backend before renderer
-code can build a display list. OpenGL context creation and loader verification
-live in `src/backends/OpenGL`; Vulkan owns its instance, device, surface and
-swapchain without creating an OpenGL context.
+the frontend. The command line is parsed before `GLContext::instantiate()`.
+That function initializes the linked platform, initializes the selected
+renderer provider and installs its sink before renderer code can build a
+display list. OpenGL context creation and loader verification live in
+`src/backends/OpenGL`; Vulkan owns its instance, device, surface and swapchain
+without creating an OpenGL context, and D3D12 obtains the platform's opaque
+Win32 window handle. Vulkan obtains `vkGetInstanceProcAddr` through the opaque
+platform bridge only after a Vulkan window is requested, so compiling that
+provider into the executable does not make other runtime selections load the
+optional Vulkan loader.
 
-The production backend is an exact CMake cache choice:
+The production executable selects one compiled provider for the process:
 
 ```text
--DA126_RENDER_BACKEND=NativeGL
--DA126_RENDER_BACKEND=OpenGL46
--DA126_RENDER_BACKEND=Vulkan
+Alpha126Cpp.exe --backend nativegl
+Alpha126Cpp.exe --backend gl46
+Alpha126Cpp.exe --backend vulkan
+Alpha126Cpp.exe --backend d3d12
 ```
 
-`NativeGL` is the default. Any other spelling is a configure error. CMake links
-exactly one implementation of the lifecycle contract in
-`src/backends/Backend.h` into a production executable, so backend choice is
-fixed for that process. There is no run-time backend switch or
-`A126_LEGACYGL_BACKEND` environment selector. The opt-in GPU parity build is the
-deliberate test-only exception: it produces separate native, GL46 and Vulkan
-executables, each still containing one backend.
+`nativegl` is the default. CMake links the enabled providers into production;
+an unknown or unavailable name is rejected before graphics initialization.
+Selection remains immutable after startup because display-list vertex capture
+depends on the active provider's canonical-geometry requirement. The opt-in GPU
+parity build deliberately produces separate native, GL46, Vulkan and D3D12
+executables, each linked to one provider, so every fixture process still has
+one backend.
 
 The window-system implementation is selected independently with the exact
 CMake cache value `-DA126_PLATFORM_BACKEND=SDL2`. `SDL2` is currently both the
@@ -86,7 +93,7 @@ packet-consuming interface. That is deliberate for this milestone:
 A translated backend implements the same interface and consumes the resolved
 commands emitted after the core has applied legacy semantics.
 `Sink::wantsCanonicalGeometry()` is how it opts in to decoded vertices. The
-OpenGL 4.6 and Vulkan backends opt in; the native backend leaves it off because
+OpenGL 4.6, Vulkan and D3D12 backends opt in; the native backend leaves it off because
 compatibility OpenGL walks the client arrays itself, and decoding them twice
 would cost real time on the reference path.
 
@@ -175,26 +182,28 @@ resolved commands. Production GPU implementations live under `src/backends`.
 `Backend.h` exposes backend configuration, initialization, presentation,
 shutdown, capability discovery and the installed sink. `Platform.h` separately
 owns platform initialization, window lifetime and state, event pumping,
-drawable sizing, cursor placement and the opaque Vulkan WSI bridge. Vulkan
-types stay out of the generic platform header.
+drawable sizing, cursor placement, the opaque Vulkan WSI bridge and, on
+Windows, an opaque native-window handle for D3D12. Vulkan and Win32 types stay
+out of the generic platform header.
 
 The current implementation is SDL2, selected independently from the renderer.
-The shared OpenGL context helper and the Vulkan backend both consume that
-platform contract; `pc/lwjgl/Display.cpp` only delegates window operations and
-presentation. Normal startup is platform initialization followed by renderer
-initialization. Process shutdown reverses ownership: renderer shutdown, window
-destruction, then platform shutdown. The game executable and all three GPU
-fixtures use the same lifecycle.
+The shared OpenGL context helper, Vulkan backend and D3D12 backend consume that
+platform contract; SDL's `SDL_SysWMinfo` is confined to the SDL2 implementation
+that supplies the opaque HWND. `pc/lwjgl/Display.cpp` only delegates window
+operations and presentation. Normal startup is platform initialization followed
+by renderer initialization. Process shutdown reverses ownership: renderer
+shutdown, window destruction, then platform shutdown. The game executable and
+all four GPU fixtures use the same lifecycle.
 
 This is the portable ownership seam, not a claim that a console implementation
 already exists. A future platform backend still has to provide the target's
 window/display, input and graphics-surface hooks. Today the SDL2 implementation
 still translates events directly into the existing LWJGL-shaped keyboard/mouse
 queues, and the shared OpenGL context helper reaches the `SDL_Window` through an
-SDL2-private header; a non-SDL port must replace those private couplings. Another
-explicit renderer may also need an additional surface bridge. Those additions
-remain below LegacyGL; matrix stacks, lights, display lists, texture defaults
-and queries do not move into platform, Vulkan or Direct3D code.
+SDL2-private header; a non-SDL port must replace those private couplings and
+provide the native surface/window bridge required by its explicit API. Those
+additions remain below LegacyGL; matrix stacks, lights, display lists, texture
+defaults and queries do not move into platform, Vulkan or Direct3D code.
 
 ## Threading
 
@@ -206,6 +215,11 @@ means giving them CPU-side mesh buffers, not frontend access.
 
 Allowed below the boundary: caching, interning, batching, eliminating redundant
 *backend* state changes, converted display-list meshes.
+
+A resident display-list mesh is not identified by list geometry alone when the
+captured vertices omit colour, normal or texture coordinates. Its variant key
+must include the execution-time current values for every omitted attribute; the
+`list.execution-current-color-variants` fixture guards this rule.
 
 Not allowed: removing, reordering or coalescing frontend calls; answering a
 query from backend state; applying a state change earlier than legacy semantics

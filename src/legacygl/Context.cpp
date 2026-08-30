@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <sstream>
+#include <utility>
 
 #include "legacygl/Trace.h"
 
@@ -51,6 +53,7 @@ void DisplayList::clear()
 	geometry.clear();
 	doubles.clear();
 	names.clear();
+	textureUploads.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -287,7 +290,11 @@ void Context::reset()
 	bufferObjects.clear();
 	arrayBufferBinding = 0;
 
+	for (const auto &entry : displayLists)
+		releaseDisplayListGeometry(entry.second);
+	releaseDisplayListGeometry(compilingDefinition);
 	displayLists.clear();
+	compilingDefinition.clear();
 	compilingListName = 0;
 	compilingListModeValue = GL_COMPILE;
 	nextListName = 1;
@@ -367,8 +374,26 @@ GLenum Context::getError()
 
 void Context::record(const ListCommand &command)
 {
-	DisplayList &list = displayLists[compilingListName];
-	list.commands.push_back(command);
+	compilingDefinition.commands.push_back(command);
+}
+
+void Context::releaseDisplayListGeometry(const DisplayList &list)
+{
+	if (activeSink == nullptr)
+		return;
+
+	for (const Geometry &geometry : list.geometry)
+	{
+		if (geometry.residencyId != 0)
+			activeSink->releaseCanonicalGeometry(geometry.residencyId);
+	}
+}
+
+std::uint64_t Context::allocateGeometryResidencyId()
+{
+	if (nextGeometryResidencyId == 0)
+		nextGeometryResidencyId = 1;
+	return nextGeometryResidencyId++;
 }
 
 // ---------------------------------------------------------------------------
@@ -609,7 +634,7 @@ void Context::ortho(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top
 
 	if (compilingListName != 0)
 	{
-		DisplayList &list = displayLists[compilingListName];
+		DisplayList &list = compilingDefinition;
 		ListCommand command;
 		command.op = ListOp::Ortho;
 		command.aux = static_cast<int>(list.doubles.size());
@@ -643,7 +668,7 @@ void Context::frustum(GLdouble left, GLdouble right, GLdouble bottom, GLdouble t
 
 	if (compilingListName != 0)
 	{
-		DisplayList &list = displayLists[compilingListName];
+		DisplayList &list = compilingDefinition;
 		ListCommand command;
 		command.op = ListOp::Frustum;
 		command.aux = static_cast<int>(list.doubles.size());
@@ -1643,7 +1668,7 @@ void Context::lightfv(GLenum light, GLenum pname, const GLfloat *params)
 
 	if (compilingListName != 0)
 	{
-		DisplayList &list = displayLists[compilingListName];
+		DisplayList &list = compilingDefinition;
 		ListCommand command;
 		command.op = ListOp::Lightfv;
 		command.u0 = light;
@@ -2010,50 +2035,95 @@ static int pixelComponents(GLenum format)
 	}
 }
 
-void Context::texImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height,
-	GLint border, GLenum format, GLenum type, const GLvoid *pixels)
+static bool pixelFootprint(GLsizei width, GLsizei height, int components, GLint alignment,
+	std::size_t &byteCount)
 {
-	nextSequence();
-	if (traceEnabled())
+	byteCount = 0;
+	if (width < 0 || height < 0 || components <= 0 ||
+		(alignment != 1 && alignment != 2 && alignment != 4 && alignment != 8))
 	{
-		const int components = pixelComponents(format);
-		const std::size_t rowBytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(components);
-		const std::size_t stride = (rowBytes + static_cast<std::size_t>(unpackAlignmentValue) - 1) /
-			static_cast<std::size_t>(unpackAlignmentValue) * static_cast<std::size_t>(unpackAlignmentValue);
-		traceCall(callSequence, "glTexImage2D", target, level, internalformat, width, height, border, format, type,
-			traceHash(pixels, pixels == nullptr ? 0 : stride * static_cast<std::size_t>(height)));
+		return false;
 	}
 
+	const std::size_t maximum = std::numeric_limits<std::size_t>::max();
+	const std::size_t widthValue = static_cast<std::size_t>(width);
+	const std::size_t componentValue = static_cast<std::size_t>(components);
+	if (widthValue > maximum / componentValue)
+		return false;
+	const std::size_t rowBytes = widthValue * componentValue;
+	const std::size_t alignmentValue = static_cast<std::size_t>(alignment);
+	if (rowBytes > maximum - (alignmentValue - 1))
+		return false;
+	const std::size_t rowStride = (rowBytes + alignmentValue - 1) / alignmentValue * alignmentValue;
+	if (height == 0)
+		return true;
+
+	const std::size_t precedingRows = static_cast<std::size_t>(height - 1);
+	if (rowStride != 0 && precedingRows > (maximum - rowBytes) / rowStride)
+		return false;
+	byteCount = precedingRows * rowStride + rowBytes;
+	return true;
+}
+
+static bool textureInternalFormatSupported(GLint internalformat)
+{
+	return internalformat == GL_RGB || internalformat == GL_RGBA;
+}
+
+static GLenum texImage2DStaticError(GLenum target, GLint level, GLint internalformat, GLsizei width,
+	GLsizei height, GLint border, GLenum format, GLenum type, GLint unpackAlignment,
+	std::size_t &byteCount)
+{
+	byteCount = 0;
 	if (target != GL_TEXTURE_2D)
+		return GL_INVALID_ENUM;
+	const int components = pixelComponents(format);
+	if (type != GL_UNSIGNED_BYTE || components == 0)
+		return GL_INVALID_ENUM;
+	if (!textureInternalFormatSupported(internalformat))
+		return GL_INVALID_VALUE;
+	if (level < 0 || level >= TextureObject::MAX_LEVELS || border != 0 || width < 0 || height < 0 ||
+		!pixelFootprint(width, height, components, unpackAlignment, byteCount))
 	{
-		setError(GL_INVALID_ENUM);
-		return;
+		return GL_INVALID_VALUE;
 	}
-	if (type != GL_UNSIGNED_BYTE || pixelComponents(format) == 0)
+	return GL_NO_ERROR;
+}
+
+static GLenum texSubImage2DStaticError(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+	GLsizei width, GLsizei height, GLenum format, GLenum type, GLint unpackAlignment,
+	std::size_t &byteCount)
+{
+	byteCount = 0;
+	if (target != GL_TEXTURE_2D)
+		return GL_INVALID_ENUM;
+	const int components = pixelComponents(format);
+	if (type != GL_UNSIGNED_BYTE || components == 0)
+		return GL_INVALID_ENUM;
+	if (level < 0 || level >= TextureObject::MAX_LEVELS || width < 0 || height < 0 ||
+		xoffset < 0 || yoffset < 0 ||
+		!pixelFootprint(width, height, components, unpackAlignment, byteCount))
 	{
-		setError(GL_INVALID_ENUM);
-		return;
+		return GL_INVALID_VALUE;
 	}
-	if (level < 0 || level >= TextureObject::MAX_LEVELS || border != 0 || width < 0 || height < 0)
+	return GL_NO_ERROR;
+}
+
+void Context::executeTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width,
+	GLsizei height, GLint border, GLenum format, GLenum type, GLint unpackAlignment,
+	const GLvoid *pixels, bool forwardRaw)
+{
+	std::size_t byteCount = 0;
+	const GLenum error = texImage2DStaticError(target, level, internalformat, width, height, border,
+		format, type, unpackAlignment, byteCount);
+	if (error != GL_NO_ERROR)
 	{
-		setError(GL_INVALID_VALUE);
+		setError(error);
 		return;
 	}
 
-	if (activeSink != nullptr)
-	{
+	if (forwardRaw && activeSink != nullptr)
 		activeSink->texImage2D(target, level, internalformat, width, height, border, format, type, pixels);
-	}
-
-	// Pixel commands are list-compilable, but no path in current main defines a
-	// texture image inside a display list. Recording one would require copying
-	// the image at compile time; until a call site needs it, refuse instead of
-	// capturing a pointer that may dangle.
-	if (compilingListName != 0)
-	{
-		setError(GL_INVALID_OPERATION);
-		return;
-	}
 
 	TextureObject *object = textureBinding == 0 ? &textureZero : nullptr;
 	if (object == nullptr)
@@ -2082,39 +2152,22 @@ void Context::texImage2D(GLenum target, GLint level, GLint internalformat, GLsiz
 		command.internalFormat = internalformat;
 		command.sourceFormat = format;
 		command.sourceType = type;
-		command.unpackAlignment = unpackAlignmentValue;
+		command.unpackAlignment = unpackAlignment;
 		command.pixels = pixels;
 		activeSink->resolvedTextureUpload(command);
 	}
 }
 
-void Context::texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height,
-	GLenum format, GLenum type, const GLvoid *pixels)
+void Context::executeTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+	GLsizei width, GLsizei height, GLenum format, GLenum type, GLint unpackAlignment,
+	const GLvoid *pixels, bool forwardRaw)
 {
-	nextSequence();
-	if (traceEnabled())
+	std::size_t byteCount = 0;
+	const GLenum error = texSubImage2DStaticError(target, level, xoffset, yoffset, width, height,
+		format, type, unpackAlignment, byteCount);
+	if (error != GL_NO_ERROR)
 	{
-		const int components = pixelComponents(format);
-		const std::size_t rowBytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(components);
-		const std::size_t stride = (rowBytes + static_cast<std::size_t>(unpackAlignmentValue) - 1) /
-			static_cast<std::size_t>(unpackAlignmentValue) * static_cast<std::size_t>(unpackAlignmentValue);
-		traceCall(callSequence, "glTexSubImage2D", target, level, xoffset, yoffset, width, height, format, type,
-			traceHash(pixels, pixels == nullptr ? 0 : stride * static_cast<std::size_t>(height)));
-	}
-
-	if (target != GL_TEXTURE_2D)
-	{
-		setError(GL_INVALID_ENUM);
-		return;
-	}
-	if (type != GL_UNSIGNED_BYTE || pixelComponents(format) == 0)
-	{
-		setError(GL_INVALID_ENUM);
-		return;
-	}
-	if (level < 0 || level >= TextureObject::MAX_LEVELS || width < 0 || height < 0 || xoffset < 0 || yoffset < 0)
-	{
-		setError(GL_INVALID_VALUE);
+		setError(error);
 		return;
 	}
 
@@ -2124,20 +2177,16 @@ void Context::texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yof
 		setError(GL_INVALID_OPERATION);
 		return;
 	}
-	if (xoffset + width > object->levels[level].width || yoffset + height > object->levels[level].height)
+	const TextureLevel &target_level = object->levels[level];
+	if (xoffset > target_level.width || width > target_level.width - xoffset ||
+		yoffset > target_level.height || height > target_level.height - yoffset)
 	{
 		setError(GL_INVALID_VALUE);
 		return;
 	}
 
-	if (activeSink != nullptr)
+	if (forwardRaw && activeSink != nullptr)
 		activeSink->texSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels);
-
-	if (compilingListName != 0)
-	{
-		setError(GL_INVALID_OPERATION);
-		return;
-	}
 
 	if (activeSink != nullptr)
 	{
@@ -2150,13 +2199,139 @@ void Context::texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yof
 		command.y = yoffset;
 		command.width = width;
 		command.height = height;
-		command.internalFormat = object->levels[level].internalFormat;
+		command.internalFormat = target_level.internalFormat;
 		command.sourceFormat = format;
 		command.sourceType = type;
-		command.unpackAlignment = unpackAlignmentValue;
+		command.unpackAlignment = unpackAlignment;
 		command.pixels = pixels;
 		activeSink->resolvedTextureUpload(command);
 	}
+}
+
+void Context::texImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height,
+	GLint border, GLenum format, GLenum type, const GLvoid *pixels)
+{
+	nextSequence();
+	std::size_t byteCount = 0;
+	const GLenum staticError = texImage2DStaticError(target, level, internalformat, width, height,
+		border, format, type, unpackAlignmentValue, byteCount);
+	if (traceEnabled())
+	{
+		const unsigned long long pixelHash = pixels == nullptr || staticError != GL_NO_ERROR ? 0 :
+			traceHash(pixels, byteCount);
+		traceCall(callSequence, "glTexImage2D", target, level, internalformat, width, height, border, format, type,
+			pixelHash);
+	}
+
+	// Proxy texture commands are not stored in display lists. The current
+	// profile does not support proxy targets, so reject them immediately.
+	if (target == GL_PROXY_TEXTURE_2D)
+	{
+		setError(GL_INVALID_ENUM);
+		return;
+	}
+
+	if (compilingListName != 0)
+	{
+		ListTextureUpload upload;
+		upload.target = target;
+		upload.level = level;
+		upload.internalFormat = internalformat;
+		upload.border = border;
+		upload.width = width;
+		upload.height = height;
+		upload.sourceFormat = format;
+		upload.sourceType = type;
+		upload.unpackAlignment = unpackAlignmentValue;
+		upload.pixelsProvided = staticError == GL_NO_ERROR && pixels != nullptr;
+		if (upload.pixelsProvided && byteCount != 0)
+		{
+			const unsigned char *source = static_cast<const unsigned char *>(pixels);
+			upload.pixelBytes.assign(source, source + byteCount);
+		}
+
+		DisplayList &list = compilingDefinition;
+		ListCommand command;
+		command.op = ListOp::TexImage2D;
+		command.aux = static_cast<int>(list.textureUploads.size());
+		list.textureUploads.push_back(std::move(upload));
+		record(command);
+
+		if (staticError == GL_NO_ERROR && activeSink != nullptr)
+			activeSink->texImage2D(target, level, internalformat, width, height, border, format, type, pixels);
+
+		if (recordingOnly())
+			return;
+
+		const ListTextureUpload &stored = list.textureUploads[static_cast<std::size_t>(command.aux)];
+		const void *storedPixels = stored.pixelsProvided ? stored.pixelBytes.data() : nullptr;
+		executeTexImage2D(stored.target, stored.level, stored.internalFormat, stored.width,
+			stored.height, stored.border, stored.sourceFormat, stored.sourceType,
+			stored.unpackAlignment, storedPixels, false);
+		return;
+	}
+
+	executeTexImage2D(target, level, internalformat, width, height, border, format, type,
+		unpackAlignmentValue, pixels, true);
+}
+
+void Context::texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height,
+	GLenum format, GLenum type, const GLvoid *pixels)
+{
+	nextSequence();
+	std::size_t byteCount = 0;
+	const GLenum staticError = texSubImage2DStaticError(target, level, xoffset, yoffset, width,
+		height, format, type, unpackAlignmentValue, byteCount);
+	if (traceEnabled())
+	{
+		const unsigned long long pixelHash = pixels == nullptr || staticError != GL_NO_ERROR ? 0 :
+			traceHash(pixels, byteCount);
+		traceCall(callSequence, "glTexSubImage2D", target, level, xoffset, yoffset, width, height, format, type,
+			pixelHash);
+	}
+
+	if (compilingListName != 0)
+	{
+		ListTextureUpload upload;
+		upload.target = target;
+		upload.level = level;
+		upload.xOffset = xoffset;
+		upload.yOffset = yoffset;
+		upload.width = width;
+		upload.height = height;
+		upload.sourceFormat = format;
+		upload.sourceType = type;
+		upload.unpackAlignment = unpackAlignmentValue;
+		upload.pixelsProvided = staticError == GL_NO_ERROR && pixels != nullptr;
+		if (upload.pixelsProvided && byteCount != 0)
+		{
+			const unsigned char *source = static_cast<const unsigned char *>(pixels);
+			upload.pixelBytes.assign(source, source + byteCount);
+		}
+
+		DisplayList &list = compilingDefinition;
+		ListCommand command;
+		command.op = ListOp::TexSubImage2D;
+		command.aux = static_cast<int>(list.textureUploads.size());
+		list.textureUploads.push_back(std::move(upload));
+		record(command);
+
+		if (staticError == GL_NO_ERROR && activeSink != nullptr)
+			activeSink->texSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels);
+
+		if (recordingOnly())
+			return;
+
+		const ListTextureUpload &stored = list.textureUploads[static_cast<std::size_t>(command.aux)];
+		const void *storedPixels = stored.pixelsProvided ? stored.pixelBytes.data() : nullptr;
+		executeTexSubImage2D(stored.target, stored.level, stored.xOffset, stored.yOffset,
+			stored.width, stored.height, stored.sourceFormat, stored.sourceType,
+			stored.unpackAlignment, storedPixels, false);
+		return;
+	}
+
+	executeTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type,
+		unpackAlignmentValue, pixels, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -2753,13 +2928,14 @@ void Context::executeGeometry(const Geometry &geometry)
 
 	ResolvedDraw command;
 	command.sequence = callSequence;
+	command.geometryResidencyId = geometry.residencyId;
 	command.geometry = &lastDrawGeometry;
 	command.primitives = &lastDrawPrimitives;
 	command.modelView = modelViewStack.top();
 	command.projection = projectionStack.top();
 	command.textureMatrix = textureStack.top();
 	command.normal = normalMatrix(command.modelView);
-	command.normalRescaleFactor = rescaleNormalFactor(command.modelView);
+	command.normalRescaleFactor = rescaleNormalFactorFromNormalMatrix(command.normal);
 
 	command.enables.texture2D = capTexture2D;
 	command.enables.depthTest = capDepthTest;
@@ -2903,10 +3079,11 @@ void Context::drawArrays(GLenum mode, GLint first, GLsizei count)
 	{
 		// A compiled array draw captures the vertex data now. Mutating or
 		// freeing the source afterwards must not change what the list draws.
-		DisplayList &list = displayLists[compilingListName];
+		DisplayList &list = compilingDefinition;
 		Geometry captured;
 		if (!decodeArrays(mode, first, count, captured, wantGeometry))
 			return;
+		captured.residencyId = allocateGeometryResidencyId();
 
 		ListCommand command;
 		command.op = ListOp::Geometry;
@@ -3179,8 +3356,7 @@ void Context::newList(GLuint list, GLenum mode)
 	if (activeSink != nullptr)
 		activeSink->newList(list, mode);
 
-	DisplayList &definition = displayLists[list];
-	definition.clear();
+	compilingDefinition.clear();
 
 	compilingListName = list;
 	compilingListModeValue = mode;
@@ -3201,7 +3377,12 @@ void Context::endList()
 	if (activeSink != nullptr)
 		activeSink->endList();
 
-	displayLists[compilingListName].defined = true;
+	compilingDefinition.defined = true;
+	auto existing = displayLists.find(compilingListName);
+	if (existing != displayLists.end())
+		releaseDisplayListGeometry(existing->second);
+	displayLists[compilingListName] = std::move(compilingDefinition);
+	compilingDefinition.clear();
 	compilingListName = 0;
 	traceListContext(0, 0);
 }
@@ -3369,6 +3550,24 @@ void Context::executeList(GLuint name)
 			case ListOp::TexParameteri:
 				applyTexParameteri(command.u1, command.i0);
 				break;
+			case ListOp::TexImage2D:
+			{
+				const ListTextureUpload &upload = list.textureUploads[static_cast<std::size_t>(command.aux)];
+				const void *pixels = upload.pixelsProvided ? upload.pixelBytes.data() : nullptr;
+				executeTexImage2D(upload.target, upload.level, upload.internalFormat, upload.width,
+					upload.height, upload.border, upload.sourceFormat, upload.sourceType,
+					upload.unpackAlignment, pixels, false);
+				break;
+			}
+			case ListOp::TexSubImage2D:
+			{
+				const ListTextureUpload &upload = list.textureUploads[static_cast<std::size_t>(command.aux)];
+				const void *pixels = upload.pixelsProvided ? upload.pixelBytes.data() : nullptr;
+				executeTexSubImage2D(upload.target, upload.level, upload.xOffset, upload.yOffset,
+					upload.width, upload.height, upload.sourceFormat, upload.sourceType,
+					upload.unpackAlignment, pixels, false);
+				break;
+			}
 			case ListOp::Clear:
 				emitResolvedClear(command.u0);
 				break;
@@ -3522,7 +3721,7 @@ void Context::callLists(GLsizei n, GLenum type, const GLvoid *lists)
 
 	if (compilingListName != 0)
 	{
-		DisplayList &list = displayLists[compilingListName];
+		DisplayList &list = compilingDefinition;
 		ListCommand command;
 		command.op = ListOp::CallLists;
 		command.i0 = n;
@@ -3555,7 +3754,13 @@ void Context::deleteLists(GLuint list, GLsizei range)
 		activeSink->deleteLists(list, range);
 
 	for (GLsizei i = 0; i < range; i++)
-		displayLists.erase(list + static_cast<GLuint>(i));
+	{
+		auto it = displayLists.find(list + static_cast<GLuint>(i));
+		if (it == displayLists.end())
+			continue;
+		releaseDisplayListGeometry(it->second);
+		displayLists.erase(it);
+	}
 }
 
 // ---------------------------------------------------------------------------

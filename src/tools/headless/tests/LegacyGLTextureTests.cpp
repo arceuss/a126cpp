@@ -167,6 +167,8 @@ HEADLESS_TEST(legacygl_textures, image_definition_tracks_levels_and_completeness
 	ctx.checkEqual(gl.getError(), GL_INVALID_ENUM, "an unsupported pixel type is rejected");
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_LIGHT0, GL_UNSIGNED_BYTE, pixels.data());
 	ctx.checkEqual(gl.getError(), GL_INVALID_ENUM, "an unsupported source format is rejected");
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_LIGHT0, 4, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+	ctx.checkEqual(gl.getError(), GL_INVALID_VALUE, "an unsupported internal format is rejected");
 	glTexImage2D(GL_TEXTURE_2D, 99, GL_RGBA, 4, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 	ctx.checkEqual(gl.getError(), GL_INVALID_VALUE, "an out-of-range level is invalid");
 }

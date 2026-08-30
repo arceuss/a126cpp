@@ -1,9 +1,11 @@
 #include <cstring>
 #include <cstdlib>
+#include <cstdio>
 #include <string>
 #include <sstream>
 #include <memory>
 
+#include "backends/Backend.h"
 #include "client/Minecraft.h"
 #include "tools/SignBench.h"
 #include "tools/SceneCapture.h"
@@ -15,26 +17,57 @@
 
 int main(int argc, char *argv[])
 {
+	int firstArgument = 1;
+	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--backend") == 0)
+	{
+		if (firstArgument + 1 >= argc || std::strcmp(argv[firstArgument + 1], "--") == 0)
+		{
+			std::fprintf(stderr, "error: --backend requires a name\n");
+			return 2;
+		}
+		if (std::strcmp(argv[firstArgument + 1], "--backend") == 0)
+		{
+			std::fprintf(stderr, "error: duplicate --backend option\n");
+			return 2;
+		}
+		if (!renderbackend::select(argv[firstArgument + 1]))
+		{
+			std::fprintf(stderr, "error: unknown or unavailable backend '%s'\n", argv[firstArgument + 1]);
+			return 2;
+		}
+		firstArgument += 2;
+		if (firstArgument < argc && std::strcmp(argv[firstArgument], "--backend") == 0)
+		{
+			std::fprintf(stderr, "error: duplicate --backend option\n");
+			return 2;
+		}
+	}
+	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--") == 0)
+		++firstArgument;
+
 	lwjgl::GLContext::instantiate();
 
-	// Developer fixture, not part of the game: renders a wall of signs and logs
-	// frame times. Usage: --sign-bench [frames] [signs] [blankText]
-	if (argc >= 2 && std::strcmp(argv[1], "--sign-bench") == 0)
+	// Developer fixture, not part of the game: renders a wall of signs or an
+	// existing saved world and logs frame times. Usage:
+	// --sign-bench [frames] [signs] [blankText] [finishEachFrame] [world]
+	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--sign-bench") == 0)
 	{
-		int frames = (argc >= 3) ? std::atoi(argv[2]) : 0;
-		int signs = (argc >= 4) ? std::atoi(argv[3]) : 0;
-		bool blankText = (argc >= 5) && std::atoi(argv[4]) != 0;
-		return runSignBench(frames, signs, blankText);
+		int frames = (firstArgument + 1 < argc) ? std::atoi(argv[firstArgument + 1]) : 0;
+		int signs = (firstArgument + 2 < argc) ? std::atoi(argv[firstArgument + 2]) : 0;
+		bool blankText = (firstArgument + 3 < argc) && std::atoi(argv[firstArgument + 3]) != 0;
+		bool finishEachFrame = (firstArgument + 4 >= argc) || std::atoi(argv[firstArgument + 4]) != 0;
+		std::string worldName = (firstArgument + 5 < argc) ? argv[firstArgument + 5] : "";
+		return runSignBench(frames, signs, blankText, finishEachFrame, worldName);
 	}
 
-	if (argc >= 2 && std::strcmp(argv[1], "--timer-probe") == 0)
-		return runTimerProbe((argc >= 3) ? std::atoi(argv[2]) : 0);
+	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--timer-probe") == 0)
+		return runTimerProbe((firstArgument + 1 < argc) ? std::atoi(argv[firstArgument + 1]) : 0);
 
 	// Developer fixture, not part of the game: renders one deterministic frame
 	// at a requested resolution and writes it to a PNG. This is the framebuffer
 	// side of the parity harness. Usage: --capture [--help]
-	if (argc >= 2 && std::strcmp(argv[1], "--capture") == 0)
-		return runSceneCapture(argc, argv, 2);
+	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--capture") == 0)
+		return runSceneCapture(argc, argv, firstArgument + 1);
 
 	// Try to read username from config file
 	jstring username = u"Player" + String::fromUTF8(std::to_string(System::currentTimeMillis() % 1000));
@@ -71,12 +104,12 @@ int main(int argc, char *argv[])
 	}
 
 	// Command-line argument overrides config
-	if (argc >= 2 && std::strlen(argv[1]) > 0)
-		username = String::fromUTF8(argv[1]);
+	if (firstArgument < argc && std::strlen(argv[firstArgument]) > 0)
+		username = String::fromUTF8(argv[firstArgument]);
 
 	jstring auth = u"-";
-	if (argc >= 3 && std::strlen(argv[2]) > 1)
-		auth = String::fromUTF8(argv[2]);
+	if (firstArgument + 1 < argc && std::strlen(argv[firstArgument + 1]) > 1)
+		auth = String::fromUTF8(argv[firstArgument + 1]);
 
 	Minecraft::start(&username, &auth);
 

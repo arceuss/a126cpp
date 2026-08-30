@@ -9,7 +9,7 @@
 namespace legacygl
 {
 
-// Installs the linked backend and applies the environment configuration. Must
+// Installs the selected backend and applies the environment configuration. Must
 // be called once the GL context is current and the loader has run. Reads:
 //
 //   A126_LEGACYGL_TRACE=<path>  write a deterministic frontend call trace

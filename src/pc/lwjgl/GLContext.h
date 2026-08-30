@@ -20,7 +20,7 @@ struct GLCapabilities
 }
 
 // Context functions
-// Idempotent. The backend is selected when the executable is linked.
+// Idempotent. Explicit backend selection must happen before the first call.
 void instantiate();
 const detail::GLCapabilities &getCapabilities();
 

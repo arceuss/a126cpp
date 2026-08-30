@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -51,4 +52,32 @@ HEADLESS_TEST(legacygl_trace, capture_frame_is_deferred_and_renumbered)
 		ctx.checkEqual(lines[2], "2 glMatrixMode(57005)", "frame call numbers are contiguous");
 		ctx.checkEqual(lines[3], "# error 0x500 at call 2", "trace comments use relative numbering");
 	}
+}
+
+HEADLESS_TEST(legacygl_trace, texture_hash_excludes_padding_after_the_final_row)
+{
+	legacyglTest::begin();
+	const char *path = "legacygl-texture-footprint-test.trace";
+	std::remove(path);
+
+	unsigned char pixels[32];
+	for (std::size_t i = 0; i < sizeof(pixels); i++)
+		pixels[i] = static_cast<unsigned char>(i + 1);
+	const unsigned long long expected = legacygl::traceHash(pixels, 25);
+	const unsigned long long paddedFinalRow = legacygl::traceHash(pixels, sizeof(pixels));
+
+	legacygl::traceOpen(path);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 8);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 3, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+	legacygl::traceClose();
+
+	std::ifstream input(path, std::ios::in | std::ios::binary);
+	std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+	input.close();
+	std::remove(path);
+
+	ctx.check(contents.find(std::to_string(expected)) != std::string::npos,
+		"the texture trace hashes the two rows and only their required inter-row padding");
+	ctx.check(contents.find(std::to_string(paddedFinalRow)) == std::string::npos,
+		"the texture trace does not read padding after the final row");
 }

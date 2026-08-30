@@ -116,6 +116,7 @@ struct ResolvedTextureState
 struct ResolvedDraw
 {
 	long long sequence = 0;
+	std::uint64_t geometryResidencyId = 0;
 	const Geometry *geometry = nullptr;
 	const PrimitiveBatch *primitives = nullptr;
 	Mat4 modelView;

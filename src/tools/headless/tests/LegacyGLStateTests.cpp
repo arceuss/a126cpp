@@ -498,6 +498,8 @@ HEADLESS_TEST(legacygl_state, rescale_normal_factor_is_not_normalization)
 	// normals by 1/4, so the factor is 4.
 	const legacygl::Mat4 uniform = legacygl::scaling(4.0f, 4.0f, 4.0f);
 	ctx.checkEqualBits(legacygl::rescaleNormalFactor(uniform), 4.0f, "uniform scale of four gives a factor of four");
+	ctx.checkEqualBits(legacygl::rescaleNormalFactorFromNormalMatrix(legacygl::normalMatrix(uniform)),
+		legacygl::rescaleNormalFactor(uniform), "the precomputed normal matrix gives the same factor");
 	ctx.check(legacygl::isUniformScale(uniform, 1.0e-5f), "a uniform scale is detected as uniform");
 
 	const legacygl::Mat4 identity = legacygl::Mat4::identity();

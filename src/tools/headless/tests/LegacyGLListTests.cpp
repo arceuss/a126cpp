@@ -365,3 +365,145 @@ HEADLESS_TEST(legacygl_lists, texture_binds_in_a_list_resolve_at_execution)
 	// behind that name is visible to a later execution.
 	ctx.check(gl.isTextureObject(texture), "executing the bind created the object");
 }
+
+HEADLESS_TEST(legacygl_lists, texture_image_in_a_compile_list_copies_pixels_and_unpack_state)
+{
+	legacygl::Context &gl = legacyglTest::begin();
+
+	const GLuint list = glGenLists(1);
+	const GLuint texture = 17;
+	glBindTexture(GL_TEXTURE_2D, texture);
+
+	std::vector<unsigned char> pixels(25);
+	for (std::size_t i = 0; i < pixels.size(); i++)
+		pixels[i] = static_cast<unsigned char>(i + 1);
+	const std::vector<unsigned char> expected = pixels;
+
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 8);
+	glNewList(list, GL_COMPILE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 3, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+	glEndList();
+
+	ctx.checkEqual(gl.getError(), GL_NO_ERROR, "compiling a texture image is valid");
+	const legacygl::TextureObject *object = gl.texture(texture);
+	ctx.check(object != nullptr && !object->levels[0].defined,
+		"GL_COMPILE deferred the texture definition");
+	const legacygl::DisplayList *definition = gl.displayList(list);
+	if (ctx.check(definition != nullptr && definition->textureUploads.size() == 1,
+		"the list owns one texture upload"))
+	{
+		const legacygl::ListTextureUpload &upload = definition->textureUploads[0];
+		ctx.checkEqual(upload.unpackAlignment, 8, "the list kept its issue-time unpack alignment");
+		ctx.check(upload.pixelBytes == expected, "the list copied the required pixel bytes");
+	}
+
+	for (unsigned char &byte : pixels)
+		byte = 0;
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glCallList(list);
+
+	ctx.checkEqual(gl.getError(), GL_NO_ERROR, "executing the texture image succeeded");
+	object = gl.texture(texture);
+	ctx.check(object != nullptr && object->levels[0].defined,
+		"executing the list defined the texture level");
+	if (object != nullptr && object->levels[0].defined)
+	{
+		ctx.checkEqual(object->levels[0].width, 3, "the executed definition kept its width");
+		ctx.checkEqual(object->levels[0].height, 2, "the executed definition kept its height");
+	}
+}
+
+HEADLESS_TEST(legacygl_lists, texture_image_and_subimage_in_one_list_execute_in_order)
+{
+	legacygl::Context &gl = legacyglTest::begin();
+
+	const GLuint list = glGenLists(1);
+	const GLuint texture = 18;
+	glBindTexture(GL_TEXTURE_2D, texture);
+
+	const unsigned char image[16] = {
+		1, 2, 3, 255, 4, 5, 6, 255,
+		7, 8, 9, 255, 10, 11, 12, 255
+	};
+	const unsigned char patch[4] = { 40, 50, 60, 255 };
+	glNewList(list, GL_COMPILE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 1, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, patch);
+	glEndList();
+
+	ctx.checkEqual(gl.getError(), GL_NO_ERROR,
+		"a sub-image may follow its definition in the same compile-only list");
+	const legacygl::TextureObject *object = gl.texture(texture);
+	ctx.check(object != nullptr && !object->levels[0].defined,
+		"neither upload executed while compiling");
+
+	glCallList(list);
+	ctx.checkEqual(gl.getError(), GL_NO_ERROR, "the ordered image and sub-image replay succeeded");
+	object = gl.texture(texture);
+	ctx.check(object != nullptr && object->levels[0].defined,
+		"the definition ran before the sub-image validation");
+}
+
+HEADLESS_TEST(legacygl_lists, texture_image_in_compile_and_execute_runs_now_and_later)
+{
+	legacygl::Context &gl = legacyglTest::begin();
+
+	const GLuint list = glGenLists(1);
+	const GLuint texture = 19;
+	glBindTexture(GL_TEXTURE_2D, texture);
+
+	unsigned char pixels[4] = { 21, 42, 84, 255 };
+	glNewList(list, GL_COMPILE_AND_EXECUTE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glEndList();
+
+	ctx.checkEqual(gl.getError(), GL_NO_ERROR, "compile-and-execute accepted the texture image");
+	const legacygl::TextureObject *object = gl.texture(texture);
+	ctx.check(object != nullptr && object->levels[0].defined,
+		"compile-and-execute defined the texture immediately");
+	const legacygl::DisplayList *definition = gl.displayList(list);
+	ctx.check(definition != nullptr && definition->textureUploads.size() == 1 &&
+		!definition->textureUploads[0].pixelBytes.empty() &&
+		definition->textureUploads[0].pixelBytes[0] == 21,
+		"compile-and-execute also stored the issue-time pixels");
+
+	pixels[0] = 0;
+	pixels[1] = 0;
+	pixels[2] = 0;
+	const unsigned char replacement[16] = {};
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, replacement);
+	glCallList(list);
+	ctx.checkEqual(gl.getError(), GL_NO_ERROR, "the recorded texture image executed later");
+	object = gl.texture(texture);
+	ctx.check(object != nullptr && object->levels[0].width == 1 && object->levels[0].height == 1,
+		"calling the list executed the stored definition again");
+}
+
+HEADLESS_TEST(legacygl_lists, texture_image_errors_occur_when_the_stored_command_executes)
+{
+	legacygl::Context &gl = legacyglTest::begin();
+
+	const unsigned char pixels[4] = { 1, 2, 3, 4 };
+	const GLuint compileList = glGenLists(1);
+	glNewList(compileList, GL_COMPILE);
+	glTexImage2D(GL_TEXTURE_2D, -1, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glEndList();
+
+	ctx.checkEqual(gl.getError(), GL_NO_ERROR, "GL_COMPILE deferred the invalid level error");
+	const legacygl::DisplayList *definition = gl.displayList(compileList);
+	ctx.check(definition != nullptr && definition->textureUploads.size() == 1 &&
+		definition->textureUploads[0].pixelBytes.empty(),
+		"the invalid command was stored without reading its pixel pointer");
+	glCallList(compileList);
+	ctx.checkEqual(gl.getError(), GL_INVALID_VALUE, "calling the compile-only list raised the stored error");
+
+	const GLuint compileAndExecuteList = glGenLists(1);
+	glNewList(compileAndExecuteList, GL_COMPILE_AND_EXECUTE);
+	glTexImage2D(GL_TEXTURE_2D, -1, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glEndList();
+	ctx.checkEqual(gl.getError(), GL_INVALID_VALUE, "compile-and-execute raised the error immediately");
+
+	glCallList(compileAndExecuteList);
+	ctx.checkEqual(gl.getError(), GL_INVALID_VALUE,
+		"compile-and-execute retained the invalid command for a later call");
+}

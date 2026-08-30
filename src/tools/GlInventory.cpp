@@ -226,6 +226,7 @@ static bool hasPrefix(const std::string &text, const char *prefix)
 static bool isBackendSourcePath(const std::string &relativePath)
 {
 	return hasPrefix(relativePath, "backends/NativeGL/") ||
+		hasPrefix(relativePath, "backends/D3D12/") ||
 		hasPrefix(relativePath, "backends/OpenGL46/") ||
 		hasPrefix(relativePath, "backends/OpenGL/") ||
 		hasPrefix(relativePath, "backends/Vulkan/") ||
@@ -350,8 +351,8 @@ int main(int argc, char **argv)
 
 	// Translated backends are below the facade boundary, so their implementation
 	// calls must not expand the frontend inventory. OpenGL backends may use modern
-	// GL only; the Vulkan backend may not call OpenGL at all.
-	static const char *coreBackendDirectories[] = { "OpenGL46", "OpenGL", "Vulkan" };
+	// GL only; the Vulkan and D3D12 backends may not call OpenGL at all.
+	static const char *coreBackendDirectories[] = { "OpenGL46", "OpenGL", "Vulkan", "D3D12" };
 	for (const char *directory : coreBackendDirectories)
 	{
 		const std::filesystem::path coreRoot = root / "backends" / directory;
@@ -375,14 +376,15 @@ int main(int argc, char **argv)
 		{
 			const std::string classifiedName = hasPrefix(entry.first, "glad_gl")
 				? entry.first.substr(5) : entry.first;
-			const bool vulkanBackend = std::string(directory) == "Vulkan";
-			if (!vulkanBackend && !isForbiddenCoreFunction(classifiedName))
+			const bool zeroOpenGLBackend = std::string(directory) == "Vulkan" ||
+				std::string(directory) == "D3D12";
+			if (!zeroOpenGLBackend && !isForbiddenCoreFunction(classifiedName))
 				continue;
 			std::ostringstream problem;
 			problem << entry.first << " is forbidden in " << entry.second.firstFile << ':'
 					<< entry.second.firstLine;
-			if (vulkanBackend)
-				problem << "; the Vulkan backend may not call OpenGL";
+			if (zeroOpenGLBackend)
+				problem << "; the " << directory << " backend may not call OpenGL";
 			else
 				problem << "; the Core backend may call modern GL only";
 			problems.push_back(problem.str());

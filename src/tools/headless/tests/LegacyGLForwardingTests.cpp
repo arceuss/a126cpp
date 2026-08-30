@@ -9,6 +9,7 @@
 // A recording backend makes the dispatch observable, so a dropped forward fails
 // here instead of only in a screenshot.
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,7 @@ public:
 	std::vector<legacygl::ResolvedClear> resolvedClears;
 	std::vector<legacygl::ResolvedTextureUpload> resolvedUploads;
 	std::vector<legacygl::ResolvedReadback> resolvedReadbacks;
+	std::vector<std::uint64_t> releasedCanonicalGeometry;
 
 	void matrixMode(unsigned int) override { calls.push_back("matrixMode"); }
 	void loadIdentity() override { calls.push_back("loadIdentity"); }
@@ -160,6 +162,10 @@ public:
 		resolvedCalls.push_back("readback");
 		resolvedReadbacks.push_back(command);
 	}
+	void releaseCanonicalGeometry(std::uint64_t identity) override
+	{
+		releasedCanonicalGeometry.push_back(identity);
+	}
 
 	long long countOf(const std::string &name) const
 	{
@@ -175,6 +181,16 @@ public:
 private:
 	unsigned int nextName = 1;
 };
+
+void compileResidentTriangleList(GLuint list, GLenum mode, const float *vertices)
+{
+	glVertexPointer(3, GL_FLOAT, 0, vertices);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glNewList(list, mode);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	glEndList();
+	glDisableClientState(GL_VERTEX_ARRAY);
+}
 
 HEADLESS_TEST(legacygl_dispatch, every_inventoried_call_reaches_the_backend)
 {
@@ -625,6 +641,300 @@ HEADLESS_TEST(legacygl_resolved, compile_only_list_defers_state_clear_and_draw)
 	{
 		ctx.checkEqualBits(sink.resolvedGeometry[0].vertices[0].r, 0.25f,
 			"list current colour is resolved into replayed geometry");
+	}
+
+	legacygl::setSink(legacygl::nullSink());
+}
+
+HEADLESS_TEST(legacygl_resolved, captured_geometry_identity_is_stable_across_replay_and_nested_calls)
+{
+	legacyglTest::begin();
+
+	RecordingSink sink;
+	legacygl::setSink(&sink);
+
+	const float vertices[] = {
+		0.0f, 0.0f, 0.0f,
+		1.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f
+	};
+	const GLuint child = glGenLists(2);
+	const GLuint outer = child + 1;
+
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	compileResidentTriangleList(child, GL_COMPILE_AND_EXECUTE, vertices);
+	ctx.checkEqual(static_cast<long long>(sink.resolvedDraws.size()), 1,
+		"GL_COMPILE_AND_EXECUTE emitted the captured draw once");
+
+	std::uint64_t identity = 0;
+	if (!sink.resolvedDraws.empty())
+	{
+		identity = sink.resolvedDraws[0].geometryResidencyId;
+		ctx.check(identity != 0, "captured array geometry has a resident identity");
+	}
+
+	glColor4f(0.125f, 0.25f, 0.375f, 1.0f);
+	glCallList(child);
+	if (ctx.check(sink.resolvedDraws.size() == 2, "direct replay emitted one draw"))
+	{
+		ctx.check(sink.resolvedDraws[1].geometryResidencyId == identity,
+			"direct replay kept the captured geometry identity");
+		ctx.checkEqualBits(sink.resolvedGeometry[1].vertices[0].r, 0.125f,
+			"replay still resolved an unsupplied colour at the call site");
+	}
+
+	glNewList(outer, GL_COMPILE);
+	glColor4f(0.25f, 0.5f, 0.75f, 1.0f);
+	glCallList(child);
+	glEndList();
+	ctx.checkEqual(static_cast<long long>(sink.resolvedDraws.size()), 2,
+		"GL_COMPILE did not execute the nested call while recording");
+
+	glColor4f(1.0f, 0.0f, 0.0f, 1.0f);
+	glCallList(outer);
+	if (ctx.check(sink.resolvedDraws.size() == 3, "nested replay emitted the child draw"))
+	{
+		ctx.check(sink.resolvedDraws[2].geometryResidencyId == identity,
+			"nested replay kept the child geometry identity");
+		ctx.checkEqualBits(sink.resolvedGeometry[2].vertices[0].b, 0.75f,
+			"nested list state was resolved without changing geometry identity");
+	}
+
+	glDeleteLists(child, 2);
+	legacygl::setSink(legacygl::nullSink());
+}
+
+HEADLESS_TEST(legacygl_resolved, captured_geometry_identity_changes_after_redefinition_and_name_reuse)
+{
+	legacyglTest::begin();
+
+	RecordingSink sink;
+	legacygl::setSink(&sink);
+
+	const float first[] = {
+		1.0f, 0.0f, 0.0f,
+		2.0f, 0.0f, 0.0f,
+		1.0f, 1.0f, 0.0f
+	};
+	const float second[] = {
+		-1.0f, 0.0f, 0.0f,
+		-2.0f, 0.0f, 0.0f,
+		-1.0f, -1.0f, 0.0f
+	};
+	const float third[] = {
+		3.0f, 0.0f, 0.0f,
+		4.0f, 0.0f, 0.0f,
+		3.0f, 1.0f, 0.0f
+	};
+	const GLuint list = glGenLists(1);
+
+	compileResidentTriangleList(list, GL_COMPILE, first);
+	glCallList(list);
+	std::uint64_t firstIdentity = 0;
+	if (!sink.resolvedDraws.empty())
+		firstIdentity = sink.resolvedDraws.back().geometryResidencyId;
+	ctx.check(firstIdentity != 0, "the first definition has a resident identity");
+
+	compileResidentTriangleList(list, GL_COMPILE, second);
+	glCallList(list);
+	std::uint64_t secondIdentity = 0;
+	if (sink.resolvedDraws.size() >= 2)
+	{
+		secondIdentity = sink.resolvedDraws.back().geometryResidencyId;
+		ctx.check(secondIdentity != 0 && secondIdentity != firstIdentity,
+			"redefinition receives a fresh resident identity");
+		ctx.checkEqualBits(sink.resolvedGeometry.back().vertices[0].x, -1.0f,
+			"redefinition replayed the replacement geometry");
+	}
+
+	glDeleteLists(list, 1);
+	const std::size_t drawsBeforeDeletedCall = sink.resolvedDraws.size();
+	glCallList(list);
+	ctx.check(sink.resolvedDraws.size() == drawsBeforeDeletedCall,
+		"a deleted list emitted no cached draw");
+	ctx.checkEqual(glGetError(), GL_NO_ERROR, "calling a deleted list remained error-free");
+
+	compileResidentTriangleList(list, GL_COMPILE, third);
+	glCallList(list);
+	if (ctx.check(sink.resolvedDraws.size() == drawsBeforeDeletedCall + 1,
+		"the reused numeric name emitted its new draw"))
+	{
+		const std::uint64_t thirdIdentity = sink.resolvedDraws.back().geometryResidencyId;
+		ctx.check(thirdIdentity != 0 && thirdIdentity != firstIdentity && thirdIdentity != secondIdentity,
+			"delete and recreate receives a fresh resident identity");
+		ctx.checkEqualBits(sink.resolvedGeometry.back().vertices[0].x, 3.0f,
+			"the reused name replayed only its fresh geometry");
+	}
+
+	glDeleteLists(list, 1);
+	legacygl::setSink(legacygl::nullSink());
+}
+
+HEADLESS_TEST(legacygl_resolved, old_definition_remains_callable_while_compile_and_execute_redefines_its_name)
+{
+	legacyglTest::begin();
+
+	RecordingSink sink;
+	legacygl::setSink(&sink);
+
+	const float vertices[] = {
+		0.0f, 0.0f, 0.0f,
+		1.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f
+	};
+	const GLuint list = glGenLists(1);
+	compileResidentTriangleList(list, GL_COMPILE, vertices);
+	glCallList(list);
+	ctx.checkEqual(static_cast<long long>(sink.resolvedDraws.size()), 1,
+		"the original definition drew once");
+	const std::uint64_t originalIdentity = sink.resolvedDraws.empty() ? 0 :
+		sink.resolvedDraws[0].geometryResidencyId;
+
+	glNewList(list, GL_COMPILE_AND_EXECUTE);
+	glCallList(list);
+	if (ctx.check(sink.resolvedDraws.size() == 2,
+		"a self-call during replacement executed the old definition"))
+	{
+		ctx.check(sink.resolvedDraws[1].geometryResidencyId == originalIdentity,
+			"the in-progress self-call retained the old geometry identity");
+	}
+	ctx.check(sink.releasedCanonicalGeometry.empty(),
+		"starting and executing a replacement did not release the old definition");
+
+	glEndList();
+	if (ctx.check(sink.releasedCanonicalGeometry.size() == 1,
+		"ending the replacement released the old definition"))
+	{
+		ctx.check(sink.releasedCanonicalGeometry[0] == originalIdentity,
+			"replacement publication released the original geometry identity");
+	}
+
+	glDeleteLists(list, 1);
+	legacygl::setSink(legacygl::nullSink());
+}
+
+HEADLESS_TEST(legacygl_resolved, transient_and_immediate_draws_have_no_resident_identity)
+{
+	legacyglTest::begin();
+
+	RecordingSink sink;
+	legacygl::setSink(&sink);
+
+	const float vertices[] = {
+		0.0f, 0.0f, 0.0f,
+		1.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f
+	};
+	glVertexPointer(3, GL_FLOAT, 0, vertices);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	glDisableClientState(GL_VERTEX_ARRAY);
+
+	glBegin(GL_TRIANGLES);
+	glVertex3f(0.0f, 0.0f, 0.0f);
+	glVertex3f(1.0f, 0.0f, 0.0f);
+	glVertex3f(0.0f, 1.0f, 0.0f);
+	glEnd();
+
+	const GLuint list = glGenLists(1);
+	glNewList(list, GL_COMPILE);
+	glBegin(GL_TRIANGLES);
+	glVertex3f(0.0f, 0.0f, 0.0f);
+	glVertex3f(1.0f, 0.0f, 0.0f);
+	glVertex3f(0.0f, 1.0f, 0.0f);
+	glEnd();
+	glEndList();
+	glCallList(list);
+
+	if (ctx.check(sink.resolvedDraws.size() == 3,
+		"transient array, immediate draw and immediate list replay all emitted"))
+	{
+		ctx.check(sink.resolvedDraws[0].geometryResidencyId == 0,
+			"an array draw outside a display list is transient");
+		ctx.check(sink.resolvedDraws[1].geometryResidencyId == 0,
+			"direct immediate geometry is transient");
+		ctx.check(sink.resolvedDraws[2].geometryResidencyId == 0,
+			"replayed immediate-mode commands do not claim captured geometry identity");
+	}
+	glDeleteLists(list, 1);
+	ctx.check(sink.releasedCanonicalGeometry.empty(),
+		"transient and immediate draws registered no resident resource");
+	legacygl::setSink(legacygl::nullSink());
+}
+
+HEADLESS_TEST(legacygl_resolved, captured_geometry_is_released_on_redefinition_deletion_and_reset)
+{
+	legacygl::Context &gl = legacyglTest::begin();
+
+	RecordingSink sink;
+	legacygl::setSink(&sink);
+
+	const float first[] = {
+		0.0f, 0.0f, 0.0f,
+		1.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f
+	};
+	const float second[] = {
+		2.0f, 0.0f, 0.0f,
+		3.0f, 0.0f, 0.0f,
+		2.0f, 1.0f, 0.0f
+	};
+	const float third[] = {
+		4.0f, 0.0f, 0.0f,
+		5.0f, 0.0f, 0.0f,
+		4.0f, 1.0f, 0.0f
+	};
+	const GLuint list = glGenLists(1);
+
+	compileResidentTriangleList(list, GL_COMPILE, first);
+	glCallList(list);
+	ctx.checkEqual(static_cast<long long>(sink.resolvedDraws.size()), 1,
+		"the first definition emitted one draw");
+	const std::uint64_t firstIdentity = sink.resolvedDraws.empty() ? 0 :
+		sink.resolvedDraws.back().geometryResidencyId;
+
+	glVertexPointer(3, GL_FLOAT, 0, second);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glNewList(list, GL_COMPILE);
+	ctx.check(sink.releasedCanonicalGeometry.empty(),
+		"starting a replacement kept the old captured geometry alive");
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	ctx.check(sink.releasedCanonicalGeometry.empty(),
+		"recording replacement geometry kept the old definition alive");
+	glEndList();
+	glDisableClientState(GL_VERTEX_ARRAY);
+	if (ctx.check(sink.releasedCanonicalGeometry.size() == 1,
+		"ending a replacement released the old captured geometry"))
+	{
+		ctx.check(sink.releasedCanonicalGeometry[0] == firstIdentity,
+			"replacement publication released the first definition identity");
+	}
+	glCallList(list);
+	ctx.checkEqual(static_cast<long long>(sink.resolvedDraws.size()), 2,
+		"the replacement definition emitted one draw");
+	const std::uint64_t secondIdentity = sink.resolvedDraws.size() >= 2 ?
+		sink.resolvedDraws.back().geometryResidencyId : 0;
+
+	glDeleteLists(list, 1);
+	if (ctx.check(sink.releasedCanonicalGeometry.size() == 2,
+		"deletion released the replacement geometry"))
+	{
+		ctx.check(sink.releasedCanonicalGeometry[1] == secondIdentity,
+			"deletion released the active definition identity");
+	}
+
+	compileResidentTriangleList(list, GL_COMPILE, third);
+	glCallList(list);
+	ctx.checkEqual(static_cast<long long>(sink.resolvedDraws.size()), 3,
+		"the recreated definition emitted one draw");
+	const std::uint64_t thirdIdentity = sink.resolvedDraws.size() >= 3 ?
+		sink.resolvedDraws.back().geometryResidencyId : 0;
+	gl.reset();
+	if (ctx.check(sink.releasedCanonicalGeometry.size() == 3,
+		"context reset released the recreated geometry"))
+	{
+		ctx.check(sink.releasedCanonicalGeometry[2] == thirdIdentity,
+			"reset released the final definition identity");
 	}
 
 	legacygl::setSink(legacygl::nullSink());

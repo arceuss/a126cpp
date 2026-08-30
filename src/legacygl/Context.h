@@ -103,6 +103,8 @@ enum class ListOp : unsigned char
 	ColorMaterial,
 	BindTexture,
 	TexParameteri,
+	TexImage2D,
+	TexSubImage2D,
 	Clear,
 	ClearColor,
 	ClearDepth,
@@ -137,16 +139,34 @@ struct ListCommand
 	int aux = -1;
 };
 
+struct ListTextureUpload
+{
+	GLenum target = GL_TEXTURE_2D;
+	GLint level = 0;
+	GLint internalFormat = 0;
+	GLint border = 0;
+	GLint xOffset = 0;
+	GLint yOffset = 0;
+	GLsizei width = 0;
+	GLsizei height = 0;
+	GLenum sourceFormat = 0;
+	GLenum sourceType = 0;
+	GLint unpackAlignment = 4;
+	bool pixelsProvided = false;
+	std::vector<unsigned char> pixelBytes;
+};
+
 struct DisplayList
 {
 	bool defined = false;
 	std::vector<ListCommand> commands;
 	// Owned payloads. A display list never keeps a caller pointer alive: array
-	// draws are decoded into geometry at compile time and glCallLists element
-	// arrays are copied.
+	// draws are decoded into geometry, texture pixels and glCallLists elements
+	// are copied at compile time.
 	std::vector<Geometry> geometry;
 	std::vector<double> doubles;
 	std::vector<unsigned int> names;
+	std::vector<ListTextureUpload> textureUploads;
 
 	void clear();
 };
@@ -400,7 +420,13 @@ private:
 	void probePostArrayColor(const Vertex &before, const Geometry &drawn);
 	void applyBindTexture(GLuint texture);
 	void applyTexParameteri(GLenum pname, GLint param);
+	void executeTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height,
+		GLint border, GLenum format, GLenum type, GLint unpackAlignment, const GLvoid *pixels, bool forwardRaw);
+	void executeTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
+		GLsizei height, GLenum format, GLenum type, GLint unpackAlignment, const GLvoid *pixels, bool forwardRaw);
 	void executeGeometry(const Geometry &geometry);
+	void releaseDisplayListGeometry(const DisplayList &list);
+	std::uint64_t allocateGeometryResidencyId();
 	void emitResolvedClear(GLbitfield mask);
 
 	void setError(GLenum error);
@@ -524,9 +550,11 @@ private:
 	GLuint arrayBufferBinding = 0;
 
 	std::unordered_map<GLuint, DisplayList> displayLists;
+	DisplayList compilingDefinition;
 	GLuint compilingListName = 0;
 	GLenum compilingListModeValue = GL_COMPILE;
 	GLuint nextListName = 1;
+	std::uint64_t nextGeometryResidencyId = 1;
 	int executionDepth = 0;
 
 	ArrayState vertexArrayState;

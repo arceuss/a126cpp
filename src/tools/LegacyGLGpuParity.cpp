@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstddef>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -9,6 +10,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <SDL_video.h>
 
 #include "backends/Backend.h"
 #include "backends/Platform/Platform.h"
@@ -22,7 +25,7 @@ const int WindowWidth = 128;
 const int WindowHeight = 128;
 const int LineMaskWidth = 32;
 const int LineMaskHeight = 32;
-const char *RecordHeader = "a126cpp-legacygl-gpu-parity 3";
+const char *RecordHeader = "a126cpp-legacygl-gpu-parity 4";
 
 struct CaseResult
 {
@@ -42,6 +45,27 @@ struct TextureCoordinate
 	float t;
 };
 
+struct InterleavedVertex
+{
+	GLfloat x;
+	GLfloat y;
+	GLfloat z;
+	GLfloat u;
+	GLfloat v;
+	GLubyte r;
+	GLubyte g;
+	GLubyte b;
+	GLubyte a;
+	GLbyte nx;
+	GLbyte ny;
+	GLbyte nz;
+	GLbyte normalPadding;
+	GLint unused;
+};
+
+static_assert(sizeof(InterleavedVertex) == 32, "Tesselator vertices have a 32-byte stride");
+static_assert(offsetof(InterleavedVertex, r) == 20, "Tesselator colours begin at byte 20");
+
 typedef std::array<unsigned char, 3> Rgb;
 typedef std::array<unsigned char, 4> Rgba;
 
@@ -55,6 +79,11 @@ std::string byteHex(const std::vector<unsigned char> &bytes)
 }
 
 std::string byteHex(const Rgb &bytes)
+{
+	return byteHex(std::vector<unsigned char>(bytes.begin(), bytes.end()));
+}
+
+std::string byteHex(const Rgba &bytes)
 {
 	return byteHex(std::vector<unsigned char>(bytes.begin(), bytes.end()));
 }
@@ -97,6 +126,11 @@ void addByteCase(ResultSet &results, const std::string &name, const Rgb &value)
 	addCase(results, name, byteHex(value));
 }
 
+void addRgbaCase(ResultSet &results, const std::string &name, const Rgba &value)
+{
+	addCase(results, name, byteHex(value));
+}
+
 void addBooleanCase(ResultSet &results, const std::string &name, bool value, bool enforceExpected)
 {
 	if (enforceExpected && !value)
@@ -105,6 +139,19 @@ void addBooleanCase(ResultSet &results, const std::string &name, bool value, boo
 }
 
 void requireExact(const std::string &name, const Rgb &actual, const Rgb &expected)
+{
+	if (actual != expected)
+		throw std::runtime_error("case " + name + ": expected " + byteHex(expected) + ", got " + byteHex(actual));
+}
+
+void requireExact(const std::string &name, const Rgba &actual, const Rgba &expected)
+{
+	if (actual != expected)
+		throw std::runtime_error("case " + name + ": expected " + byteHex(expected) + ", got " + byteHex(actual));
+}
+
+void requireExact(const std::string &name, const std::vector<unsigned char> &actual,
+	const std::vector<unsigned char> &expected)
 {
 	if (actual != expected)
 		throw std::runtime_error("case " + name + ": expected " + byteHex(expected) + ", got " + byteHex(actual));
@@ -221,6 +268,20 @@ Rgb readRgb(int x, int y)
 	return result;
 }
 
+Rgba readRgba(int x, int y)
+{
+	Rgba result = { 0, 0, 0, 0 };
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	glReadPixels(x, y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, result.data());
+	return result;
+}
+
+void setColor(const Rgba &color)
+{
+	glColor4f(color[0] / 255.0f, color[1] / 255.0f,
+		color[2] / 255.0f, color[3] / 255.0f);
+}
+
 std::vector<Rgb> renderTextureSamples(const std::vector<TextureCoordinate> &coordinates)
 {
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -289,6 +350,307 @@ void recordAlphaCases(ResultSet &results, bool enforceExpected)
 		}
 	}
 	glDisable(GL_ALPHA_TEST);
+}
+
+void drawTriangle(GLenum winding)
+{
+	glBegin(GL_TRIANGLES);
+	glVertex3f(4.0f, 4.0f, 0.0f);
+	if (winding == GL_CCW)
+	{
+		glVertex3f(28.0f, 4.0f, 0.0f);
+		glVertex3f(16.0f, 28.0f, 0.0f);
+	}
+	else
+	{
+		glVertex3f(16.0f, 28.0f, 0.0f);
+		glVertex3f(28.0f, 4.0f, 0.0f);
+	}
+	glEnd();
+}
+
+bool renderCullCase(GLenum winding, GLenum cullFace)
+{
+	configure2D(32, 32);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glEnable(GL_CULL_FACE);
+	glCullFace(cullFace);
+	glColor4f(1.0f, 0.0f, 0.0f, 1.0f);
+	drawTriangle(winding);
+	glFinish();
+	const Rgb pixel = readRgb(16, 12);
+	return pixel[0] != 0;
+}
+
+void recordCullCases(ResultSet &results, bool enforceExpected)
+{
+	struct CullCase
+	{
+		const char *name;
+		GLenum winding;
+		GLenum cullFace;
+		bool visible;
+	};
+	const CullCase cases[] = {
+		{ "cull.ccw.back", GL_CCW, GL_BACK, true },
+		{ "cull.ccw.front", GL_CCW, GL_FRONT, false },
+		{ "cull.cw.back", GL_CW, GL_BACK, false },
+		{ "cull.cw.front", GL_CW, GL_FRONT, true }
+	};
+	for (const CullCase &test : cases)
+	{
+		const bool visible = renderCullCase(test.winding, test.cullFace);
+		if (enforceExpected && visible != test.visible)
+			throw std::runtime_error("case " + std::string(test.name) + ": unexpected visibility");
+		addCase(results, test.name, visible ? "1" : "0");
+	}
+}
+
+bool depthComparisonPasses(GLenum function, int relation)
+{
+	switch (function)
+	{
+		case GL_NEVER: return false;
+		case GL_LESS: return relation < 0;
+		case GL_EQUAL: return relation == 0;
+		case GL_LEQUAL: return relation <= 0;
+		case GL_GREATER: return relation > 0;
+		case GL_NOTEQUAL: return relation != 0;
+		case GL_GEQUAL: return relation >= 0;
+		default: return true;
+	}
+}
+
+std::vector<unsigned char> renderDepthSignature(GLenum function)
+{
+	configure2D(48, 16);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glClearDepth(1.0);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	glDepthFunc(GL_ALWAYS);
+	glColor4f(0.0f, 0.0f, 1.0f, 1.0f);
+	for (int i = 0; i < 3; i++)
+		drawQuad(2.0f + i * 16.0f, 2.0f, 14.0f + i * 16.0f, 14.0f, 0.0f);
+
+	const float candidateDepths[] = { 0.5f, 0.0f, -0.5f };
+	glDepthFunc(function);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	for (int i = 0; i < 3; i++)
+		drawQuad(2.0f + i * 16.0f, 2.0f, 14.0f + i * 16.0f, 14.0f, candidateDepths[i]);
+	glFinish();
+
+	std::vector<unsigned char> result;
+	for (int i = 0; i < 3; i++)
+	{
+		const Rgb pixel = readRgb(8 + i * 16, 8);
+		result.insert(result.end(), pixel.begin(), pixel.end());
+	}
+	return result;
+}
+
+Rgb renderDepthMaskCase(bool writeCandidate)
+{
+	configure2D(16, 16);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glClearDepth(1.0);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_ALWAYS);
+	glDepthMask(GL_TRUE);
+	glColor4f(0.0f, 0.0f, 1.0f, 1.0f);
+	drawQuad(2.0f, 2.0f, 14.0f, 14.0f, 0.0f);
+
+	glDepthMask(writeCandidate ? GL_TRUE : GL_FALSE);
+	glColor4f(1.0f, 0.0f, 0.0f, 1.0f);
+	drawQuad(2.0f, 2.0f, 14.0f, 14.0f, 0.5f);
+	glDepthMask(GL_TRUE);
+	glDepthFunc(GL_LESS);
+	glColor4f(0.0f, 1.0f, 0.0f, 1.0f);
+	drawQuad(2.0f, 2.0f, 14.0f, 14.0f, 0.25f);
+	glFinish();
+	return readRgb(8, 8);
+}
+
+void recordDepthCases(ResultSet &results, bool enforceExpected)
+{
+	const GLenum functions[] = { GL_NEVER, GL_LESS, GL_EQUAL, GL_LEQUAL, GL_GREATER, GL_NOTEQUAL, GL_GEQUAL, GL_ALWAYS };
+	const char *functionNames[] = { "never", "less", "equal", "lequal", "greater", "notequal", "gequal", "always" };
+	const int relations[] = { -1, 0, 1 };
+	for (std::size_t functionIndex = 0; functionIndex < 8; functionIndex++)
+	{
+		const std::string name = "depth." + std::string(functionNames[functionIndex]) + ".signature";
+		const std::vector<unsigned char> actual = renderDepthSignature(functions[functionIndex]);
+		std::vector<unsigned char> expected;
+		for (int relation : relations)
+		{
+			const Rgb pixel = depthComparisonPasses(functions[functionIndex], relation) ?
+				Rgb{ 255, 255, 255 } : Rgb{ 0, 0, 255 };
+			expected.insert(expected.end(), pixel.begin(), pixel.end());
+		}
+		if (enforceExpected)
+			requireExact(name, actual, expected);
+		addCase(results, name, byteHex(actual));
+	}
+
+	const Rgb preserved = renderDepthMaskCase(false);
+	const Rgb updated = renderDepthMaskCase(true);
+	if (enforceExpected)
+	{
+		requireExact("depth.mask-false-preserves", preserved, Rgb{ 0, 255, 0 });
+		requireExact("depth.mask-true-updates", updated, Rgb{ 255, 0, 0 });
+	}
+	addByteCase(results, "depth.mask-false-preserves", preserved);
+	addByteCase(results, "depth.mask-true-updates", updated);
+}
+
+Rgba renderBlendCase(GLenum sourceFactor, GLenum destinationFactor)
+{
+	const Rgba destination = { 48, 96, 160, 64 };
+	const Rgba source = { 192, 128, 32, 160 };
+	configure2D(16, 16);
+	glClearColor(destination[0] / 255.0f, destination[1] / 255.0f,
+		destination[2] / 255.0f, destination[3] / 255.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glEnable(GL_BLEND);
+	glBlendFunc(sourceFactor, destinationFactor);
+	setColor(source);
+	drawQuad(2.0f, 2.0f, 14.0f, 14.0f, 0.0f);
+	glFinish();
+	return readRgba(8, 8);
+}
+
+void recordBlendCases(ResultSet &results)
+{
+	struct BlendCase
+	{
+		const char *name;
+		GLenum source;
+		GLenum destination;
+	};
+	const BlendCase cases[] = {
+		{ "blend.game.src-alpha.one-minus-src-alpha", GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA },
+		{ "blend.game.src-color.one", GL_SRC_COLOR, GL_ONE },
+		{ "blend.game.one.one", GL_ONE, GL_ONE },
+		{ "blend.game.src-alpha.one", GL_SRC_ALPHA, GL_ONE },
+		{ "blend.game.dst-color.src-color", GL_DST_COLOR, GL_SRC_COLOR },
+		{ "blend.game.one-minus-dst-color.one-minus-src-color", GL_ONE_MINUS_DST_COLOR, GL_ONE_MINUS_SRC_COLOR },
+		{ "blend.factor.src-color.zero", GL_SRC_COLOR, GL_ZERO },
+		{ "blend.factor.dst-color.zero", GL_DST_COLOR, GL_ZERO },
+		{ "blend.factor.src-alpha-saturate.zero", GL_SRC_ALPHA_SATURATE, GL_ZERO }
+	};
+	for (const BlendCase &test : cases)
+		addRgbaCase(results, test.name, renderBlendCase(test.source, test.destination));
+}
+
+unsigned char logicResult(GLenum operation, unsigned char source, unsigned char destination)
+{
+	switch (operation)
+	{
+		case GL_CLEAR: return 0;
+		case GL_AND: return source & destination;
+		case GL_AND_REVERSE: return source & static_cast<unsigned char>(~destination);
+		case GL_COPY: return source;
+		case GL_AND_INVERTED: return static_cast<unsigned char>(~source) & destination;
+		case GL_NOOP: return destination;
+		case GL_XOR: return source ^ destination;
+		case GL_OR: return source | destination;
+		case GL_NOR: return static_cast<unsigned char>(~(source | destination));
+		case GL_EQUIV: return static_cast<unsigned char>(~(source ^ destination));
+		case GL_INVERT: return static_cast<unsigned char>(~destination);
+		case GL_OR_REVERSE: return source | static_cast<unsigned char>(~destination);
+		case GL_COPY_INVERTED: return static_cast<unsigned char>(~source);
+		case GL_OR_INVERTED: return static_cast<unsigned char>(~source) | destination;
+		case GL_NAND: return static_cast<unsigned char>(~(source & destination));
+		default: return 255;
+	}
+}
+
+void recordLogicOpCases(ResultSet &results, bool enforceExpected)
+{
+	const GLenum operations[] = {
+		GL_CLEAR, GL_AND, GL_AND_REVERSE, GL_COPY, GL_AND_INVERTED, GL_NOOP, GL_XOR, GL_OR,
+		GL_NOR, GL_EQUIV, GL_INVERT, GL_OR_REVERSE, GL_COPY_INVERTED, GL_OR_INVERTED, GL_NAND, GL_SET
+	};
+	const char *operationNames[] = {
+		"clear", "and", "and-reverse", "copy", "and-inverted", "noop", "xor", "or",
+		"nor", "equiv", "invert", "or-reverse", "copy-inverted", "or-inverted", "nand", "set"
+	};
+	const Rgba destination = { 60, 165, 90, 195 };
+	const Rgba source = { 150, 105, 240, 15 };
+	configure2D(64, 64);
+	glClearColor(destination[0] / 255.0f, destination[1] / 255.0f,
+		destination[2] / 255.0f, destination[3] / 255.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glEnable(GL_COLOR_LOGIC_OP);
+	setColor(source);
+	for (std::size_t i = 0; i < 16; i++)
+	{
+		const float left = 2.0f + static_cast<float>(i % 4) * 15.0f;
+		const float bottom = 2.0f + static_cast<float>(i / 4) * 15.0f;
+		glLogicOp(operations[i]);
+		drawQuad(left, bottom, left + 10.0f, bottom + 10.0f, 0.0f);
+	}
+	glFinish();
+	for (std::size_t i = 0; i < 16; i++)
+	{
+		const int x = 7 + static_cast<int>(i % 4) * 15;
+		const int y = 7 + static_cast<int>(i / 4) * 15;
+		const Rgba actual = readRgba(x, y);
+		Rgba expected = {};
+		for (std::size_t channel = 0; channel < 4; channel++)
+			expected[channel] = logicResult(operations[i], source[channel], destination[channel]);
+		const std::string name = "logic." + std::string(operationNames[i]);
+		if (enforceExpected)
+			requireExact(name, actual, expected);
+		addRgbaCase(results, name, actual);
+	}
+}
+
+void recordAsymmetricTransformCase(ResultSet &results, bool enforceExpected)
+{
+	configure2D(WindowWidth, WindowHeight);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glClearDepth(1.0);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glViewport(11, 17, 73, 61);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	glFrustum(-1.0, 2.0, -0.75, 1.25, 1.0, 9.0);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glTranslatef(0.6f, -0.3f, -3.0f);
+	glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
+	glScalef(0.7f, 1.2f, 1.0f);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
+	glDepthMask(GL_TRUE);
+	glColor4f(1.0f, 0.0f, 0.0f, 1.0f);
+	drawQuad(-1.5f, -0.8f, 1.5f, 0.8f, 0.0f);
+	glColor4f(0.0f, 1.0f, 0.0f, 1.0f);
+	drawQuad(-0.3f, -0.3f, 0.3f, 0.3f, 1.5f);
+	glFinish();
+
+	const int samples[][2] = {
+		{ 29, 34 }, { 35, 29 }, { 35, 44 }, { 46, 43 },
+		{ 44, 34 }, { 52, 34 }, { 40, 23 }, { 40, 52 }
+	};
+	std::vector<unsigned char> actual;
+	for (const auto &sample : samples)
+	{
+		const Rgb pixel = readRgb(sample[0], sample[1]);
+		actual.insert(actual.end(), pixel.begin(), pixel.end());
+	}
+	const std::vector<unsigned char> expected = {
+		0, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0,
+		0, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+	};
+	const std::string name = "matrix.asymmetric-modelview-projection-viewport";
+	if (enforceExpected)
+		requireExact(name, actual, expected);
+	addCase(results, name, byteHex(actual));
 }
 
 void recordTextureCases(ResultSet &results, bool enforceExpected)
@@ -391,6 +753,163 @@ void recordTextureCases(ResultSet &results, bool enforceExpected)
 	glDeleteTextures(1, &texture);
 }
 
+void recordTextureZeroDeleteCase(ResultSet &results, bool enforceExpected)
+{
+	configure2D(WindowWidth, WindowHeight);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+	const Rgba texel = { 37, 91, 173, 255 };
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, texel.data());
+
+	const std::vector<TextureCoordinate> coordinate = { { 0.5f, 0.5f } };
+	const Rgb beforeDelete = renderTextureSamples(coordinate)[0];
+	const GLuint zero = 0;
+	glDeleteTextures(1, &zero);
+	const Rgb afterDelete = renderTextureSamples(coordinate)[0];
+
+	std::vector<unsigned char> actual;
+	actual.insert(actual.end(), beforeDelete.begin(), beforeDelete.end());
+	actual.insert(actual.end(), afterDelete.begin(), afterDelete.end());
+	const std::vector<unsigned char> expected = { 37, 91, 173, 37, 91, 173 };
+	const std::string name = "texture.zero-delete-preserves-default";
+	if (enforceExpected)
+		requireExact(name, actual, expected);
+	addCase(results, name, byteHex(actual));
+	glDisable(GL_TEXTURE_2D);
+}
+
+void recordDisplayListTextureCase(ResultSet &results, bool enforceExpected)
+{
+	configure2D(WindowWidth, WindowHeight);
+	GLuint texture = 0;
+	glGenTextures(1, &texture);
+	const GLuint list = glGenLists(1);
+	std::array<Rgba, 4> pixels = {
+		Rgba{ 37, 91, 173, 255 }, Rgba{ 37, 91, 173, 255 },
+		Rgba{ 37, 91, 173, 255 }, Rgba{ 37, 91, 173, 255 }
+	};
+
+	glNewList(list, GL_COMPILE);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+	drawTexturedQuad(48.0f, 48.0f, 80.0f, 80.0f, 0.25f, 0.25f);
+	glEndList();
+	if (glGetError() != GL_NO_ERROR)
+		throw std::runtime_error("case texture.display-list-first-use: compiling the list raised an error");
+
+	for (Rgba &pixel : pixels)
+		pixel = { 0, 0, 0, 0 };
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glEnable(GL_TEXTURE_2D);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	glCallList(list);
+	if (glGetError() != GL_NO_ERROR)
+		throw std::runtime_error("case texture.display-list-first-use: executing the list raised an error");
+	glFinish();
+
+	const Rgb result = readRgb(64, 64);
+	if (enforceExpected)
+		requireExact("texture.display-list-first-use", result, { 37, 91, 173 });
+	addByteCase(results, "texture.display-list-first-use", result);
+
+	glDisable(GL_TEXTURE_2D);
+	glDeleteLists(list, 1);
+	glDeleteTextures(1, &texture);
+}
+
+void recordDisplayListCurrentColorCase(ResultSet &results, bool enforceExpected)
+{
+	configure2D(WindowWidth, WindowHeight);
+	const float vertices[] = {
+		0.0f, 0.0f, 0.0f,
+		16.0f, 0.0f, 0.0f,
+		16.0f, 16.0f, 0.0f,
+		0.0f, 16.0f, 0.0f
+	};
+	const GLuint list = glGenLists(1);
+	glVertexPointer(3, GL_FLOAT, 0, vertices);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glNewList(list, GL_COMPILE);
+	glDrawArrays(GL_QUADS, 0, 4);
+	glEndList();
+	glDisableClientState(GL_VERTEX_ARRAY);
+
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glColor4f(1.0f, 0.0f, 0.0f, 1.0f);
+	glPushMatrix();
+	glTranslatef(16.0f, 16.0f, 0.0f);
+	glCallList(list);
+	glPopMatrix();
+	glColor4f(0.0f, 1.0f, 0.0f, 1.0f);
+	glPushMatrix();
+	glTranslatef(48.0f, 16.0f, 0.0f);
+	glCallList(list);
+	glPopMatrix();
+	glFinish();
+
+	const Rgb first = readRgb(24, 24);
+	const Rgb second = readRgb(56, 24);
+	std::vector<unsigned char> actual;
+	actual.insert(actual.end(), first.begin(), first.end());
+	actual.insert(actual.end(), second.begin(), second.end());
+	const std::vector<unsigned char> expected = { 255, 0, 0, 0, 255, 0 };
+	const std::string name = "list.execution-current-color-variants";
+	if (enforceExpected)
+		requireExact(name, actual, expected);
+	addCase(results, name, byteHex(actual));
+	glDeleteLists(list, 1);
+}
+
+void recordPresentedTextureLifetimeCase(ResultSet &results, bool enforceExpected)
+{
+	configure2D(WindowWidth, WindowHeight);
+	GLuint texture = 0;
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glEnable(GL_TEXTURE_2D);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+	const std::array<Rgba, 4> frameColors = {
+		Rgba{ 255, 0, 0, 255 }, Rgba{ 0, 255, 0, 255 },
+		Rgba{ 0, 0, 255, 255 }, Rgba{ 37, 91, 173, 255 }
+	};
+	for (std::size_t frame = 0; frame < frameColors.size(); frame++)
+	{
+		std::array<Rgba, 4> pixels;
+		pixels.fill(frameColors[frame]);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		drawTexturedQuad(48.0f, 48.0f, 80.0f, 80.0f, 0.25f, 0.25f);
+		if (frame + 1 < frameColors.size())
+		{
+			// Three asynchronous presents wrap the two Vulkan frame slots before the final draw.
+			renderbackend::present();
+		}
+	}
+
+	const Rgb result = readRgb(64, 64);
+	if (enforceExpected)
+		requireExact("texture.present-redefine-slot-reuse", result, { 37, 91, 173 });
+	addByteCase(results, "texture.present-redefine-slot-reuse", result);
+
+	glDisable(GL_TEXTURE_2D);
+	glDeleteTextures(1, &texture);
+}
+
 void recordTextureMatrixCases(ResultSet &results, bool enforceExpected)
 {
 	configure2D(WindowWidth, WindowHeight);
@@ -469,6 +988,56 @@ void recordPrimaryColorCases(ResultSet &results, bool enforceExpected)
 	addByteCase(results, "primary.smooth.interior", smooth);
 }
 
+Rgb renderInterleavedArray(bool useBuffer)
+{
+	configure2D(WindowWidth, WindowHeight);
+	const std::array<InterleavedVertex, 3> vertices = {
+		InterleavedVertex{ 16.0f, 16.0f, 0.0f, 0.0f, 0.0f, 37, 91, 173, 255, 0, 0, 127, 0, 0 },
+		InterleavedVertex{ 112.0f, 16.0f, 0.0f, 0.0f, 0.0f, 37, 91, 173, 255, 0, 0, 127, 0, 0 },
+		InterleavedVertex{ 16.0f, 112.0f, 0.0f, 0.0f, 0.0f, 37, 91, 173, 255, 0, 0, 127, 0, 0 }
+	};
+
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glBindBufferARB(GL_ARRAY_BUFFER_ARB, 0);
+	if (useBuffer)
+	{
+		GLuint buffer = 0;
+		glGenBuffersARB(1, &buffer);
+		glBindBufferARB(GL_ARRAY_BUFFER_ARB, buffer);
+		glBufferDataARB(GL_ARRAY_BUFFER_ARB, static_cast<GLsizeiptrARB>(sizeof(vertices)), vertices.data(),
+			GL_STREAM_DRAW_ARB);
+	}
+
+	const GLvoid *position = useBuffer ? reinterpret_cast<const GLvoid *>(0) : &vertices[0].x;
+	const GLvoid *color = useBuffer ? reinterpret_cast<const GLvoid *>(offsetof(InterleavedVertex, r)) : &vertices[0].r;
+	glVertexPointer(3, GL_FLOAT, static_cast<GLsizei>(sizeof(InterleavedVertex)), position);
+	glColorPointer(4, GL_UNSIGNED_BYTE, static_cast<GLsizei>(sizeof(InterleavedVertex)), color);
+	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+	glDisableClientState(GL_NORMAL_ARRAY);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_COLOR_ARRAY);
+	glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
+	glDisableClientState(GL_COLOR_ARRAY);
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glBindBufferARB(GL_ARRAY_BUFFER_ARB, 0);
+	glFinish();
+	return readRgb(40, 40);
+}
+
+void recordInterleavedArrayCases(ResultSet &results, bool enforceExpected)
+{
+	const Rgb client = renderInterleavedArray(false);
+	if (enforceExpected)
+		requireExact("arrays.interleaved32.client-pointer", client, { 37, 91, 173 });
+	addByteCase(results, "arrays.interleaved32.client-pointer", client);
+
+	const Rgb buffer = renderInterleavedArray(true);
+	if (enforceExpected)
+		requireExact("arrays.interleaved32.buffer-offset", buffer, { 37, 91, 173 });
+	addByteCase(results, "arrays.interleaved32.buffer-offset", buffer);
+}
+
 void setDirectionalLight(GLenum light, const GLfloat *direction, const GLfloat *diffuse)
 {
 	const GLfloat black[] = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -524,7 +1093,7 @@ Rgb renderNormalMode(GLenum mode)
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-	glNormal3f(0.0f, 0.0f, 1.0f);
+	glNormal3f(0.0f, 0.0f, 0.5f);
 	drawQuad(24.0f, 24.0f, 40.0f, 40.0f, 0.0f);
 	glFinish();
 	return readRgb(64, 64);
@@ -544,8 +1113,8 @@ void recordNormalModeCases(ResultSet &results, bool enforceExpected)
 	const Rgb normalize = renderNormalMode(GL_NORMALIZE);
 	if (enforceExpected)
 	{
-		requireNear("normal.none.scaled", none, { 64, 64, 64 }, 2);
-		requireNear("normal.rescale.scaled", rescale, { 128, 128, 128 }, 2);
+		requireNear("normal.none.scaled", none, { 32, 32, 32 }, 2);
+		requireNear("normal.rescale.scaled", rescale, { 64, 64, 64 }, 2);
 		requireNear("normal.normalize.scaled", normalize, { 128, 128, 128 }, 2);
 	}
 	addByteCase(results, "normal.none.scaled", none);
@@ -582,11 +1151,19 @@ void recordFogCases(ResultSet &results, bool enforceExpected)
 	const Rgb absolute = renderFogMode(GL_EYE_PLANE_ABSOLUTE_NV);
 	const Rgb plane = renderFogMode(GL_EYE_PLANE);
 	const Rgb radial = renderFogMode(GL_EYE_RADIAL_NV);
-	if (enforceExpected && std::abs(static_cast<int>(radial[0]) - static_cast<int>(absolute[0])) < 8)
-		throw std::runtime_error("case fog.eye-radial: expected radial distance to differ from absolute eye Z");
+	glFogi(GL_FOG_MODE, GL_EXP);
+	glFogf(GL_FOG_DENSITY, 0.25f);
+	const Rgb exponential = renderFogMode(GL_EYE_PLANE_ABSOLUTE_NV);
+	if (enforceExpected)
+	{
+		if (std::abs(static_cast<int>(radial[0]) - static_cast<int>(absolute[0])) < 8)
+			throw std::runtime_error("case fog.eye-radial: expected radial distance to differ from absolute eye Z");
+		requireNear("fog.exp.eye-plane-absolute", exponential, { 94, 94, 94 }, 2);
+	}
 	addByteCase(results, "fog.eye-plane-absolute", absolute);
 	addByteCase(results, "fog.eye-plane-signed", plane);
 	addByteCase(results, "fog.eye-radial", radial);
+	addByteCase(results, "fog.exp.eye-plane-absolute", exponential);
 }
 
 void recordClearCases(ResultSet &results, bool enforceExpected)
@@ -819,6 +1396,9 @@ void recordLineCases(ResultSet &results)
 
 ResultSet recordCases()
 {
+	platform::initialize();
+	if (SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8) != 0)
+		throw std::runtime_error("legacygl GPU parity fixture could not request an alpha framebuffer");
 	lwjgl::GLContext::instantiate();
 	platform::setWindowSize(WindowWidth, WindowHeight);
 	int drawableWidth = 0;
@@ -832,9 +1412,19 @@ ResultSet recordCases()
 	const bool enforceExpected = results.backend == "native";
 	recordGeneratedNameCases(results, enforceExpected);
 	recordAlphaCases(results, enforceExpected);
+	recordCullCases(results, enforceExpected);
+	recordDepthCases(results, enforceExpected);
+	recordBlendCases(results);
+	recordLogicOpCases(results, enforceExpected);
+	recordAsymmetricTransformCase(results, enforceExpected);
 	recordTextureCases(results, enforceExpected);
+	recordTextureZeroDeleteCase(results, enforceExpected);
+	recordDisplayListTextureCase(results, enforceExpected);
+	recordDisplayListCurrentColorCase(results, enforceExpected);
+	recordPresentedTextureLifetimeCase(results, enforceExpected);
 	recordTextureMatrixCases(results, enforceExpected);
 	recordPrimaryColorCases(results, enforceExpected);
+	recordInterleavedArrayCases(results, enforceExpected);
 	recordTwoLightCase(results, enforceExpected);
 	recordNormalModeCases(results, enforceExpected);
 	recordFogCases(results, enforceExpected);
@@ -988,25 +1578,27 @@ bool onePixelBoundary(const std::vector<unsigned char> &first, const std::vector
 	return different;
 }
 
-void compareExactCase(const CaseResult &native, const CaseResult &candidate, const std::string &candidateName)
+void compareExactCase(const CaseResult &reference, const CaseResult &candidate,
+	const std::string &referenceName, const std::string &candidateName)
 {
-	if (native.value != candidate.value)
-		throw std::runtime_error("case " + native.name + ": native=" + native.value + ", " +
+	if (reference.value != candidate.value)
+		throw std::runtime_error("case " + reference.name + ": " + referenceName + "=" +
+			reference.value + ", " +
 			candidateName + "=" + candidate.value);
 }
 
-void compareTolerantCase(const CaseResult &native, const CaseResult &candidate, int tolerance,
-	const std::string &candidateName)
+void compareTolerantCase(const CaseResult &reference, const CaseResult &candidate, int tolerance,
+	const std::string &referenceName, const std::string &candidateName)
 {
-	const std::vector<unsigned char> nativeBytes = parseHex(native.value, native.name);
+	const std::vector<unsigned char> referenceBytes = parseHex(reference.value, reference.name);
 	const std::vector<unsigned char> candidateBytes = parseHex(candidate.value, candidate.name);
-	if (nativeBytes.size() != candidateBytes.size())
-		throw std::runtime_error("case " + native.name + ": byte count differs");
-	for (std::size_t i = 0; i < nativeBytes.size(); i++)
+	if (referenceBytes.size() != candidateBytes.size())
+		throw std::runtime_error("case " + reference.name + ": byte count differs");
+	for (std::size_t i = 0; i < referenceBytes.size(); i++)
 	{
-		if (std::abs(static_cast<int>(nativeBytes[i]) - static_cast<int>(candidateBytes[i])) > tolerance)
-			throw std::runtime_error("case " + native.name + ": channel " + std::to_string(i) +
-				" native=" + std::to_string(nativeBytes[i]) + ", " + candidateName + "=" +
+		if (std::abs(static_cast<int>(referenceBytes[i]) - static_cast<int>(candidateBytes[i])) > tolerance)
+			throw std::runtime_error("case " + reference.name + ": channel " + std::to_string(i) +
+				" " + referenceName + "=" + std::to_string(referenceBytes[i]) + ", " + candidateName + "=" +
 				std::to_string(candidateBytes[i]));
 	}
 }
@@ -1036,34 +1628,33 @@ void compareLineCase(const ResultSet &nativeResults, const ResultSet &candidateR
 	throw std::runtime_error("case " + nativeWidth2.name + ": line masks differ beyond classification");
 }
 
-void compareResults(const ResultSet &nativeResults, const ResultSet &candidateResults)
+void compareResults(const ResultSet &referenceResults, const ResultSet &candidateResults)
 {
-	if (nativeResults.backend != "native")
-		throw std::runtime_error("native record identifies backend " + nativeResults.backend);
-	if (candidateResults.backend == "native")
-		throw std::runtime_error("candidate record identifies the native backend");
-	if (nativeResults.cases.size() != candidateResults.cases.size())
-		throw std::runtime_error("record case counts differ: native=" + std::to_string(nativeResults.cases.size()) +
+	if (referenceResults.backend == candidateResults.backend)
+		throw std::runtime_error("cannot compare two " + referenceResults.backend + " records");
+	if (referenceResults.cases.size() != candidateResults.cases.size())
+		throw std::runtime_error("record case counts differ: " + referenceResults.backend + "=" +
+			std::to_string(referenceResults.cases.size()) +
 			", " + candidateResults.backend + "=" + std::to_string(candidateResults.cases.size()));
 
-	for (const CaseResult &native : nativeResults.cases)
+	for (const CaseResult &reference : referenceResults.cases)
 	{
-		const CaseResult &candidate = findCase(candidateResults, native.name);
-		if (native.name == "line.width2.horizontal" || native.name == "line.width2.diagonal")
+		const CaseResult &candidate = findCase(candidateResults, reference.name);
+		if (reference.name == "line.width2.horizontal" || reference.name == "line.width2.diagonal")
 			continue;
-		if (native.name.compare(0, 15, "texture.linear.") == 0)
-			compareTolerantCase(native, candidate, 1, candidateResults.backend);
-		else if (native.name == "primary.smooth.interior" ||
-			native.name.compare(0, 9, "lighting.") == 0 ||
-			native.name.compare(0, 7, "normal.") == 0 ||
-			native.name.compare(0, 4, "fog.") == 0)
-			compareTolerantCase(native, candidate, 2, candidateResults.backend);
+		if (reference.name.compare(0, 15, "texture.linear.") == 0)
+			compareTolerantCase(reference, candidate, 1, referenceResults.backend, candidateResults.backend);
+		else if (reference.name == "primary.smooth.interior" ||
+			reference.name.compare(0, 9, "lighting.") == 0 ||
+			reference.name.compare(0, 7, "normal.") == 0 ||
+			reference.name.compare(0, 4, "fog.") == 0)
+			compareTolerantCase(reference, candidate, 2, referenceResults.backend, candidateResults.backend);
 		else
-			compareExactCase(native, candidate, candidateResults.backend);
+			compareExactCase(reference, candidate, referenceResults.backend, candidateResults.backend);
 	}
-	compareLineCase(nativeResults, candidateResults, "horizontal");
-	compareLineCase(nativeResults, candidateResults, "diagonal");
-	std::cout << "legacygl-gpu-parity: compared " << nativeResults.cases.size() << " named cases\n";
+	compareLineCase(referenceResults, candidateResults, "horizontal");
+	compareLineCase(referenceResults, candidateResults, "diagonal");
+	std::cout << "legacygl-gpu-parity: compared " << referenceResults.cases.size() << " named cases\n";
 }
 
 void printUsage()

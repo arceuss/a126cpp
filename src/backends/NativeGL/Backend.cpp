@@ -169,7 +169,7 @@ static NativeGLSink theNativeSink;
 namespace renderbackend
 {
 
-const Configuration &configuration()
+static const Configuration &nativeGLConfiguration()
 {
 	static const Configuration config = {
 		"native",
@@ -181,29 +181,43 @@ const Configuration &configuration()
 	return config;
 }
 
-void initialize()
+static void nativeGLInitialize()
 {
-	openglbackend::initialize(configuration());
+	openglbackend::initialize(nativeGLConfiguration());
 }
 
-void present()
+static void nativeGLPresent()
 {
 	openglbackend::present();
 }
 
-void shutdown()
+static void nativeGLShutdown()
 {
 	openglbackend::shutdown();
 }
 
-bool hasCapability(const char *capability)
+static bool nativeGLHasCapability(const char *capability)
 {
 	return openglbackend::hasCapability(capability);
 }
 
-legacygl::Sink *sink()
+static legacygl::Sink *nativeGLSink()
 {
 	return &legacygl::theNativeSink;
+}
+
+const Backend &nativeGLBackend()
+{
+	static const Backend backend = {
+		"nativegl",
+		nativeGLConfiguration,
+		nativeGLInitialize,
+		nativeGLPresent,
+		nativeGLShutdown,
+		nativeGLHasCapability,
+		nativeGLSink
+	};
+	return backend;
 }
 
 }

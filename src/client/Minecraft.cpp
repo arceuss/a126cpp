@@ -103,7 +103,8 @@ void Minecraft::init()
 
 	lwjgl::Display::setTitle(u"Minecraft Minecraft " + VERSION_STRING);
 
-	lwjgl::Display::create();
+	if (!unattended)
+		lwjgl::Display::create();
 
 	// TODO
 	// EntityRenderDispatcher.instance.itemInHandRenderer = new ItemInHandRenderer(this);

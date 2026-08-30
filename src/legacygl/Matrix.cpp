@@ -170,18 +170,22 @@ Mat4 normalMatrix(const Mat4 &modelView)
 // GL_EXT_rescale_normal / GL 1.2 section 2.10.3: the factor is
 // 1 / sqrt(mi31^2 + mi32^2 + mi33^2), taken from the inverse model-view's third
 // row. Under the uniform-scale assumption that is the reciprocal of the scale.
-float rescaleNormalFactor(const Mat4 &modelView)
+float rescaleNormalFactorFromNormalMatrix(const Mat4 &normal)
 {
 	// The inverse's third row is the inverse transpose's third column, which in
 	// column-major layout is slots 8, 9 and 10.
-	const Mat4 inverseTranspose = normalMatrix(modelView);
-	const float x = inverseTranspose.m[8];
-	const float y = inverseTranspose.m[9];
-	const float z = inverseTranspose.m[10];
+	const float x = normal.m[8];
+	const float y = normal.m[9];
+	const float z = normal.m[10];
 	const float lengthSquared = x * x + y * y + z * z;
 	if (lengthSquared == 0.0f)
 		return 1.0f;
 	return 1.0f / std::sqrt(lengthSquared);
+}
+
+float rescaleNormalFactor(const Mat4 &modelView)
+{
+	return rescaleNormalFactorFromNormalMatrix(normalMatrix(modelView));
 }
 
 bool isUniformScale(const Mat4 &modelView, float tolerance)

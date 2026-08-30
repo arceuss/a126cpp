@@ -29,7 +29,7 @@ static void shutdown()
 
 void instantiate()
 {
-	// Repeated calls retain the old make-current behavior while the linked
+	// Repeated calls retain the old make-current behavior while the selected
 	// backend and LegacyGL sink themselves remain process-latched.
 	platform::initialize();
 	try

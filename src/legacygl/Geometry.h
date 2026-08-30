@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
 // Canonical vertex form and legacy attribute conversion.
@@ -33,6 +34,10 @@ struct Vertex
 // display-list memory for no observable gain.
 struct Geometry
 {
+	// Nonzero only for immutable array geometry captured by a display list.
+	// Translated backends may retain a canonical GPU representation until the
+	// semantic core explicitly releases this identity.
+	std::uint64_t residencyId = 0;
 	unsigned int mode = 0;
 	int vertexCount = 0;
 	bool hasColor = false;
@@ -42,6 +47,7 @@ struct Geometry
 
 	void clear()
 	{
+		residencyId = 0;
 		mode = 0;
 		vertexCount = 0;
 		hasColor = false;

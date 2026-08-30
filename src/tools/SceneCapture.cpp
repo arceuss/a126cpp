@@ -9,7 +9,6 @@
 
 #include "client/Minecraft.h"
 #include "client/gamemode/SurvivalMode.h"
-#include "backends/Platform/Platform.h"
 #include "java/Random.h"
 #include "java/String.h"
 #include "java/System.h"
@@ -260,15 +259,9 @@ try
 	Random::setDefaultSeedForCapture(static_cast<long_t>(options.seed));
 
 	Minecraft minecraft(options.width, options.height, false);
-	// The renderer opens the pause menu when the window has been unfocused for
-	// half a second, and a hidden window is never focused. The fixture opts out.
+	// Keep the platform window hidden and suppress the focus-loss pause menu.
 	minecraft.unattended = true;
 	minecraft.init();
-
-	// Headless: the client shows its window during init, and a capture has no
-	// reason to put one on screen. Rendering and readback both target the back
-	// buffer, which the driver keeps for a hidden window.
-	platform::hideWindow();
 
 	if (options.world.empty())
 	{

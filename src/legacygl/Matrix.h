@@ -39,6 +39,7 @@ Mat4 normalMatrix(const Mat4 &modelView);
 // GL_RESCALE_NORMAL's scalar. The inverse-transpose model-view rows are assumed
 // uniformly scaled; the factor restores unit length for that case only. Callers
 // that need to know whether the assumption holds ask isUniformScale().
+float rescaleNormalFactorFromNormalMatrix(const Mat4 &normal);
 float rescaleNormalFactor(const Mat4 &modelView);
 bool isUniformScale(const Mat4 &modelView, float tolerance);
 

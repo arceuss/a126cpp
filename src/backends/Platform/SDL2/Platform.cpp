@@ -9,6 +9,7 @@
 #include "SDL_vulkan.h"
 
 #ifdef _WIN32
+#include "SDL_syswm.h"
 #include <windows.h>
 #define IDI_ICON1 1
 #endif
@@ -124,8 +125,18 @@ void createWindow(WindowGraphicsAPI graphicsAPI)
 		return;
 
 	windowGraphicsAPI = graphicsAPI;
-	const Uint32 graphicsFlag = graphicsAPI == WindowGraphicsAPI::OpenGL ?
-		SDL_WINDOW_OPENGL : SDL_WINDOW_VULKAN;
+	Uint32 graphicsFlag = 0;
+	switch (graphicsAPI)
+	{
+		case WindowGraphicsAPI::OpenGL:
+			graphicsFlag = SDL_WINDOW_OPENGL;
+			break;
+		case WindowGraphicsAPI::Vulkan:
+			graphicsFlag = SDL_WINDOW_VULKAN;
+			break;
+		case WindowGraphicsAPI::Direct3D:
+			break;
+	}
 	windowHandle = SDL_CreateWindow("Minecraft Alpha v1.2.6", SDL_WINDOWPOS_CENTERED,
 		SDL_WINDOWPOS_CENTERED, 854, 480,
 		SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | graphicsFlag);
@@ -201,8 +212,18 @@ void getDrawableSize(int &width, int &height)
 {
 	if (windowGraphicsAPI == WindowGraphicsAPI::OpenGL)
 		SDL_GL_GetDrawableSize(windowHandle, &width, &height);
-	else
+	else if (windowGraphicsAPI == WindowGraphicsAPI::Vulkan)
 		SDL_Vulkan_GetDrawableSize(windowHandle, &width, &height);
+	else
+		SDL_GetWindowSize(windowHandle, &width, &height);
+}
+
+void *getVulkanInstanceProcAddress()
+{
+	void *address = SDL_Vulkan_GetVkGetInstanceProcAddr();
+	if (address == nullptr)
+		throw SDLException();
+	return address;
 }
 
 void getRequiredVulkanInstanceExtensions(unsigned int &count, const char **names)
@@ -219,6 +240,17 @@ void createVulkanSurface(void *instance, void *surfaceStorage)
 		throw SDLException();
 	}
 }
+
+#ifdef _WIN32
+void *getWin32WindowHandle()
+{
+	SDL_SysWMinfo info = {};
+	SDL_VERSION(&info.version);
+	if (!SDL_GetWindowWMInfo(windowHandle, &info) || info.subsystem != SDL_SYSWM_WINDOWS)
+		throw SDLException();
+	return info.info.win.window;
+}
+#endif
 
 void setCursorPosition(int x, int y)
 {

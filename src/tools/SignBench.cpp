@@ -25,7 +25,7 @@
 #include "world/phys/AABB.h"
 #include "world/phys/Vec3.h"
 
-// Developer fixture: renders a dense wall of signs in a real window through the
+// Developer fixture: renders a dense wall of signs in a hidden window through the
 // production client path and writes frame timings to a log.
 //
 // It exists because sign-heavy views are the case where this port has been much
@@ -33,7 +33,7 @@
 // variation (16 post rotations, four wall facings, colour codes, empty and
 // full-length lines) in one view for visual comparison.
 
-namespace
+namespace signbench
 {
 
 bool g_blankText = false;
@@ -134,40 +134,63 @@ double percentile(std::vector<double> sorted, double fraction)
 
 }
 
-int runSignBench(int frames, int signCount, bool blankText)
+int runSignBench(int frames, int signCount, bool blankText, bool finishEachFrame,
+	const std::string &worldName)
 try
 {
 	if (frames <= 0)
 		frames = 600;
 	if (signCount < 0)
 		signCount = 4096;
-	g_blankText = blankText;
+	signbench::g_blankText = blankText;
 
 	Minecraft minecraft(854, 480, false);
+	minecraft.unattended = true;
 	std::cerr << "sign-bench: client initialised" << std::endl;
 	minecraft.init();
-
-	// Alpha's in-memory level constructor: no save directory, generated chunks.
-	std::shared_ptr<Level> level =
-		std::make_shared<Level>(u"sign-bench", Dimension::Id_Normal, 1234567LL);
-
-	const int_t baseX = 0;
-	const int_t baseY = 70;
-	const int_t baseZ = 0;
-	std::cerr << "sign-bench: level constructed" << std::endl;
-	int_t placed = buildSignWall(*level, static_cast<int_t>(signCount), baseX, baseY, baseZ);
-	std::cerr << "sign-bench: signs placed " << placed << std::endl;
-
-	minecraft.setLevel(level, u"Sign bench");
-	std::cerr << "sign-bench: level bound" << std::endl;
-	if (minecraft.player == nullptr)
+	if (lwjgl::Display::isVisible())
 	{
-		std::cerr << "sign-bench: no player was created" << std::endl;
+		std::cerr << "sign-bench: unattended window became visible" << std::endl;
 		return 1;
 	}
 
-	// Stand in front of the wall looking at it.
-	minecraft.player->moveTo(baseX + 16.0, baseY + 12.0, baseZ - 40.0, 0.0f, 0.0f);
+	std::shared_ptr<Level> level;
+	const int_t baseX = 0;
+	const int_t baseY = 70;
+	const int_t baseZ = 0;
+	int_t placed = 0;
+	if (worldName.empty())
+	{
+		// Alpha's in-memory level constructor: no save directory, generated chunks.
+		level = std::make_shared<Level>(u"sign-bench", Dimension::Id_Normal, 1234567LL);
+		std::cerr << "sign-bench: level constructed" << std::endl;
+		placed = signbench::buildSignWall(*level, static_cast<int_t>(signCount), baseX, baseY, baseZ);
+		std::cerr << "sign-bench: signs placed " << placed << std::endl;
+		minecraft.setLevel(level, u"Sign bench");
+	}
+	else
+	{
+		std::cerr << "sign-bench: loading world " << worldName << std::endl;
+		minecraft.selectLevel(String::fromUTF8(worldName));
+		level = minecraft.level;
+	}
+	std::cerr << "sign-bench: level bound" << std::endl;
+	if (minecraft.player == nullptr || level == nullptr)
+	{
+		std::cerr << "sign-bench: the world produced no player" << std::endl;
+		return 1;
+	}
+
+	if (worldName.empty())
+	{
+		// Stand in front of the wall looking at it.
+		minecraft.player->moveTo(baseX + 16.0, baseY + 12.0, baseZ - 40.0, 0.0f, 0.0f);
+	}
+	const double fixedPlayerX = minecraft.player->x;
+	const double fixedPlayerY = minecraft.player->y;
+	const double fixedPlayerZ = minecraft.player->z;
+	const float fixedPlayerYRot = minecraft.player->yRot;
+	const float fixedPlayerXRot = minecraft.player->xRot;
 	minecraft.setScreen(nullptr);
 	minecraft.options.showDebugInfo = true;
 
@@ -182,7 +205,9 @@ try
 	// twenty-per-second ticks each frame owes, and the render uses the leftover
 	// partial tick (Minecraft.cpp:467-520).
 	Timer timer(20.0f);
-	int_t chunkUpdates = 0;
+	const int warmupFrames = worldName.empty() ? 60 : 2000;
+	int_t warmupChunkUpdates = 0;
+	int_t measuredChunkUpdates = 0;
 	long_t gameTicks = 0;
 	long_t loopStartMs = System::currentTimeMillis();
 	for (int frame = 0; frame < frames; frame++)
@@ -199,6 +224,11 @@ try
 		for (int_t i = 0; i < timer.ticks; i++)
 		{
 			minecraft.tick();
+			if (!worldName.empty())
+			{
+				minecraft.player->moveTo(fixedPlayerX, fixedPlayerY, fixedPlayerZ,
+					fixedPlayerYRot, fixedPlayerXRot);
+			}
 			gameTicks++;
 		}
 		auto afterTick = std::chrono::steady_clock::now();
@@ -209,13 +239,16 @@ try
 		minecraft.gameRenderer.render(timer.a);
 		auto afterRender = std::chrono::steady_clock::now();
 
-		// Attribution: everything still queued in the driver is charged to the
-		// frame that produced it instead of leaking into the next tick.
-		glFinish();
+		if (finishEachFrame)
+		{
+			// Attribution: everything still queued in the driver is charged to the
+			// frame that produced it instead of leaking into the next tick.
+			glFinish();
+		}
 		auto afterFinish = std::chrono::steady_clock::now();
 
 		// Skip the warm-up frames that compile chunk display lists.
-		if (frame >= 60)
+		if (frame >= warmupFrames)
 		{
 			frameTimes.push_back(std::chrono::duration<double, std::milli>(afterFinish - start).count());
 			tickTimes.push_back(std::chrono::duration<double, std::milli>(afterTick - start).count());
@@ -223,7 +256,10 @@ try
 			renderTimes.push_back(std::chrono::duration<double, std::milli>(afterRender - afterLight).count());
 			finishTimes.push_back(std::chrono::duration<double, std::milli>(afterFinish - afterRender).count());
 		}
-		chunkUpdates += Chunk::updates;
+		if (frame >= warmupFrames)
+			measuredChunkUpdates += Chunk::updates;
+		else
+			warmupChunkUpdates += Chunk::updates;
 		Chunk::updates = 0;
 	}
 
@@ -254,15 +290,20 @@ try
 	};
 
 	emit("sign-bench");
+	emit("window_visible " + std::to_string(lwjgl::Display::isVisible() ? 1 : 0));
+	emit("finish_each_frame " + std::to_string(finishEachFrame ? 1 : 0));
+	emit("world " + (worldName.empty() ? std::string("generated") : worldName));
 	emit("signs " + std::to_string(placed));
 	emit("renderable_tile_entities "
 		+ std::to_string(minecraft.levelRenderer.renderableTileEntities.size()));
+	emit("warmup_frames " + std::to_string(frames < warmupFrames ? frames : warmupFrames));
 	emit("measured_frames " + std::to_string(frameTimes.size()));
-	emit("chunk_updates " + std::to_string(chunkUpdates));
+	emit("warmup_chunk_updates " + std::to_string(warmupChunkUpdates));
+	emit("chunk_updates " + std::to_string(measuredChunkUpdates));
 	emit("mean_ms " + std::to_string(mean));
 	emit("min_ms " + std::to_string(sorted.empty() ? 0.0 : sorted.front()));
-	emit("p50_ms " + std::to_string(percentile(sorted, 0.5)));
-	emit("p95_ms " + std::to_string(percentile(sorted, 0.95)));
+	emit("p50_ms " + std::to_string(signbench::percentile(sorted, 0.5)));
+	emit("p95_ms " + std::to_string(signbench::percentile(sorted, 0.95)));
 	emit("game_ticks " + std::to_string(gameTicks));
 	emit("ticks_per_second " + std::to_string(loopSeconds > 0.0 ? gameTicks / loopSeconds : 0.0));
 	emit("max_ms " + std::to_string(sorted.empty() ? 0.0 : sorted.back()));

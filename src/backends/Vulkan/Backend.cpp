@@ -2,6 +2,7 @@
 #include "backends/Vulkan/Shaders.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -11,6 +12,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <set>
 #include <string>
@@ -21,13 +23,121 @@
 #include "legacygl/LegacyGL.h"
 #include "legacygl/Sink.h"
 
+#define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 
 namespace vulkanbackend
 {
 
+#define A126_VULKAN_GLOBAL_FUNCTIONS(X) \
+	X(vkCreateInstance) \
+	X(vkEnumerateInstanceExtensionProperties) \
+	X(vkEnumerateInstanceLayerProperties)
+
+#define A126_VULKAN_INSTANCE_FUNCTIONS(X) \
+	X(vkDestroyInstance) \
+	X(vkCreateDevice) \
+	X(vkDestroySurfaceKHR) \
+	X(vkEnumerateDeviceExtensionProperties) \
+	X(vkEnumeratePhysicalDevices) \
+	X(vkGetDeviceProcAddr) \
+	X(vkGetPhysicalDeviceFeatures) \
+	X(vkGetPhysicalDeviceFeatures2) \
+	X(vkGetPhysicalDeviceFormatProperties) \
+	X(vkGetPhysicalDeviceMemoryProperties) \
+	X(vkGetPhysicalDeviceProperties) \
+	X(vkGetPhysicalDeviceProperties2) \
+	X(vkGetPhysicalDeviceQueueFamilyProperties) \
+	X(vkGetPhysicalDeviceSurfaceCapabilitiesKHR) \
+	X(vkGetPhysicalDeviceSurfaceFormatsKHR) \
+	X(vkGetPhysicalDeviceSurfacePresentModesKHR) \
+	X(vkGetPhysicalDeviceSurfaceSupportKHR)
+
+#define A126_VULKAN_DEVICE_FUNCTIONS(X) \
+	X(vkDestroyDevice) \
+	X(vkAcquireNextImageKHR) \
+	X(vkAllocateCommandBuffers) \
+	X(vkAllocateDescriptorSets) \
+	X(vkAllocateMemory) \
+	X(vkBeginCommandBuffer) \
+	X(vkBindBufferMemory) \
+	X(vkBindImageMemory) \
+	X(vkCmdBeginRenderPass) \
+	X(vkCmdBindDescriptorSets) \
+	X(vkCmdBindPipeline) \
+	X(vkCmdBindVertexBuffers) \
+	X(vkCmdClearAttachments) \
+	X(vkCmdCopyBufferToImage) \
+	X(vkCmdCopyImageToBuffer) \
+	X(vkCmdDraw) \
+	X(vkCmdEndRenderPass) \
+	X(vkCmdPipelineBarrier) \
+	X(vkCmdPushConstants) \
+	X(vkCmdSetDepthBias) \
+	X(vkCmdSetLineWidth) \
+	X(vkCmdSetScissor) \
+	X(vkCmdSetViewport) \
+	X(vkCreateBuffer) \
+	X(vkCreateCommandPool) \
+	X(vkCreateDescriptorPool) \
+	X(vkCreateDescriptorSetLayout) \
+	X(vkCreateFence) \
+	X(vkCreateFramebuffer) \
+	X(vkCreateGraphicsPipelines) \
+	X(vkCreateImage) \
+	X(vkCreateImageView) \
+	X(vkCreatePipelineLayout) \
+	X(vkCreateRenderPass) \
+	X(vkCreateSampler) \
+	X(vkCreateSemaphore) \
+	X(vkCreateShaderModule) \
+	X(vkCreateSwapchainKHR) \
+	X(vkDestroyBuffer) \
+	X(vkDestroyCommandPool) \
+	X(vkDestroyDescriptorPool) \
+	X(vkDestroyDescriptorSetLayout) \
+	X(vkDestroyFence) \
+	X(vkDestroyFramebuffer) \
+	X(vkDestroyImage) \
+	X(vkDestroyImageView) \
+	X(vkDestroyPipeline) \
+	X(vkDestroyPipelineLayout) \
+	X(vkDestroyRenderPass) \
+	X(vkDestroySampler) \
+	X(vkDestroySemaphore) \
+	X(vkDestroyShaderModule) \
+	X(vkDestroySwapchainKHR) \
+	X(vkDeviceWaitIdle) \
+	X(vkEndCommandBuffer) \
+	X(vkFlushMappedMemoryRanges) \
+	X(vkFreeMemory) \
+	X(vkGetBufferMemoryRequirements) \
+	X(vkGetDeviceQueue) \
+	X(vkGetImageMemoryRequirements) \
+	X(vkGetSwapchainImagesKHR) \
+	X(vkInvalidateMappedMemoryRanges) \
+	X(vkMapMemory) \
+	X(vkQueuePresentKHR) \
+	X(vkQueueSubmit) \
+	X(vkResetCommandBuffer) \
+	X(vkResetDescriptorPool) \
+	X(vkResetFences) \
+	X(vkUnmapMemory) \
+	X(vkUpdateDescriptorSets) \
+	X(vkWaitForFences)
+
+static PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = nullptr;
+
+#define A126_DEFINE_VULKAN_FUNCTION(name) static PFN_##name name = nullptr;
+A126_VULKAN_GLOBAL_FUNCTIONS(A126_DEFINE_VULKAN_FUNCTION)
+A126_VULKAN_INSTANCE_FUNCTIONS(A126_DEFINE_VULKAN_FUNCTION)
+A126_VULKAN_DEVICE_FUNCTIONS(A126_DEFINE_VULKAN_FUNCTION)
+#undef A126_DEFINE_VULKAN_FUNCTION
+
 static const int VULKAN_TEXTURE_LEVELS = 16;
+static const int VULKAN_FRAMES_IN_FLIGHT = 2;
 static const VkDeviceSize VULKAN_STREAM_CHUNK_SIZE = 4 * 1024 * 1024;
+static const VkDeviceSize VULKAN_RESIDENT_PAGE_SIZE = 16 * 1024 * 1024;
 static const char *VULKAN_PORTABILITY_SUBSET_EXTENSION = "VK_KHR_portability_subset";
 
 struct VulkanGPUVertex
@@ -107,7 +217,9 @@ struct BufferResource
 	VkBuffer buffer = VK_NULL_HANDLE;
 	VkDeviceMemory memory = VK_NULL_HANDLE;
 	VkDeviceSize size = 0;
+	VkDeviceSize allocationSize = 0;
 	void *mapped = nullptr;
+	uint32_t memoryTypeIndex = std::numeric_limits<uint32_t>::max();
 	bool coherent = false;
 };
 
@@ -125,11 +237,63 @@ struct StreamAllocation
 	void *mapped = nullptr;
 };
 
+struct ResidentFreeRange
+{
+	VkDeviceSize offset = 0;
+	VkDeviceSize size = 0;
+};
+
+struct ResidentPage
+{
+	BufferResource buffer;
+	std::vector<ResidentFreeRange> freeRanges;
+};
+
+struct ResidentAllocation
+{
+	ResidentPage *page = nullptr;
+	VkDeviceSize offset = 0;
+	VkDeviceSize size = 0;
+};
+
+struct ResidentGeometryVariantKey
+{
+	std::uint64_t residencyId = 0;
+	unsigned int missingAttributes = 0;
+	std::array<std::uint32_t, 4> color = {};
+	std::array<std::uint32_t, 3> normal = {};
+	std::array<std::uint32_t, 2> texCoord = {};
+
+	bool operator<(const ResidentGeometryVariantKey &other) const
+	{
+		return std::tie(residencyId, missingAttributes, color, normal, texCoord) <
+			std::tie(other.residencyId, other.missingAttributes, other.color,
+				other.normal, other.texCoord);
+	}
+};
+
+struct ResidentGeometryEntry
+{
+	std::shared_ptr<ResidentAllocation> allocation;
+	legacygl::Topology topology = legacygl::Topology::Triangles;
+	uint32_t vertexCount = 0;
+};
+
+struct LegacyDescriptorEntry
+{
+	VkBuffer uniformBuffer = VK_NULL_HANDLE;
+	VkImageView imageView = VK_NULL_HANDLE;
+	VkSampler sampler = VK_NULL_HANDLE;
+	VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+};
+
 struct ImageResource
 {
 	VkImage image = VK_NULL_HANDLE;
 	VkDeviceMemory memory = VK_NULL_HANDLE;
 	VkImageView view = VK_NULL_HANDLE;
+	uint32_t width = 0;
+	uint32_t height = 0;
 };
 
 struct VulkanTextureLevel
@@ -251,6 +415,23 @@ struct SwapchainSupport
 	std::vector<VkPresentModeKHR> presentModes;
 };
 
+struct FrameResources
+{
+	VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+	VkSemaphore imageAvailable = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	std::vector<VkDescriptorPool> descriptorPools;
+	std::size_t activeDescriptorPool = 0;
+	std::vector<LegacyDescriptorEntry> legacyDescriptorCache;
+	std::vector<StreamChunk> streamChunks;
+	std::vector<std::shared_ptr<ResidentAllocation>> residentAllocations;
+	std::vector<BufferResource> transientBuffers;
+	std::vector<ImageResource> retiredImages;
+	bool commandRecording = false;
+	bool legacyPassActive = false;
+	bool inFlight = false;
+};
+
 struct State
 {
 	VkInstance instance = VK_NULL_HANDLE;
@@ -295,20 +476,29 @@ struct State
 	std::map<unsigned int, VkPipeline> clearPipelines;
 	std::map<SamplerKey, VkSampler> samplers;
 	std::map<unsigned int, VulkanTexture> textures;
+	std::map<ResidentGeometryVariantKey, ResidentGeometryEntry> residentGeometry;
+	std::vector<std::unique_ptr<ResidentPage>> residentPages;
 	ImageResource fallbackTexture;
 
 	VkCommandPool commandPool = VK_NULL_HANDLE;
-	VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-	VkSemaphore imageAvailable = VK_NULL_HANDLE;
-	VkSemaphore renderingFinished = VK_NULL_HANDLE;
-	VkFence frameFence = VK_NULL_HANDLE;
-	std::vector<VkDescriptorPool> descriptorPools;
-	std::size_t activeDescriptorPool = 0;
-	std::vector<StreamChunk> streamChunks;
-	std::vector<BufferResource> transientBuffers;
-	std::vector<ImageResource> retiredImages;
-	bool commandRecording = false;
-	bool legacyPassActive = false;
+	FrameResources frames[VULKAN_FRAMES_IN_FLIGHT];
+	std::size_t currentFrame = 0;
+	std::vector<VkSemaphore> renderingFinished;
+	std::uint64_t legacyDescriptorCacheHits = 0;
+	std::uint64_t legacyDescriptorCacheMisses = 0;
+	std::uint64_t textureImageCreates = 0;
+	std::uint64_t textureImageReuses = 0;
+	std::uint64_t textureUploadBytes = 0;
+	std::uint64_t residentGeometryCacheHits = 0;
+	std::uint64_t residentGeometryCacheMisses = 0;
+	VkDeviceSize residentGeometryBytes = 0;
+	VkDeviceSize residentGeometryPeakBytes = 0;
+	std::uint64_t drawableSizeQueries = 0;
+	bool streamMemoryTypeReported = false;
+	bool residentMemoryTypeReported = false;
+	int drawableWidth = 0;
+	int drawableHeight = 0;
+	bool drawableSizeCheckedForFrame = false;
 	bool targetsNeedTransition = false;
 	bool logicOpSupported = false;
 	bool wideLinesSupported = false;
@@ -321,6 +511,11 @@ struct State
 };
 
 static State state;
+
+static FrameResources &currentFrame()
+{
+	return state.frames[state.currentFrame];
+}
 
 static void submitAndWait();
 static void imageBarrier(VkImage image, VkImageAspectFlags aspect, VkImageLayout oldLayout,
@@ -336,6 +531,52 @@ static void requireSuccess(VkResult result, const char *operation)
 	throw std::runtime_error(std::string(operation) + " failed with VkResult " +
 		std::to_string(static_cast<int>(result)));
 }
+
+template <typename Function>
+static Function requiredVulkanFunction(PFN_vkVoidFunction address, const char *name)
+{
+	if (address == nullptr)
+		throw std::runtime_error(std::string("required Vulkan function is unavailable: ") + name);
+	return reinterpret_cast<Function>(address);
+}
+
+static void loadGlobalFunctions()
+{
+	vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+		platform::getVulkanInstanceProcAddress());
+	if (vkGetInstanceProcAddr == nullptr)
+		throw std::runtime_error("Vulkan loader does not export vkGetInstanceProcAddr");
+
+#define A126_LOAD_VULKAN_GLOBAL_FUNCTION(name) \
+	name = requiredVulkanFunction<PFN_##name>( \
+		vkGetInstanceProcAddr(VK_NULL_HANDLE, #name), #name);
+	A126_VULKAN_GLOBAL_FUNCTIONS(A126_LOAD_VULKAN_GLOBAL_FUNCTION)
+#undef A126_LOAD_VULKAN_GLOBAL_FUNCTION
+}
+
+static void loadInstanceFunctions()
+{
+	vkDestroyInstance = nullptr;
+#define A126_LOAD_VULKAN_INSTANCE_FUNCTION(name) \
+	name = requiredVulkanFunction<PFN_##name>( \
+		vkGetInstanceProcAddr(state.instance, #name), #name);
+	A126_VULKAN_INSTANCE_FUNCTIONS(A126_LOAD_VULKAN_INSTANCE_FUNCTION)
+#undef A126_LOAD_VULKAN_INSTANCE_FUNCTION
+}
+
+static void loadDeviceFunctions()
+{
+	vkDestroyDevice = nullptr;
+#define A126_LOAD_VULKAN_DEVICE_FUNCTION(name) \
+	name = requiredVulkanFunction<PFN_##name>( \
+		vkGetDeviceProcAddr(state.device, #name), #name);
+	A126_VULKAN_DEVICE_FUNCTIONS(A126_LOAD_VULKAN_DEVICE_FUNCTION)
+#undef A126_LOAD_VULKAN_DEVICE_FUNCTION
+}
+
+#undef A126_VULKAN_GLOBAL_FUNCTIONS
+#undef A126_VULKAN_INSTANCE_FUNCTIONS
+#undef A126_VULKAN_DEVICE_FUNCTIONS
 
 static const char *deviceTypeName(VkPhysicalDeviceType type)
 {
@@ -501,6 +742,17 @@ static void createInstance()
 	}
 
 	requireSuccess(vkCreateInstance(&createInfo, nullptr, &state.instance), "vkCreateInstance");
+	try
+	{
+		loadInstanceFunctions();
+	}
+	catch (...)
+	{
+		if (vkDestroyInstance != nullptr)
+			vkDestroyInstance(state.instance, nullptr);
+		state.instance = VK_NULL_HANDLE;
+		throw;
+	}
 
 	if (enableDebugUtils)
 	{
@@ -715,6 +967,17 @@ static void createDevice()
 	createInfo.pEnabledFeatures = &features;
 	requireSuccess(vkCreateDevice(state.physicalDevice, &createInfo, nullptr, &state.device),
 		"vkCreateDevice");
+	try
+	{
+		loadDeviceFunctions();
+	}
+	catch (...)
+	{
+		if (vkDestroyDevice != nullptr)
+			vkDestroyDevice(state.device, nullptr);
+		state.device = VK_NULL_HANDLE;
+		throw;
+	}
 	vkGetDeviceQueue(state.device, state.queueFamilies.graphics, 0, &state.graphicsQueue);
 	vkGetDeviceQueue(state.device, state.queueFamilies.present, 0, &state.presentQueue);
 	state.logicOpSupported = features.logicOp == VK_TRUE;
@@ -824,7 +1087,9 @@ static BufferResource createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 
 	VkMemoryRequirements requirements = {};
 	vkGetBufferMemoryRequirements(state.device, result.buffer, &requirements);
+	result.allocationSize = requirements.size;
 	const uint32_t memoryType = findMemoryType(requirements.memoryTypeBits, required, preferred);
+	result.memoryTypeIndex = memoryType;
 	VkMemoryAllocateInfo allocateInfo = {};
 	allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	allocateInfo.allocationSize = requirements.size;
@@ -890,9 +1155,172 @@ static VkDeviceSize alignDeviceSize(VkDeviceSize value, VkDeviceSize alignment)
 	return value + addition;
 }
 
+static void flushBufferRange(const BufferResource &buffer, VkDeviceSize offset, VkDeviceSize size)
+{
+	if (buffer.coherent || buffer.memory == VK_NULL_HANDLE || size == 0)
+		return;
+	if (offset > buffer.allocationSize || size > buffer.allocationSize - offset)
+		throw std::runtime_error("Vulkan mapped flush range exceeds its allocation");
+	const VkDeviceSize atomSize = std::max<VkDeviceSize>(1,
+		state.physicalProperties.limits.nonCoherentAtomSize);
+	const VkDeviceSize flushOffset = offset - offset % atomSize;
+	VkDeviceSize flushEnd = alignDeviceSize(offset + size, atomSize);
+	flushEnd = std::min(flushEnd, buffer.allocationSize);
+	VkMappedMemoryRange range = {};
+	range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+	range.memory = buffer.memory;
+	range.offset = flushOffset;
+	range.size = flushEnd - flushOffset;
+	requireSuccess(vkFlushMappedMemoryRanges(state.device, 1, &range),
+		"vkFlushMappedMemoryRanges(resident geometry)");
+}
+
+static bool allocateResidentRange(ResidentPage &page, VkDeviceSize size,
+	VkDeviceSize alignment, VkDeviceSize &offset)
+{
+	for (std::size_t i = 0; i < page.freeRanges.size(); i++)
+	{
+		const ResidentFreeRange range = page.freeRanges[i];
+		const VkDeviceSize alignedOffset = alignDeviceSize(range.offset, alignment);
+		if (alignedOffset < range.offset)
+			continue;
+		const VkDeviceSize padding = alignedOffset - range.offset;
+		if (padding > range.size || size > range.size - padding)
+			continue;
+
+		page.freeRanges.erase(page.freeRanges.begin() + static_cast<std::ptrdiff_t>(i));
+		std::size_t insertion = i;
+		if (padding != 0)
+		{
+			page.freeRanges.insert(page.freeRanges.begin() + static_cast<std::ptrdiff_t>(insertion),
+				{ range.offset, padding });
+			insertion++;
+		}
+		const VkDeviceSize remaining = range.size - padding - size;
+		if (remaining != 0)
+		{
+			page.freeRanges.insert(page.freeRanges.begin() + static_cast<std::ptrdiff_t>(insertion),
+				{ alignedOffset + size, remaining });
+		}
+		offset = alignedOffset;
+		return true;
+	}
+	return false;
+}
+
+static void releaseResidentRange(ResidentPage &page, VkDeviceSize offset, VkDeviceSize size)
+{
+	ResidentFreeRange released = { offset, size };
+	auto found = std::lower_bound(page.freeRanges.begin(), page.freeRanges.end(), offset,
+		[](const ResidentFreeRange &range, VkDeviceSize value)
+		{
+			return range.offset < value;
+		});
+	found = page.freeRanges.insert(found, released);
+	if (found != page.freeRanges.begin())
+	{
+		auto previous = found - 1;
+		if (previous->offset + previous->size == found->offset)
+		{
+			previous->size += found->size;
+			found = page.freeRanges.erase(found);
+			found = previous;
+		}
+	}
+	auto next = found + 1;
+	if (next != page.freeRanges.end() && found->offset + found->size == next->offset)
+	{
+		found->size += next->size;
+		page.freeRanges.erase(next);
+	}
+}
+
+static void destroyResidentAllocation(ResidentAllocation *allocation)
+{
+	if (allocation == nullptr)
+		return;
+	if (allocation->page != nullptr)
+		releaseResidentRange(*allocation->page, allocation->offset, allocation->size);
+	if (state.residentGeometryBytes >= allocation->size)
+		state.residentGeometryBytes -= allocation->size;
+	else
+		state.residentGeometryBytes = 0;
+	delete allocation;
+}
+
+static std::shared_ptr<ResidentAllocation> allocateResidentGeometry(VkDeviceSize size,
+	VkDeviceSize alignment)
+{
+	ResidentPage *selectedPage = nullptr;
+	VkDeviceSize offset = 0;
+	VkDeviceSize reservedSize = 0;
+	const VkDeviceSize atomSize = std::max<VkDeviceSize>(1,
+		state.physicalProperties.limits.nonCoherentAtomSize);
+	for (const std::unique_ptr<ResidentPage> &page : state.residentPages)
+	{
+		const VkDeviceSize pageAlignment = page->buffer.coherent ? alignment :
+			std::max(alignment, atomSize);
+		const VkDeviceSize pageSize = page->buffer.coherent ? size :
+			alignDeviceSize(size, atomSize);
+		if (allocateResidentRange(*page, pageSize, pageAlignment, offset))
+		{
+			selectedPage = page.get();
+			reservedSize = pageSize;
+			break;
+		}
+	}
+	if (selectedPage == nullptr)
+	{
+		std::unique_ptr<ResidentPage> page(new ResidentPage());
+		const VkDeviceSize pageSize = std::max(VULKAN_RESIDENT_PAGE_SIZE,
+			alignDeviceSize(size, std::max(alignment, atomSize)));
+		page->buffer = createBuffer(pageSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+			VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, true);
+		page->freeRanges.push_back({ 0, pageSize });
+		if (!state.residentMemoryTypeReported)
+		{
+			const VkMemoryType &memoryType =
+				state.memoryProperties.memoryTypes[page->buffer.memoryTypeIndex];
+			std::cout << "vulkan: resident geometry memory type=" << page->buffer.memoryTypeIndex <<
+				", flags=0x" << std::hex << memoryType.propertyFlags << std::dec <<
+				", heap=" << memoryType.heapIndex << '\n';
+			state.residentMemoryTypeReported = true;
+		}
+		selectedPage = page.get();
+		state.residentPages.push_back(std::move(page));
+		const VkDeviceSize pageAlignment = selectedPage->buffer.coherent ? alignment :
+			std::max(alignment, atomSize);
+		reservedSize = selectedPage->buffer.coherent ? size : alignDeviceSize(size, atomSize);
+		if (!allocateResidentRange(*selectedPage, reservedSize, pageAlignment, offset))
+			throw std::runtime_error("Vulkan resident geometry page allocation failed");
+	}
+
+	ResidentAllocation *allocation = new ResidentAllocation();
+	allocation->page = selectedPage;
+	allocation->offset = offset;
+	allocation->size = reservedSize;
+	state.residentGeometryBytes += reservedSize;
+	state.residentGeometryPeakBytes = std::max(state.residentGeometryPeakBytes,
+		state.residentGeometryBytes);
+	return std::shared_ptr<ResidentAllocation>(allocation, destroyResidentAllocation);
+}
+
+static void releaseResidentGeometry(std::uint64_t residencyId)
+{
+	for (auto entry = state.residentGeometry.begin(); entry != state.residentGeometry.end();)
+	{
+		if (entry->first.residencyId == residencyId)
+			entry = state.residentGeometry.erase(entry);
+		else
+			++entry;
+	}
+}
+
 static StreamAllocation allocateStreamBuffer(VkDeviceSize size, VkDeviceSize alignment)
 {
-	for (StreamChunk &chunk : state.streamChunks)
+	FrameResources &frame = currentFrame();
+	for (StreamChunk &chunk : frame.streamChunks)
 	{
 		const VkDeviceSize offset = alignDeviceSize(chunk.used, alignment);
 		if (offset <= chunk.buffer.size && size <= chunk.buffer.size - offset)
@@ -910,10 +1338,20 @@ static StreamAllocation allocateStreamBuffer(VkDeviceSize size, VkDeviceSize ali
 	StreamChunk chunk;
 	chunk.buffer = createBuffer(std::max(VULKAN_STREAM_CHUNK_SIZE,
 		alignDeviceSize(size, alignment)), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-		VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
-	state.streamChunks.push_back(chunk);
-	StreamChunk &stored = state.streamChunks.back();
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+		VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, true);
+	if (!state.streamMemoryTypeReported)
+	{
+		const VkMemoryType &memoryType =
+			state.memoryProperties.memoryTypes[chunk.buffer.memoryTypeIndex];
+		std::cout << "vulkan: stream memory type=" << chunk.buffer.memoryTypeIndex <<
+			", flags=0x" << std::hex << memoryType.propertyFlags << std::dec <<
+			", heap=" << memoryType.heapIndex << '\n';
+		state.streamMemoryTypeReported = true;
+	}
+	frame.streamChunks.push_back(chunk);
+	StreamChunk &stored = frame.streamChunks.back();
 	stored.used = size;
 	stored.dirty = true;
 	StreamAllocation allocation;
@@ -922,18 +1360,18 @@ static StreamAllocation allocateStreamBuffer(VkDeviceSize size, VkDeviceSize ali
 	return allocation;
 }
 
-static void flushStreamBuffers()
+static void flushStreamBuffers(FrameResources &frame)
 {
-	for (const StreamChunk &chunk : state.streamChunks)
+	for (const StreamChunk &chunk : frame.streamChunks)
 	{
 		if (chunk.dirty)
 			flushBuffer(chunk.buffer);
 	}
 }
 
-static void resetStreamBuffers()
+static void resetStreamBuffers(FrameResources &frame)
 {
-	for (StreamChunk &chunk : state.streamChunks)
+	for (StreamChunk &chunk : frame.streamChunks)
 	{
 		chunk.used = 0;
 		chunk.dirty = false;
@@ -980,6 +1418,8 @@ static ImageResource createImage(uint32_t width, uint32_t height, VkFormat forma
 	viewCreateInfo.subresourceRange.layerCount = 1;
 	requireSuccess(vkCreateImageView(state.device, &viewCreateInfo, nullptr, &result.view),
 		"vkCreateImageView");
+	result.width = width;
+	result.height = height;
 	return result;
 }
 
@@ -1028,6 +1468,12 @@ static void destroySwapchain()
 	if (state.presentPipeline != VK_NULL_HANDLE)
 		vkDestroyPipeline(state.device, state.presentPipeline, nullptr);
 	state.presentPipeline = VK_NULL_HANDLE;
+	for (VkSemaphore semaphore : state.renderingFinished)
+	{
+		if (semaphore != VK_NULL_HANDLE)
+			vkDestroySemaphore(state.device, semaphore, nullptr);
+	}
+	state.renderingFinished.clear();
 	for (VkFramebuffer framebuffer : state.framebuffers)
 		vkDestroyFramebuffer(state.device, framebuffer, nullptr);
 	state.framebuffers.clear();
@@ -1052,6 +1498,22 @@ static bool createSwapchain()
 	if (extent.width == 0 || extent.height == 0)
 		return false;
 	VkSurfaceFormatKHR surfaceFormat = chooseSurfaceFormat(support.formats);
+	VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+	const char *presentModeName = "fifo";
+	for (VkPresentModeKHR supportedMode : support.presentModes)
+	{
+		if (supportedMode == VK_PRESENT_MODE_IMMEDIATE_KHR)
+		{
+			presentMode = supportedMode;
+			presentModeName = "immediate";
+			break;
+		}
+		if (supportedMode == VK_PRESENT_MODE_MAILBOX_KHR)
+		{
+			presentMode = supportedMode;
+			presentModeName = "mailbox";
+		}
+	}
 
 	uint32_t imageCount = support.capabilities.minImageCount + 1;
 	if (support.capabilities.maxImageCount != 0 && imageCount > support.capabilities.maxImageCount)
@@ -1082,7 +1544,7 @@ static bool createSwapchain()
 	}
 	createInfo.preTransform = support.capabilities.currentTransform;
 	createInfo.compositeAlpha = chooseCompositeAlpha(support.capabilities.supportedCompositeAlpha);
-	createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+	createInfo.presentMode = presentMode;
 	createInfo.clipped = VK_TRUE;
 	requireSuccess(vkCreateSwapchainKHR(state.device, &createInfo, nullptr, &state.swapchain),
 		"vkCreateSwapchainKHR");
@@ -1094,6 +1556,14 @@ static bool createSwapchain()
 	state.swapchainImages.resize(imageCount);
 	requireSuccess(vkGetSwapchainImagesKHR(state.device, state.swapchain, &imageCount,
 		state.swapchainImages.data()), "vkGetSwapchainImagesKHR");
+	VkSemaphoreCreateInfo semaphoreCreateInfo = {};
+	semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	state.renderingFinished.resize(state.swapchainImages.size(), VK_NULL_HANDLE);
+	for (VkSemaphore &semaphore : state.renderingFinished)
+	{
+		requireSuccess(vkCreateSemaphore(state.device, &semaphoreCreateInfo, nullptr,
+			&semaphore), "vkCreateSemaphore(renderingFinished)");
+	}
 
 	for (VkImage image : state.swapchainImages)
 	{
@@ -1165,7 +1635,8 @@ static bool createSwapchain()
 	}
 
 	std::cout << "vulkan: swapchain " << state.swapchainExtent.width << 'x' <<
-		state.swapchainExtent.height << ", images=" << state.swapchainImages.size() << '\n';
+		state.swapchainExtent.height << ", images=" << state.swapchainImages.size() <<
+		", present=" << presentModeName << '\n';
 	return true;
 }
 
@@ -1297,13 +1768,17 @@ static void recreateSwapchain()
 
 static bool ensureRenderTargets()
 {
-	int width = 0;
-	int height = 0;
-	platform::getDrawableSize(width, height);
-	if (width <= 0 || height <= 0)
+	if (!state.drawableSizeCheckedForFrame)
+	{
+		platform::getDrawableSize(state.drawableWidth, state.drawableHeight);
+		state.drawableSizeQueries++;
+		state.drawableSizeCheckedForFrame = true;
+	}
+	if (state.drawableWidth <= 0 || state.drawableHeight <= 0)
 		return false;
-	if (state.swapchain == VK_NULL_HANDLE || state.targetExtent.width != static_cast<uint32_t>(width) ||
-		state.targetExtent.height != static_cast<uint32_t>(height))
+	if (state.swapchain == VK_NULL_HANDLE ||
+		state.targetExtent.width != static_cast<uint32_t>(state.drawableWidth) ||
+		state.targetExtent.height != static_cast<uint32_t>(state.drawableHeight))
 	{
 		recreateSwapchain();
 	}
@@ -1324,28 +1799,29 @@ static void createCommandResources()
 	allocateInfo.commandPool = state.commandPool;
 	allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 	allocateInfo.commandBufferCount = 1;
-	requireSuccess(vkAllocateCommandBuffers(state.device, &allocateInfo, &state.commandBuffer),
-		"vkAllocateCommandBuffers");
 
 	VkSemaphoreCreateInfo semaphoreCreateInfo = {};
 	semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-	requireSuccess(vkCreateSemaphore(state.device, &semaphoreCreateInfo, nullptr,
-		&state.imageAvailable), "vkCreateSemaphore");
-	requireSuccess(vkCreateSemaphore(state.device, &semaphoreCreateInfo, nullptr,
-		&state.renderingFinished), "vkCreateSemaphore");
 
 	VkFenceCreateInfo fenceCreateInfo = {};
 	fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-	requireSuccess(vkCreateFence(state.device, &fenceCreateInfo, nullptr, &state.frameFence),
-		"vkCreateFence");
+	for (FrameResources &frame : state.frames)
+	{
+		requireSuccess(vkAllocateCommandBuffers(state.device, &allocateInfo, &frame.commandBuffer),
+			"vkAllocateCommandBuffers");
+		requireSuccess(vkCreateSemaphore(state.device, &semaphoreCreateInfo, nullptr,
+			&frame.imageAvailable), "vkCreateSemaphore(imageAvailable)");
+		requireSuccess(vkCreateFence(state.device, &fenceCreateInfo, nullptr, &frame.fence),
+			"vkCreateFence");
+	}
 }
 
 static void createRendererResources()
 {
 	VkDescriptorSetLayoutBinding legacyBindings[2] = {};
 	legacyBindings[0].binding = 0;
-	legacyBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	legacyBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
 	legacyBindings[0].descriptorCount = 1;
 	legacyBindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 	legacyBindings[1].binding = 1;
@@ -1423,7 +1899,7 @@ static void createRendererResources()
 static VkDescriptorPool createDescriptorPool()
 {
 	VkDescriptorPoolSize sizes[2] = {};
-	sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
 	sizes[0].descriptorCount = 256;
 	sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	sizes[1].descriptorCount = 256;
@@ -1440,13 +1916,14 @@ static VkDescriptorPool createDescriptorPool()
 
 static VkDescriptorSet allocateDescriptorSet(VkDescriptorSetLayout layout)
 {
+	FrameResources &frame = currentFrame();
 	for (;;)
 	{
-		if (state.activeDescriptorPool == state.descriptorPools.size())
-			state.descriptorPools.push_back(createDescriptorPool());
+		if (frame.activeDescriptorPool == frame.descriptorPools.size())
+			frame.descriptorPools.push_back(createDescriptorPool());
 		VkDescriptorSetAllocateInfo allocateInfo = {};
 		allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		allocateInfo.descriptorPool = state.descriptorPools[state.activeDescriptorPool];
+		allocateInfo.descriptorPool = frame.descriptorPools[frame.activeDescriptorPool];
 		allocateInfo.descriptorSetCount = 1;
 		allocateInfo.pSetLayouts = &layout;
 		VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
@@ -1455,36 +1932,48 @@ static VkDescriptorSet allocateDescriptorSet(VkDescriptorSetLayout layout)
 			return descriptorSet;
 		if (result != VK_ERROR_OUT_OF_POOL_MEMORY && result != VK_ERROR_FRAGMENTED_POOL)
 			requireSuccess(result, "vkAllocateDescriptorSets");
-		state.activeDescriptorPool++;
+		frame.activeDescriptorPool++;
 	}
 }
 
-static void cleanupSubmittedResources()
+static void cleanupSubmittedResources(FrameResources &frame)
 {
-	for (BufferResource &buffer : state.transientBuffers)
+	frame.residentAllocations.clear();
+	for (BufferResource &buffer : frame.transientBuffers)
 		destroyBuffer(buffer);
-	state.transientBuffers.clear();
-	for (ImageResource &image : state.retiredImages)
+	frame.transientBuffers.clear();
+	for (ImageResource &image : frame.retiredImages)
 		destroyImage(image);
-	state.retiredImages.clear();
-	for (VkDescriptorPool pool : state.descriptorPools)
+	frame.retiredImages.clear();
+	frame.legacyDescriptorCache.clear();
+	for (VkDescriptorPool pool : frame.descriptorPools)
 		requireSuccess(vkResetDescriptorPool(state.device, pool, 0), "vkResetDescriptorPool");
-	state.activeDescriptorPool = 0;
-	resetStreamBuffers();
+	frame.activeDescriptorPool = 0;
+	resetStreamBuffers(frame);
+}
+
+static void waitForFrame(FrameResources &frame)
+{
+	if (!frame.inFlight)
+		return;
+	requireSuccess(vkWaitForFences(state.device, 1, &frame.fence, VK_TRUE,
+		std::numeric_limits<uint64_t>::max()), "vkWaitForFences");
+	cleanupSubmittedResources(frame);
+	frame.inFlight = false;
 }
 
 static void beginCommandRecording()
 {
-	if (state.commandRecording)
+	FrameResources &frame = currentFrame();
+	if (frame.commandRecording)
 		return;
-	requireSuccess(vkWaitForFences(state.device, 1, &state.frameFence, VK_TRUE,
-		std::numeric_limits<uint64_t>::max()), "vkWaitForFences");
-	requireSuccess(vkResetCommandBuffer(state.commandBuffer, 0), "vkResetCommandBuffer");
+	waitForFrame(frame);
+	requireSuccess(vkResetCommandBuffer(frame.commandBuffer, 0), "vkResetCommandBuffer");
 	VkCommandBufferBeginInfo beginInfo = {};
 	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	requireSuccess(vkBeginCommandBuffer(state.commandBuffer, &beginInfo), "vkBeginCommandBuffer");
-	state.commandRecording = true;
+	requireSuccess(vkBeginCommandBuffer(frame.commandBuffer, &beginInfo), "vkBeginCommandBuffer");
+	frame.commandRecording = true;
 
 	if (state.targetsNeedTransition)
 	{
@@ -1516,7 +2005,7 @@ static void beginCommandRecording()
 		barriers[1].subresourceRange.layerCount = 1;
 		barriers[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
 			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-		vkCmdPipelineBarrier(state.commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+		vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
 			VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, 0, nullptr, 0, nullptr, 2, barriers);
 		state.targetsNeedTransition = false;
@@ -1526,58 +2015,56 @@ static void beginCommandRecording()
 static void beginLegacyPass()
 {
 	beginCommandRecording();
-	if (state.legacyPassActive)
+	FrameResources &frame = currentFrame();
+	if (frame.legacyPassActive)
 		return;
 	VkRenderPassBeginInfo beginInfo = {};
 	beginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 	beginInfo.renderPass = state.legacyRenderPass;
 	beginInfo.framebuffer = state.legacyFramebuffer;
 	beginInfo.renderArea.extent = state.targetExtent;
-	vkCmdBeginRenderPass(state.commandBuffer, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
-	state.legacyPassActive = true;
+	vkCmdBeginRenderPass(frame.commandBuffer, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
+	frame.legacyPassActive = true;
 }
 
 static void endLegacyPass()
 {
-	if (!state.legacyPassActive)
+	FrameResources &frame = currentFrame();
+	if (!frame.legacyPassActive)
 		return;
-	vkCmdEndRenderPass(state.commandBuffer);
-	state.legacyPassActive = false;
+	vkCmdEndRenderPass(frame.commandBuffer);
+	frame.legacyPassActive = false;
 }
 
 static void submitAndWait()
 {
-	if (!state.commandRecording)
-		return;
-	endLegacyPass();
-	requireSuccess(vkEndCommandBuffer(state.commandBuffer), "vkEndCommandBuffer");
-	flushStreamBuffers();
-	requireSuccess(vkResetFences(state.device, 1, &state.frameFence), "vkResetFences");
-	VkSubmitInfo submitInfo = {};
-	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &state.commandBuffer;
-	requireSuccess(vkQueueSubmit(state.graphicsQueue, 1, &submitInfo, state.frameFence),
-		"vkQueueSubmit");
-	requireSuccess(vkWaitForFences(state.device, 1, &state.frameFence, VK_TRUE,
-		std::numeric_limits<uint64_t>::max()), "vkWaitForFences");
-	state.commandRecording = false;
-	cleanupSubmittedResources();
+	FrameResources &frame = currentFrame();
+	if (frame.commandRecording)
+	{
+		endLegacyPass();
+		requireSuccess(vkEndCommandBuffer(frame.commandBuffer), "vkEndCommandBuffer");
+		flushStreamBuffers(frame);
+		requireSuccess(vkResetFences(state.device, 1, &frame.fence), "vkResetFences");
+		VkSubmitInfo submitInfo = {};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &frame.commandBuffer;
+		requireSuccess(vkQueueSubmit(state.graphicsQueue, 1, &submitInfo, frame.fence),
+			"vkQueueSubmit");
+		frame.commandRecording = false;
+		frame.inFlight = true;
+	}
+	for (FrameResources &submittedFrame : state.frames)
+		waitForFrame(submittedFrame);
 }
 
 static void retireImage(ImageResource &image)
 {
 	if (image.image == VK_NULL_HANDLE)
 		return;
-	if (state.commandRecording)
-	{
-		state.retiredImages.push_back(image);
-		image = ImageResource();
-	}
-	else
-	{
-		destroyImage(image);
-	}
+	beginCommandRecording();
+	currentFrame().retiredImages.push_back(image);
+	image = ImageResource();
 }
 
 static void destroyResources()
@@ -1585,17 +2072,34 @@ static void destroyResources()
 	if (state.device != VK_NULL_HANDLE)
 	{
 		vkDeviceWaitIdle(state.device);
-		state.commandRecording = false;
-		state.legacyPassActive = false;
-		for (BufferResource &buffer : state.transientBuffers)
-			destroyBuffer(buffer);
-		state.transientBuffers.clear();
-		for (StreamChunk &chunk : state.streamChunks)
-			destroyBuffer(chunk.buffer);
-		state.streamChunks.clear();
-		for (ImageResource &image : state.retiredImages)
-			destroyImage(image);
-		state.retiredImages.clear();
+		state.residentGeometry.clear();
+		for (FrameResources &frame : state.frames)
+		{
+			frame.commandRecording = false;
+			frame.legacyPassActive = false;
+			frame.inFlight = false;
+			frame.residentAllocations.clear();
+			for (BufferResource &buffer : frame.transientBuffers)
+				destroyBuffer(buffer);
+			frame.transientBuffers.clear();
+			for (StreamChunk &chunk : frame.streamChunks)
+				destroyBuffer(chunk.buffer);
+			frame.streamChunks.clear();
+			for (ImageResource &image : frame.retiredImages)
+				destroyImage(image);
+			frame.retiredImages.clear();
+			frame.legacyDescriptorCache.clear();
+			for (VkDescriptorPool pool : frame.descriptorPools)
+				vkDestroyDescriptorPool(state.device, pool, nullptr);
+			frame.descriptorPools.clear();
+			if (frame.fence != VK_NULL_HANDLE)
+				vkDestroyFence(state.device, frame.fence, nullptr);
+			if (frame.imageAvailable != VK_NULL_HANDLE)
+				vkDestroySemaphore(state.device, frame.imageAvailable, nullptr);
+		}
+		for (const std::unique_ptr<ResidentPage> &page : state.residentPages)
+			destroyBuffer(page->buffer);
+		state.residentPages.clear();
 		for (std::pair<const unsigned int, VulkanTexture> &entry : state.textures)
 			destroyImage(entry.second.image);
 		state.textures.clear();
@@ -1603,9 +2107,6 @@ static void destroyResources()
 		for (const std::pair<const SamplerKey, VkSampler> &entry : state.samplers)
 			vkDestroySampler(state.device, entry.second, nullptr);
 		state.samplers.clear();
-		for (VkDescriptorPool pool : state.descriptorPools)
-			vkDestroyDescriptorPool(state.device, pool, nullptr);
-		state.descriptorPools.clear();
 		destroyRenderTargets();
 		destroySwapchain();
 		if (state.presentSampler != VK_NULL_HANDLE)
@@ -1632,12 +2133,6 @@ static void destroyResources()
 			vkDestroyPipelineLayout(state.device, state.legacyPipelineLayout, nullptr);
 		if (state.legacyDescriptorSetLayout != VK_NULL_HANDLE)
 			vkDestroyDescriptorSetLayout(state.device, state.legacyDescriptorSetLayout, nullptr);
-		if (state.frameFence != VK_NULL_HANDLE)
-			vkDestroyFence(state.device, state.frameFence, nullptr);
-		if (state.renderingFinished != VK_NULL_HANDLE)
-			vkDestroySemaphore(state.device, state.renderingFinished, nullptr);
-		if (state.imageAvailable != VK_NULL_HANDLE)
-			vkDestroySemaphore(state.device, state.imageAvailable, nullptr);
 		if (state.commandPool != VK_NULL_HANDLE)
 			vkDestroyCommandPool(state.device, state.commandPool, nullptr);
 		vkDestroyDevice(state.device, nullptr);
@@ -1663,6 +2158,7 @@ static void initialize()
 	try
 	{
 		platform::createWindow(platform::WindowGraphicsAPI::Vulkan);
+		loadGlobalFunctions();
 		createInstance();
 		platform::createVulkanSurface(reinterpret_cast<void *>(state.instance), &state.surface);
 		selectPhysicalDevice();
@@ -1673,6 +2169,7 @@ static void initialize()
 			createRenderTargets();
 		state.initialized = true;
 		std::cout << "legacygl: selected backend vulkan\n";
+		std::cout << "vulkan: frames in flight=" << VULKAN_FRAMES_IN_FLIGHT << '\n';
 	}
 	catch (...)
 	{
@@ -1687,11 +2184,15 @@ static void present()
 {
 	if (!state.initialized)
 		return;
-	if (!ensureRenderTargets())
+	const bool targetsReady = ensureRenderTargets();
+	state.drawableSizeCheckedForFrame = false;
+	if (!targetsReady)
 		return;
+	FrameResources &frame = currentFrame();
+	waitForFrame(frame);
 	uint32_t imageIndex = 0;
 	VkResult acquireResult = vkAcquireNextImageKHR(state.device, state.swapchain,
-		std::numeric_limits<uint64_t>::max(), state.imageAvailable, VK_NULL_HANDLE, &imageIndex);
+		std::numeric_limits<uint64_t>::max(), frame.imageAvailable, VK_NULL_HANDLE, &imageIndex);
 	if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR)
 	{
 		recreateSwapchain();
@@ -1699,6 +2200,7 @@ static void present()
 	}
 	if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR)
 		requireSuccess(acquireResult, "vkAcquireNextImageKHR");
+	VkSemaphore renderingFinished = state.renderingFinished[imageIndex];
 
 	endLegacyPass();
 	beginCommandRecording();
@@ -1725,48 +2227,45 @@ static void present()
 	renderPassBeginInfo.renderPass = state.renderPass;
 	renderPassBeginInfo.framebuffer = state.framebuffers[imageIndex];
 	renderPassBeginInfo.renderArea.extent = state.swapchainExtent;
-	vkCmdBeginRenderPass(state.commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-	vkCmdBindPipeline(state.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, presentPipeline());
+	vkCmdBeginRenderPass(frame.commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+	vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, presentPipeline());
 	setFullscreenViewport(state.swapchainExtent);
-	vkCmdBindDescriptorSets(state.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+	vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		state.presentPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
-	vkCmdDraw(state.commandBuffer, 3, 1, 0, 0);
-	vkCmdEndRenderPass(state.commandBuffer);
+	vkCmdDraw(frame.commandBuffer, 3, 1, 0, 0);
+	vkCmdEndRenderPass(frame.commandBuffer);
 	imageBarrier(state.colorTarget.image, VK_IMAGE_ASPECT_COLOR_BIT,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 		VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
 		VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-	requireSuccess(vkEndCommandBuffer(state.commandBuffer), "vkEndCommandBuffer");
+	requireSuccess(vkEndCommandBuffer(frame.commandBuffer), "vkEndCommandBuffer");
 
-	flushStreamBuffers();
-	requireSuccess(vkResetFences(state.device, 1, &state.frameFence), "vkResetFences");
+	flushStreamBuffers(frame);
+	requireSuccess(vkResetFences(state.device, 1, &frame.fence), "vkResetFences");
 	VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 	VkSubmitInfo submitInfo = {};
 	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	submitInfo.waitSemaphoreCount = 1;
-	submitInfo.pWaitSemaphores = &state.imageAvailable;
+	submitInfo.pWaitSemaphores = &frame.imageAvailable;
 	submitInfo.pWaitDstStageMask = &waitStage;
 	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &state.commandBuffer;
+	submitInfo.pCommandBuffers = &frame.commandBuffer;
 	submitInfo.signalSemaphoreCount = 1;
-	submitInfo.pSignalSemaphores = &state.renderingFinished;
-	requireSuccess(vkQueueSubmit(state.graphicsQueue, 1, &submitInfo, state.frameFence),
+	submitInfo.pSignalSemaphores = &renderingFinished;
+	requireSuccess(vkQueueSubmit(state.graphicsQueue, 1, &submitInfo, frame.fence),
 		"vkQueueSubmit");
-	state.commandRecording = false;
+	frame.commandRecording = false;
+	frame.inFlight = true;
 
 	VkPresentInfoKHR presentInfo = {};
 	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 	presentInfo.waitSemaphoreCount = 1;
-	presentInfo.pWaitSemaphores = &state.renderingFinished;
+	presentInfo.pWaitSemaphores = &renderingFinished;
 	presentInfo.swapchainCount = 1;
 	presentInfo.pSwapchains = &state.swapchain;
 	presentInfo.pImageIndices = &imageIndex;
 	VkResult presentResult = vkQueuePresentKHR(state.presentQueue, &presentInfo);
-	requireSuccess(vkQueueWaitIdle(state.presentQueue), "vkQueueWaitIdle");
-	requireSuccess(vkWaitForFences(state.device, 1, &state.frameFence, VK_TRUE,
-		std::numeric_limits<uint64_t>::max()), "vkWaitForFences");
-	cleanupSubmittedResources();
 	if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR ||
 		acquireResult == VK_SUBOPTIMAL_KHR)
 	{
@@ -1775,6 +2274,7 @@ static void present()
 	else
 	{
 		requireSuccess(presentResult, "vkQueuePresentKHR");
+		state.currentFrame = (state.currentFrame + 1) % VULKAN_FRAMES_IN_FLIGHT;
 	}
 }
 
@@ -1784,10 +2284,29 @@ static void shutdown()
 		return;
 	if (state.initialized)
 		submitAndWait();
+	const std::uint64_t residentCacheHits = state.residentGeometryCacheHits;
+	const std::uint64_t residentCacheMisses = state.residentGeometryCacheMisses;
+	const VkDeviceSize residentBytes = state.residentGeometryPeakBytes;
+	const std::size_t residentPages = state.residentPages.size();
 	destroyResources();
 	const unsigned int validationErrors = state.validationErrorCount;
+	const std::uint64_t descriptorCacheHits = state.legacyDescriptorCacheHits;
+	const std::uint64_t descriptorCacheMisses = state.legacyDescriptorCacheMisses;
+	const std::uint64_t textureImageCreates = state.textureImageCreates;
+	const std::uint64_t textureImageReuses = state.textureImageReuses;
+	const std::uint64_t textureUploadBytes = state.textureUploadBytes;
+	const std::uint64_t drawableSizeQueries = state.drawableSizeQueries;
 	state = State();
-	std::cout << "vulkan: shutdown, validation errors=" << validationErrors << '\n';
+	std::cout << "vulkan: shutdown, validation errors=" << validationErrors <<
+		", descriptor cache hits=" << descriptorCacheHits <<
+		", misses=" << descriptorCacheMisses <<
+		", texture images=" << textureImageCreates << " created/" << textureImageReuses << " reused" <<
+		", upload bytes=" << textureUploadBytes <<
+		", resident cache hits=" << residentCacheHits <<
+		", misses=" << residentCacheMisses <<
+		", resident bytes=" << residentBytes <<
+		", pages=" << residentPages <<
+		", drawable size queries=" << drawableSizeQueries << '\n';
 }
 
 static unsigned char colorByte(float value)
@@ -1963,6 +2482,89 @@ static VulkanGPUVertex makeGPUVertex(const legacygl::Vertex &vertex, const legac
 	result.flatColor[0] = flat.r; result.flatColor[1] = flat.g; result.flatColor[2] = flat.b; result.flatColor[3] = flat.a;
 	result.flatNormal[0] = flat.nx; result.flatNormal[1] = flat.ny; result.flatNormal[2] = flat.nz;
 	return result;
+}
+
+static std::uint32_t floatBits(float value)
+{
+	std::uint32_t result = 0;
+	std::memcpy(&result, &value, sizeof(result));
+	return result;
+}
+
+static ResidentGeometryVariantKey residentGeometryKey(const legacygl::ResolvedDraw &command)
+{
+	ResidentGeometryVariantKey key;
+	key.residencyId = command.geometryResidencyId;
+	const legacygl::Geometry &geometry = *command.geometry;
+	const legacygl::Vertex &resolved = geometry.vertices.front();
+	if (!geometry.hasColor)
+	{
+		key.missingAttributes |= 1u;
+		key.color = { floatBits(resolved.r), floatBits(resolved.g), floatBits(resolved.b),
+			floatBits(resolved.a) };
+	}
+	if (!geometry.hasNormal)
+	{
+		key.missingAttributes |= 2u;
+		key.normal = { floatBits(resolved.nx), floatBits(resolved.ny), floatBits(resolved.nz) };
+	}
+	if (!geometry.hasTexCoord)
+	{
+		key.missingAttributes |= 4u;
+		key.texCoord = { floatBits(resolved.s), floatBits(resolved.t) };
+	}
+	return key;
+}
+
+static void writeGPUVertices(const legacygl::ResolvedDraw &command, int verticesPerPrimitive,
+	void *destination)
+{
+	unsigned char *write = static_cast<unsigned char *>(destination);
+	for (const legacygl::CanonicalPrimitive &primitive : command.primitives->primitives)
+	{
+		const legacygl::Vertex &flat = command.geometry->vertices[
+			static_cast<std::size_t>(primitive.provoking)];
+		for (int i = 0; i < verticesPerPrimitive; i++)
+		{
+			const legacygl::Vertex &vertex = command.geometry->vertices[
+				static_cast<std::size_t>(primitive.indices[i])];
+			const VulkanGPUVertex gpuVertex = makeGPUVertex(vertex, flat);
+			std::memcpy(write, &gpuVertex, sizeof(gpuVertex));
+			write += sizeof(gpuVertex);
+		}
+	}
+}
+
+static const ResidentGeometryEntry &residentGeometryEntry(
+	const legacygl::ResolvedDraw &command, int verticesPerPrimitive,
+	std::size_t vertexCount, VkDeviceSize vertexBytes)
+{
+	const ResidentGeometryVariantKey key = residentGeometryKey(command);
+	auto found = state.residentGeometry.find(key);
+	if (found != state.residentGeometry.end())
+	{
+		if (found->second.topology != command.primitives->topology ||
+			found->second.vertexCount != vertexCount)
+		{
+			throw std::runtime_error("Vulkan resident geometry identity changed while cached");
+		}
+		state.residentGeometryCacheHits++;
+		return found->second;
+	}
+
+	if (vertexCount > std::numeric_limits<uint32_t>::max())
+		throw std::runtime_error("Vulkan resident geometry exceeds the draw-count range");
+	state.residentGeometryCacheMisses++;
+	ResidentGeometryEntry entry;
+	entry.allocation = allocateResidentGeometry(vertexBytes,
+		static_cast<VkDeviceSize>(alignof(VulkanGPUVertex)));
+	entry.topology = command.primitives->topology;
+	entry.vertexCount = static_cast<uint32_t>(vertexCount);
+	void *destination = static_cast<unsigned char *>(entry.allocation->page->buffer.mapped) +
+		entry.allocation->offset;
+	writeGPUVertices(command, verticesPerPrimitive, destination);
+	flushBufferRange(entry.allocation->page->buffer, entry.allocation->offset, vertexBytes);
+	return state.residentGeometry.emplace(key, std::move(entry)).first->second;
 }
 
 static void fillGPUState(const legacygl::ResolvedDraw &command, VulkanGPUState &gpuState)
@@ -2269,7 +2871,7 @@ static void imageBarrier(VkImage image, VkImageAspectFlags aspect, VkImageLayout
 	barrier.subresourceRange.layerCount = 1;
 	barrier.srcAccessMask = sourceAccess;
 	barrier.dstAccessMask = destinationAccess;
-	vkCmdPipelineBarrier(state.commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0,
+	vkCmdPipelineBarrier(currentFrame().commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0,
 		nullptr, 1, &barrier);
 }
 
@@ -2277,29 +2879,43 @@ static void uploadRGBAImage(ImageResource &image, const unsigned char *pixels, i
 {
 	endLegacyPass();
 	beginCommandRecording();
-	retireImage(image);
-	image = createImage(static_cast<uint32_t>(width), static_cast<uint32_t>(height),
-		VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-		VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+	const uint32_t imageWidth = static_cast<uint32_t>(width);
+	const uint32_t imageHeight = static_cast<uint32_t>(height);
+	const bool reuseImage = image.image != VK_NULL_HANDLE && image.width == imageWidth &&
+		image.height == imageHeight;
+	if (!reuseImage)
+	{
+		retireImage(image);
+		image = createImage(imageWidth, imageHeight, VK_FORMAT_R8G8B8A8_UNORM,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			VK_IMAGE_ASPECT_COLOR_BIT);
+		state.textureImageCreates++;
+	}
+	else
+	{
+		state.textureImageReuses++;
+	}
 	const VkDeviceSize byteSize = static_cast<VkDeviceSize>(width) * static_cast<VkDeviceSize>(height) * 4;
-	BufferResource staging = createBuffer(byteSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
+	state.textureUploadBytes += static_cast<std::uint64_t>(byteSize);
+	StreamAllocation staging = allocateStreamBuffer(byteSize, 4);
 	std::memcpy(staging.mapped, pixels, static_cast<std::size_t>(byteSize));
-	flushBuffer(staging);
 	VkBufferImageCopy copy = {};
+	copy.bufferOffset = staging.offset;
 	copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	copy.imageSubresource.layerCount = 1;
-	copy.imageExtent = { static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1 };
-	imageBarrier(image.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
-		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-	vkCmdCopyBufferToImage(state.commandBuffer, staging.buffer, image.image,
+	copy.imageExtent = { imageWidth, imageHeight, 1 };
+	imageBarrier(image.image, VK_IMAGE_ASPECT_COLOR_BIT,
+		reuseImage ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		reuseImage ? VK_ACCESS_SHADER_READ_BIT : 0, VK_ACCESS_TRANSFER_WRITE_BIT,
+		reuseImage ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+		VK_PIPELINE_STAGE_TRANSFER_BIT);
+	vkCmdCopyBufferToImage(currentFrame().commandBuffer, staging.buffer, image.image,
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 	imageBarrier(image.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
 		VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-	state.transientBuffers.push_back(staging);
 }
 
 static void ensureFallbackTexture()
@@ -2415,6 +3031,50 @@ struct TextureBinding
 	VkImageView view = VK_NULL_HANDLE;
 	VkSampler sampler = VK_NULL_HANDLE;
 };
+
+static VkDescriptorSet legacyDescriptorSet(VkBuffer uniformBuffer, const TextureBinding &texture)
+{
+	FrameResources &frame = currentFrame();
+	for (const LegacyDescriptorEntry &entry : frame.legacyDescriptorCache)
+	{
+		if (entry.uniformBuffer == uniformBuffer && entry.imageView == texture.view &&
+			entry.sampler == texture.sampler)
+		{
+			state.legacyDescriptorCacheHits++;
+			return entry.descriptorSet;
+		}
+	}
+
+	state.legacyDescriptorCacheMisses++;
+	LegacyDescriptorEntry entry;
+	entry.uniformBuffer = uniformBuffer;
+	entry.imageView = texture.view;
+	entry.sampler = texture.sampler;
+	entry.descriptorSet = allocateDescriptorSet(state.legacyDescriptorSetLayout);
+	VkDescriptorBufferInfo bufferInfo = {};
+	bufferInfo.buffer = uniformBuffer;
+	bufferInfo.range = sizeof(VulkanGPUState);
+	VkDescriptorImageInfo imageInfo = {};
+	imageInfo.sampler = texture.sampler;
+	imageInfo.imageView = texture.view;
+	imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	VkWriteDescriptorSet writes[2] = {};
+	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[0].dstSet = entry.descriptorSet;
+	writes[0].dstBinding = 0;
+	writes[0].descriptorCount = 1;
+	writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+	writes[0].pBufferInfo = &bufferInfo;
+	writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[1].dstSet = entry.descriptorSet;
+	writes[1].dstBinding = 1;
+	writes[1].descriptorCount = 1;
+	writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	writes[1].pImageInfo = &imageInfo;
+	vkUpdateDescriptorSets(state.device, 2, writes, 0, nullptr);
+	frame.legacyDescriptorCache.push_back(entry);
+	return entry.descriptorSet;
+}
 
 static TextureBinding bindTextureState(const legacygl::ResolvedDraw &command, VulkanGPUState &gpuState)
 {
@@ -2542,8 +3202,8 @@ static void setFullscreenViewport(VkExtent2D extent)
 	viewport.maxDepth = 1.0f;
 	VkRect2D scissor = {};
 	scissor.extent = extent;
-	vkCmdSetViewport(state.commandBuffer, 0, 1, &viewport);
-	vkCmdSetScissor(state.commandBuffer, 0, 1, &scissor);
+	vkCmdSetViewport(currentFrame().commandBuffer, 0, 1, &viewport);
+	vkCmdSetScissor(currentFrame().commandBuffer, 0, 1, &scissor);
 }
 
 class VulkanSink final : public legacygl::Sink
@@ -2603,6 +3263,8 @@ public:
 		for (int i = 0; i < n; i++)
 		{
 			const unsigned int name = textures[i];
+			if (name == 0)
+				continue;
 			textureNames.release(name);
 			auto found = state.textures.find(name);
 			if (found != state.textures.end())
@@ -2684,6 +3346,11 @@ public:
 		return true;
 	}
 
+	void releaseCanonicalGeometry(std::uint64_t residencyId) override
+	{
+		releaseResidentGeometry(residencyId);
+	}
+
 	void resolvedClear(const legacygl::ResolvedClear &command) override
 	{
 		if (!ensureRenderTargets())
@@ -2702,11 +3369,21 @@ public:
 				attachments[attachmentCount].clearValue.color.float32[i] = command.color[i];
 			attachmentCount++;
 		}
+		VkImageAspectFlags depthStencilAspect = 0;
 		if ((command.mask & GL_DEPTH_BUFFER_BIT) != 0 && command.depthWrite)
+			depthStencilAspect |= VK_IMAGE_ASPECT_DEPTH_BIT;
+		if ((command.mask & GL_STENCIL_BUFFER_BIT) != 0 &&
+			(state.depthFormat == VK_FORMAT_D24_UNORM_S8_UINT ||
+			state.depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT))
 		{
-			attachments[attachmentCount].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+			depthStencilAspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+		if (depthStencilAspect != 0)
+		{
+			attachments[attachmentCount].aspectMask = depthStencilAspect;
 			attachments[attachmentCount].clearValue.depthStencil.depth =
 				static_cast<float>(std::max(0.0, std::min(1.0, command.depth)));
+			attachments[attachmentCount].clearValue.depthStencil.stencil = 0;
 			attachmentCount++;
 		}
 		if (attachmentCount != 0)
@@ -2714,7 +3391,7 @@ public:
 			VkClearRect rectangle = {};
 			rectangle.rect.extent = state.targetExtent;
 			rectangle.layerCount = 1;
-			vkCmdClearAttachments(state.commandBuffer, attachmentCount, attachments, 1, &rectangle);
+			vkCmdClearAttachments(currentFrame().commandBuffer, attachmentCount, attachments, 1, &rectangle);
 		}
 		if ((command.mask & GL_COLOR_BUFFER_BIT) != 0 && writeMask != 0 &&
 			writeMask != (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
@@ -2729,12 +3406,12 @@ public:
 			for (int i = 0; i < 4; i++)
 				push.color[i] = command.color[i];
 			push.depth = static_cast<float>(command.depth);
-			vkCmdBindPipeline(state.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+			vkCmdBindPipeline(currentFrame().commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 				clearPipeline(writeMask));
 			setFullscreenViewport(state.targetExtent);
-			vkCmdPushConstants(state.commandBuffer, state.clearPipelineLayout,
+			vkCmdPushConstants(currentFrame().commandBuffer, state.clearPipelineLayout,
 				VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
-			vkCmdDraw(state.commandBuffer, 3, 1, 0, 0);
+			vkCmdDraw(currentFrame().commandBuffer, 3, 1, 0, 0);
 		}
 	}
 
@@ -2748,64 +3425,56 @@ public:
 		if (command.enables.lineSmooth)
 			throw std::runtime_error("Vulkan backend does not emulate exercised GL_LINE_SMOOTH");
 
-		std::vector<VulkanGPUVertex> vertices;
 		const int verticesPerPrimitive = command.primitives->topology == legacygl::Topology::Points ? 1 :
 			(command.primitives->topology == legacygl::Topology::Lines ? 2 : 3);
-		vertices.reserve(command.primitives->primitives.size() *
-			static_cast<std::size_t>(verticesPerPrimitive));
-		for (const legacygl::CanonicalPrimitive &primitive : command.primitives->primitives)
-		{
-			const legacygl::Vertex &flat = command.geometry->vertices[
-				static_cast<std::size_t>(primitive.provoking)];
-			for (int i = 0; i < verticesPerPrimitive; i++)
-			{
-				const legacygl::Vertex &vertex = command.geometry->vertices[
-					static_cast<std::size_t>(primitive.indices[i])];
-				vertices.push_back(makeGPUVertex(vertex, flat));
-			}
-		}
-		if (vertices.empty())
+		const std::size_t vertexCount = command.primitives->primitives.size() *
+			static_cast<std::size_t>(verticesPerPrimitive);
+		if (vertexCount == 0)
 			return;
+		if (vertexCount > std::numeric_limits<uint32_t>::max() ||
+			vertexCount > std::numeric_limits<VkDeviceSize>::max() / sizeof(VulkanGPUVertex))
+		{
+			throw std::runtime_error("Vulkan geometry exceeds the draw-count range");
+		}
 
 		VulkanGPUState gpuState = {};
 		fillGPUState(command, gpuState);
 		const TextureBinding texture = bindTextureState(command, gpuState);
 		beginLegacyPass();
-		BufferResource vertexBuffer = createBuffer(vertices.size() * sizeof(VulkanGPUVertex),
-			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-			VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
-		std::memcpy(vertexBuffer.mapped, vertices.data(), vertices.size() * sizeof(VulkanGPUVertex));
-		flushBuffer(vertexBuffer);
-		BufferResource uniformBuffer = createBuffer(sizeof(VulkanGPUState),
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-			VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
-		std::memcpy(uniformBuffer.mapped, &gpuState, sizeof(gpuState));
-		flushBuffer(uniformBuffer);
+		const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(
+			vertexCount * sizeof(VulkanGPUVertex));
+		VkBuffer vertexBuffer = VK_NULL_HANDLE;
+		VkDeviceSize vertexOffset = 0;
+		uint32_t drawVertexCount = static_cast<uint32_t>(vertexCount);
+		if (command.geometryResidencyId == 0)
+		{
+			const StreamAllocation vertexUpload = allocateStreamBuffer(vertexBytes,
+				static_cast<VkDeviceSize>(alignof(VulkanGPUVertex)));
+			writeGPUVertices(command, verticesPerPrimitive, vertexUpload.mapped);
+			vertexBuffer = vertexUpload.buffer;
+			vertexOffset = vertexUpload.offset;
+		}
+		else
+		{
+			const ResidentGeometryEntry &entry = residentGeometryEntry(command,
+				verticesPerPrimitive, vertexCount, vertexBytes);
+			currentFrame().residentAllocations.push_back(entry.allocation);
+			vertexBuffer = entry.allocation->page->buffer.buffer;
+			vertexOffset = entry.allocation->offset;
+			drawVertexCount = entry.vertexCount;
+		}
+		const VkDeviceSize uniformAlignment = std::max<VkDeviceSize>(
+			static_cast<VkDeviceSize>(alignof(VulkanGPUState)),
+			state.physicalProperties.limits.minUniformBufferOffsetAlignment);
+		const StreamAllocation uniformUpload = allocateStreamBuffer(sizeof(VulkanGPUState),
+			uniformAlignment);
+		std::memcpy(uniformUpload.mapped, &gpuState, sizeof(gpuState));
+		if (uniformUpload.offset > std::numeric_limits<uint32_t>::max())
+			throw std::runtime_error("Vulkan uniform stream offset exceeds the dynamic-offset range");
+		const uint32_t uniformOffset = static_cast<uint32_t>(uniformUpload.offset);
+		const VkDescriptorSet descriptorSet = legacyDescriptorSet(uniformUpload.buffer, texture);
 
-		VkDescriptorSet descriptorSet = allocateDescriptorSet(state.legacyDescriptorSetLayout);
-		VkDescriptorBufferInfo bufferInfo = {};
-		bufferInfo.buffer = uniformBuffer.buffer;
-		bufferInfo.range = sizeof(VulkanGPUState);
-		VkDescriptorImageInfo imageInfo = {};
-		imageInfo.sampler = texture.sampler;
-		imageInfo.imageView = texture.view;
-		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		VkWriteDescriptorSet writes[2] = {};
-		writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].dstSet = descriptorSet;
-		writes[0].dstBinding = 0;
-		writes[0].descriptorCount = 1;
-		writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		writes[0].pBufferInfo = &bufferInfo;
-		writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[1].dstSet = descriptorSet;
-		writes[1].dstBinding = 1;
-		writes[1].descriptorCount = 1;
-		writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		writes[1].pImageInfo = &imageInfo;
-		vkUpdateDescriptorSets(state.device, 2, writes, 0, nullptr);
-
-		vkCmdBindPipeline(state.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		vkCmdBindPipeline(currentFrame().commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 			legacyPipeline(command));
 		VkViewport viewport = {};
 		viewport.x = static_cast<float>(command.pipeline.viewport[0]);
@@ -2819,8 +3488,8 @@ public:
 		viewport.maxDepth = 1.0f;
 		VkRect2D scissor = {};
 		scissor.extent = state.targetExtent;
-		vkCmdSetViewport(state.commandBuffer, 0, 1, &viewport);
-		vkCmdSetScissor(state.commandBuffer, 0, 1, &scissor);
+		vkCmdSetViewport(currentFrame().commandBuffer, 0, 1, &viewport);
+		vkCmdSetScissor(currentFrame().commandBuffer, 0, 1, &scissor);
 		float lineWidth = command.pipeline.lineWidth;
 		if (!state.wideLinesSupported || lineWidth < state.physicalProperties.limits.lineWidthRange[0] ||
 			lineWidth > state.physicalProperties.limits.lineWidthRange[1])
@@ -2833,16 +3502,13 @@ public:
 				lineWidthFallbackReported = true;
 			}
 		}
-		vkCmdSetLineWidth(state.commandBuffer, lineWidth);
-		vkCmdSetDepthBias(state.commandBuffer, command.pipeline.polygonOffsetUnits, 0.0f,
+		vkCmdSetLineWidth(currentFrame().commandBuffer, lineWidth);
+		vkCmdSetDepthBias(currentFrame().commandBuffer, command.pipeline.polygonOffsetUnits, 0.0f,
 			command.pipeline.polygonOffsetFactor);
-		const VkDeviceSize offset = 0;
-		vkCmdBindVertexBuffers(state.commandBuffer, 0, 1, &vertexBuffer.buffer, &offset);
-		vkCmdBindDescriptorSets(state.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			state.legacyPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
-		vkCmdDraw(state.commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
-		state.transientBuffers.push_back(vertexBuffer);
-		state.transientBuffers.push_back(uniformBuffer);
+		vkCmdBindVertexBuffers(currentFrame().commandBuffer, 0, 1, &vertexBuffer, &vertexOffset);
+		vkCmdBindDescriptorSets(currentFrame().commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+			state.legacyPipelineLayout, 0, 1, &descriptorSet, 1, &uniformOffset);
+		vkCmdDraw(currentFrame().commandBuffer, drawVertexCount, 1, 0, 0);
 	}
 
 	void resolvedTextureUpload(const legacygl::ResolvedTextureUpload &command) override
@@ -2904,7 +3570,7 @@ public:
 		copy.imageOffset.y = static_cast<int>(state.targetExtent.height) - (command.y + command.height);
 		copy.imageExtent = { static_cast<uint32_t>(command.width),
 			static_cast<uint32_t>(command.height), 1 };
-		vkCmdCopyImageToBuffer(state.commandBuffer, state.colorTarget.image,
+		vkCmdCopyImageToBuffer(currentFrame().commandBuffer, state.colorTarget.image,
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.buffer, 1, &copy);
 		imageBarrier(state.colorTarget.image, VK_IMAGE_ASPECT_COLOR_BIT,
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -2946,7 +3612,7 @@ static VulkanSink sinkInstance;
 namespace renderbackend
 {
 
-const Configuration &configuration()
+static const Configuration &vulkanConfiguration()
 {
 	static const Configuration value = {
 		"vulkan",
@@ -2962,29 +3628,43 @@ const Configuration &configuration()
 	return value;
 }
 
-void initialize()
+static void vulkanInitialize()
 {
 	vulkanbackend::initialize();
 }
 
-void present()
+static void vulkanPresent()
 {
 	vulkanbackend::present();
 }
 
-void shutdown()
+static void vulkanShutdown()
 {
 	vulkanbackend::shutdown();
 }
 
-bool hasCapability(const char *capability)
+static bool vulkanHasCapability(const char *capability)
 {
 	return capability != nullptr && std::strcmp(capability, "GL_NV_fog_distance") == 0;
 }
 
-legacygl::Sink *sink()
+static legacygl::Sink *vulkanSink()
 {
 	return &vulkanbackend::sinkInstance;
+}
+
+const Backend &vulkanBackend()
+{
+	static const Backend backend = {
+		"vulkan",
+		vulkanConfiguration,
+		vulkanInitialize,
+		vulkanPresent,
+		vulkanShutdown,
+		vulkanHasCapability,
+		vulkanSink
+	};
+	return backend;
 }
 
 }

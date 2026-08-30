@@ -1100,7 +1100,7 @@ static CoreGLSink theCoreGLSink;
 namespace renderbackend
 {
 
-const Configuration &configuration()
+static const Configuration &openGL46Configuration()
 {
 	static const Configuration config = {
 		"gl46",
@@ -1112,29 +1112,43 @@ const Configuration &configuration()
 	return config;
 }
 
-void initialize()
+static void openGL46Initialize()
 {
-	openglbackend::initialize(configuration());
+	openglbackend::initialize(openGL46Configuration());
 }
 
-void present()
+static void openGL46Present()
 {
 	openglbackend::present();
 }
 
-void shutdown()
+static void openGL46Shutdown()
 {
 	openglbackend::shutdown();
 }
 
-bool hasCapability(const char *capability)
+static bool openGL46HasCapability(const char *capability)
 {
 	return openglbackend::hasCapability(capability);
 }
 
-legacygl::Sink *sink()
+static legacygl::Sink *openGL46Sink()
 {
 	return &legacygl::theCoreGLSink;
+}
+
+const Backend &openGL46Backend()
+{
+	static const Backend backend = {
+		"gl46",
+		openGL46Configuration,
+		openGL46Initialize,
+		openGL46Present,
+		openGL46Shutdown,
+		openGL46HasCapability,
+		openGL46Sink
+	};
+	return backend;
 }
 
 }

@@ -29,15 +29,14 @@ declaration but no call site.
   is the behavioural oracle.
 - **tests** - covered by a `legacygl_*` headless test.
 
-OpenGL 4.6 and Vulkan support the complete inventoried stream through four
-resolved commands: draw, texture upload, clear and readback. Logical object
-names and `glFinish` are handled directly by each sink. Per-entry-point columns
-for the translated backends would therefore repeat the core column without
-showing where translation actually occurs; the 82-case GPU fixture and backend
-deny scans are their coverage gates. The shared/Core OpenGL scans reject
-fixed-function and compatibility-era entry points. The Vulkan scan rejects
-every `gl*` or `glad_gl*` function call. Direct3D is not implemented yet; see
-`backend-status.md`.
+OpenGL 4.6, Vulkan and D3D12 support the complete inventoried stream through
+four resolved commands: draw, texture upload, clear and readback. Logical
+object names and `glFinish` are handled directly by each sink. Per-entry-point
+columns for the translated backends would therefore repeat the core column
+without showing where translation actually occurs; the 129-case GPU fixture
+and backend deny scans are their coverage gates. The shared/Core OpenGL scans
+reject fixed-function and compatibility-era entry points. The Vulkan and D3D12
+scans reject every `gl*` or `glad_gl*` function call.
 
 ## Entry points
 
@@ -157,6 +156,7 @@ unrestricted GL access; each translated tree is checked separately:
 | `backends/OpenGL/` | OpenGL context creation, loader initialization and profile verification shared by NativeGL and GL46 |
 | `backends/OpenGL46/` | the translated backend; only modern Core entry points are permitted here |
 | `backends/Vulkan/` | the translated Vulkan backend; no OpenGL entry point is permitted here |
+| `backends/D3D12/` | the translated Direct3D backend; no OpenGL entry point is permitted here |
 | `backends/Platform/` | platform lifetime, window/event operations and graphics-surface plumbing; it does not expand the frontend GL surface |
 
 `src/legacygl/LegacyGL.h` refuses to compile in a translation unit that also
@@ -165,8 +165,9 @@ includes a GL loader header, so this list cannot grow by accident.
 The inventory separately scans every `.cpp` and `.h` below the translated
 backend trees. It rejects fixed-function entry points, legacy client-array or
 display-list calls and compatibility-era ARB aliases in the shared/Core OpenGL
-trees, and rejects all GL-shaped function calls in Vulkan. Modern calls made
-below the OpenGL boundary do not expand the Alpha-facing inventory.
+trees, and rejects all GL-shaped function calls in Vulkan and D3D12. The current
+deny scan passes for both explicit-API trees. Modern calls made below the OpenGL
+boundary do not expand the Alpha-facing inventory.
 
 ## Loader
 
@@ -182,3 +183,9 @@ python -m glad --profile compatibility --api gl=4.6 --generator c --spec gl --ou
 
 The generator is a build-time convenience, not a project dependency: the
 generated `glad.h`/`glad.c` are checked in.
+
+The Vulkan backend is compiled with `VK_NO_PROTOTYPES` and resolves its
+exercised global, instance and device functions from the loader entry point
+provided by the platform bridge. The SDK remains a header and shader-tool build
+requirement, but `Vulkan::Vulkan` is not linked into the production executable;
+native, GL46 and D3D12 runtime selections therefore do not load `vulkan-1.dll`.

@@ -30,7 +30,23 @@ struct Configuration
 	bool supportsQueryValidation;
 };
 
-// Exactly one backend implementation provides these symbols in a process.
+struct Backend
+{
+	const char *cliName;
+	const Configuration &(*configuration)();
+	void (*initialize)();
+	void (*present)();
+	void (*shutdown)();
+	bool (*hasCapability)(const char *capability);
+	legacygl::Sink *(*sink)();
+};
+
+const Backend &nativeGLBackend();
+const Backend &openGL46Backend();
+const Backend &vulkanBackend();
+const Backend &d3d12Backend();
+
+bool select(const char *cliName);
 const Configuration &configuration();
 void initialize();
 void present();

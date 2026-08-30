@@ -68,10 +68,10 @@ public:
 
 	volatile bool pause = false;
 
-	// Set only by the scene-capture fixture (src/tools/SceneCapture.cpp), which
-	// renders into a hidden window. A window that is never focused otherwise
-	// makes the renderer open the pause menu half a second in, which would sit
-	// over every capture. Normal gameplay leaves this false.
+	// Set only by unattended fixtures, which render into the platform window
+	// without ever showing it. A window that is never focused otherwise makes
+	// the renderer open the pause menu half a second in. Normal gameplay leaves
+	// this false.
 	bool unattended = false;
 
 	Textures textures = Textures(texturePackRepository, options);

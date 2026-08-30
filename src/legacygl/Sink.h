@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 #include "legacygl/ResolvedCommands.h"
 
@@ -129,6 +130,7 @@ public:
 
 	// Loader-neutral work emitted after the semantic core has validated each
 	// call and resolved all legacy state needed by a translated backend.
+	virtual void releaseCanonicalGeometry(std::uint64_t residencyId) { (void)residencyId; }
 	virtual void resolvedDraw(const ResolvedDraw &command) { (void)command; }
 	virtual void resolvedClear(const ResolvedClear &command) { (void)command; }
 	virtual void resolvedTextureUpload(const ResolvedTextureUpload &command) { (void)command; }
