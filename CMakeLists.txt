@@ -989,6 +989,8 @@ add_library(Alpha126CppCore OBJECT
 	"src/legacygl/LegacyGL.h"
 	"src/legacygl/Matrix.cpp"
 	"src/legacygl/Matrix.h"
+	"src/legacygl/PixelFormat.cpp"
+	"src/legacygl/PixelFormat.h"
 	"src/legacygl/Primitive.cpp"
 	"src/legacygl/Primitive.h"
 	"src/legacygl/ResolvedCommands.h"
@@ -1103,6 +1105,24 @@ else()
 	set(A126_ENABLE_D3D12_BACKEND OFF)
 endif()
 option(A126_ENABLE_GL_GPU_TESTS "Enable serialized LegacyGL GPU parity tests" OFF)
+option(A126_ENABLE_RENDER_DIAGNOSTICS "Compile renderer diagnostics instrumentation" OFF)
+set(A126_DEFAULT_RENDER_BACKEND "gl21" CACHE STRING "Default renderer: nativegl, gl21, gl46, vulkan or d3d12")
+set_property(CACHE A126_DEFAULT_RENDER_BACKEND PROPERTY STRINGS nativegl gl21 gl46 vulkan d3d12)
+set(A126_EXECUTABLE_NAME "Alpha126Cpp" CACHE STRING "Client executable output name")
+
+if(A126_DEFAULT_RENDER_BACKEND STREQUAL "native")
+	message(STATUS "Migrating A126_DEFAULT_RENDER_BACKEND=native to nativegl")
+	set(A126_DEFAULT_RENDER_BACKEND "nativegl" CACHE STRING "Default renderer" FORCE)
+endif()
+if(NOT A126_DEFAULT_RENDER_BACKEND MATCHES "^(nativegl|gl21|gl46|vulkan|d3d12)$")
+	message(FATAL_ERROR "Unknown A126_DEFAULT_RENDER_BACKEND=${A126_DEFAULT_RENDER_BACKEND}")
+endif()
+if(A126_DEFAULT_RENDER_BACKEND STREQUAL "vulkan" AND NOT A126_ENABLE_VULKAN_BACKEND)
+	message(FATAL_ERROR "The default Vulkan renderer is disabled")
+endif()
+if(A126_DEFAULT_RENDER_BACKEND STREQUAL "d3d12" AND NOT A126_ENABLE_D3D12_BACKEND)
+	message(FATAL_ERROR "The default D3D12 renderer is disabled")
+endif()
 
 add_library(a126cpp-render-backend-opengl-context STATIC EXCLUDE_FROM_ALL
 	"src/backends/OpenGL/Context.cpp"
@@ -1118,6 +1138,7 @@ set_target_properties(a126cpp-render-backend-opengl-context PROPERTIES
 
 add_library(a126cpp-render-backend-nativegl STATIC EXCLUDE_FROM_ALL
 	"src/backends/NativeGL/Backend.cpp"
+	"src/backends/OpenGL21/Backend.cpp"
 )
 target_include_directories(a126cpp-render-backend-nativegl PRIVATE "src")
 target_link_libraries(a126cpp-render-backend-nativegl PRIVATE a126cpp-render-backend-opengl-context)
@@ -1248,6 +1269,8 @@ if(A126_ENABLE_VULKAN_BACKEND)
 
 	add_library(a126cpp-render-backend-vulkan STATIC EXCLUDE_FROM_ALL
 		"src/backends/Vulkan/Backend.cpp"
+		"src/backends/Vulkan/PipelineCacheFile.cpp"
+		"src/backends/Vulkan/PipelineCacheFile.h"
 		"src/backends/Vulkan/Shaders.cpp"
 		"src/backends/Vulkan/Shaders.h"
 		${A126_VULKAN_SHADER_OUTPUTS}
@@ -1258,6 +1281,10 @@ if(A126_ENABLE_VULKAN_BACKEND)
 		"${A126_VULKAN_GENERATED_SHADER_DIR}"
 		"$<TARGET_PROPERTY:Vulkan::Vulkan,INTERFACE_INCLUDE_DIRECTORIES>"
 	)
+	if(A126_ENABLE_RENDER_DIAGNOSTICS)
+		target_compile_definitions(a126cpp-render-backend-vulkan PRIVATE
+			A126_RENDER_DIAGNOSTICS_COMPILED=1)
+	endif()
 	set_target_properties(a126cpp-render-backend-vulkan PROPERTIES
 		CXX_STANDARD 17
 		CXX_STANDARD_REQUIRED YES
@@ -1273,6 +1300,10 @@ if(WIN32 AND A126_ENABLE_D3D12_BACKEND)
 	)
 	target_include_directories(a126cpp-render-backend-d3d12 PRIVATE "src")
 	target_link_libraries(a126cpp-render-backend-d3d12 PRIVATE d3d12 dxgi d3dcompiler)
+	if(A126_ENABLE_RENDER_DIAGNOSTICS)
+		target_compile_definitions(a126cpp-render-backend-d3d12 PRIVATE
+			A126_RENDER_DIAGNOSTICS_COMPILED=1)
+	endif()
 	set_target_properties(a126cpp-render-backend-d3d12 PROPERTIES
 		CXX_STANDARD 17
 		CXX_STANDARD_REQUIRED YES
@@ -1331,7 +1362,9 @@ add_executable(Alpha126Cpp
 )
 target_compile_definitions(Alpha126Cpp PRIVATE
 	A126_HAS_BACKEND_NATIVEGL=1
+	A126_HAS_BACKEND_OPENGL21=1
 	A126_HAS_BACKEND_OPENGL46=1
+	A126_DEFAULT_RENDER_BACKEND="${A126_DEFAULT_RENDER_BACKEND}"
 )
 target_link_libraries(Alpha126Cpp PRIVATE
 	Alpha126CppCore
@@ -1362,6 +1395,7 @@ set_target_properties(Alpha126Cpp PROPERTIES
 	CXX_STANDARD 17
 	CXX_STANDARD_REQUIRED YES
 	CXX_EXTENSIONS NO
+	OUTPUT_NAME "${A126_EXECUTABLE_NAME}"
 )
 
 # Headless deterministic regression suite.
@@ -1377,6 +1411,7 @@ file(GLOB Alpha126Cpp_HEADLESS_TESTS CONFIGURE_DEPENDS
 
 add_executable(a126cpp-headless-tests
 	"src/backends/Backend.cpp"
+	"src/backends/Vulkan/PipelineCacheFile.cpp"
 	"src/tools/headless/TestFramework.cpp"
 	"src/tools/headless/TestFramework.h"
 	"src/tools/headless/TestWorld.cpp"
@@ -1420,6 +1455,15 @@ if(A126_ENABLE_GL_GPU_TESTS)
 		Alpha126CppCore a126cpp-render-backend-nativegl
 	)
 
+	add_executable(a126cpp-legacygl-gpu-parity-gl21
+		"src/backends/Backend.cpp"
+		"src/tools/LegacyGLGpuParity.cpp"
+	)
+	target_compile_definitions(a126cpp-legacygl-gpu-parity-gl21 PRIVATE A126_HAS_BACKEND_OPENGL21=1)
+	target_link_libraries(a126cpp-legacygl-gpu-parity-gl21 PRIVATE
+		Alpha126CppCore a126cpp-render-backend-nativegl
+	)
+
 	add_executable(a126cpp-legacygl-gpu-parity-gl46
 		"src/backends/Backend.cpp"
 		"src/tools/LegacyGLGpuParity.cpp"
@@ -1431,6 +1475,7 @@ if(A126_ENABLE_GL_GPU_TESTS)
 
 	set(A126_GL_GPU_PARITY_TARGETS
 		a126cpp-legacygl-gpu-parity-native
+		a126cpp-legacygl-gpu-parity-gl21
 		a126cpp-legacygl-gpu-parity-gl46
 	)
 	if(A126_ENABLE_VULKAN_BACKEND)
@@ -1490,6 +1535,12 @@ if(WIN32 AND TARGET OpenAL32)
 				"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-native>/OpenAL32.dll"
 			COMMENT "Copying OpenAL32.dll to output directory"
 		)
+		add_custom_command(TARGET a126cpp-legacygl-gpu-parity-gl21 POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				"$<TARGET_FILE:OpenAL32>"
+				"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-gl21>/OpenAL32.dll"
+			COMMENT "Copying OpenAL32.dll to output directory"
+		)
 		add_custom_command(TARGET a126cpp-legacygl-gpu-parity-gl46 POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
 				"$<TARGET_FILE:OpenAL32>"
@@ -1534,17 +1585,29 @@ add_test(NAME gl-inventory COMMAND a126cpp-gl-inventory)
 
 if(A126_ENABLE_GL_GPU_TESTS)
 	set(A126_GL_GPU_NATIVE_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-native.txt")
+	set(A126_GL_GPU_GL21_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-gl21.txt")
 	set(A126_GL_GPU_GL46_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-gl46.txt")
 	set(A126_GL_GPU_TESTS
 		legacygl-gpu-record-native
+		legacygl-gpu-record-gl21
 		legacygl-gpu-record-gl46
+		legacygl-gpu-compare-gl21
 		legacygl-gpu-compare
+		legacygl-gpu-compare-gl21-gl46
 	)
 
 	add_test(NAME legacygl-gpu-record-native
 		COMMAND a126cpp-legacygl-gpu-parity-native --record "${A126_GL_GPU_NATIVE_RECORD}"
 	)
 	set_tests_properties(legacygl-gpu-record-native PROPERTIES
+		FIXTURES_SETUP legacygl-gpu-records
+		RESOURCE_LOCK legacygl-gpu
+	)
+
+	add_test(NAME legacygl-gpu-record-gl21
+		COMMAND a126cpp-legacygl-gpu-parity-gl21 --record "${A126_GL_GPU_GL21_RECORD}"
+	)
+	set_tests_properties(legacygl-gpu-record-gl21 PROPERTIES
 		FIXTURES_SETUP legacygl-gpu-records
 		RESOURCE_LOCK legacygl-gpu
 	)
@@ -1557,10 +1620,26 @@ if(A126_ENABLE_GL_GPU_TESTS)
 		RESOURCE_LOCK legacygl-gpu
 	)
 
+	add_test(NAME legacygl-gpu-compare-gl21
+		COMMAND a126cpp-legacygl-gpu-parity-native --compare "${A126_GL_GPU_NATIVE_RECORD}" "${A126_GL_GPU_GL21_RECORD}"
+	)
+	set_tests_properties(legacygl-gpu-compare-gl21 PROPERTIES
+		FIXTURES_REQUIRED legacygl-gpu-records
+		RESOURCE_LOCK legacygl-gpu
+	)
+
 	add_test(NAME legacygl-gpu-compare
 		COMMAND a126cpp-legacygl-gpu-parity-native --compare "${A126_GL_GPU_NATIVE_RECORD}" "${A126_GL_GPU_GL46_RECORD}"
 	)
 	set_tests_properties(legacygl-gpu-compare PROPERTIES
+		FIXTURES_REQUIRED legacygl-gpu-records
+		RESOURCE_LOCK legacygl-gpu
+	)
+
+	add_test(NAME legacygl-gpu-compare-gl21-gl46
+		COMMAND a126cpp-legacygl-gpu-parity-gl21 --compare "${A126_GL_GPU_GL21_RECORD}" "${A126_GL_GPU_GL46_RECORD}"
+	)
+	set_tests_properties(legacygl-gpu-compare-gl21-gl46 PROPERTIES
 		FIXTURES_REQUIRED legacygl-gpu-records
 		RESOURCE_LOCK legacygl-gpu
 	)
@@ -1590,10 +1669,19 @@ if(A126_ENABLE_GL_GPU_TESTS)
 			FIXTURES_REQUIRED legacygl-gpu-records
 			RESOURCE_LOCK legacygl-gpu
 		)
+
+		add_test(NAME legacygl-gpu-compare-gl21-vulkan
+			COMMAND a126cpp-legacygl-gpu-parity-gl21 --compare "${A126_GL_GPU_GL21_RECORD}" "${A126_GL_GPU_VULKAN_RECORD}"
+		)
+		set_tests_properties(legacygl-gpu-compare-gl21-vulkan PROPERTIES
+			FIXTURES_REQUIRED legacygl-gpu-records
+			RESOURCE_LOCK legacygl-gpu
+		)
 		list(APPEND A126_GL_GPU_TESTS
 			legacygl-gpu-record-vulkan
 			legacygl-gpu-compare-vulkan
 			legacygl-gpu-compare-gl46-vulkan
+			legacygl-gpu-compare-gl21-vulkan
 		)
 	endif()
 
@@ -1623,10 +1711,19 @@ if(A126_ENABLE_GL_GPU_TESTS)
 			RESOURCE_LOCK legacygl-gpu
 		)
 
+		add_test(NAME legacygl-gpu-compare-gl21-d3d12
+			COMMAND a126cpp-legacygl-gpu-parity-gl21 --compare "${A126_GL_GPU_GL21_RECORD}" "${A126_GL_GPU_D3D12_RECORD}"
+		)
+		set_tests_properties(legacygl-gpu-compare-gl21-d3d12 PROPERTIES
+			FIXTURES_REQUIRED legacygl-gpu-records
+			RESOURCE_LOCK legacygl-gpu
+		)
+
 		list(APPEND A126_GL_GPU_TESTS
 			legacygl-gpu-record-d3d12
 			legacygl-gpu-compare-d3d12
 			legacygl-gpu-compare-gl46-d3d12
+			legacygl-gpu-compare-gl21-d3d12
 		)
 
 		if(A126_ENABLE_VULKAN_BACKEND)

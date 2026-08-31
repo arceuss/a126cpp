@@ -51,6 +51,10 @@ layout(std140, set = 0, binding = 0) uniform LegacyFFPBlock
 	uvec4 uFlags1;
 	uvec4 uFlags2;
 	uvec4 uFlags3;
+	vec4 uCurrentColor;
+	vec4 uCurrentNormal;
+	vec4 uCurrentTexCoord;
+	uvec4 uFlags4;
 };
 
 layout(location = 0) in vec3 inPosition;
@@ -172,15 +176,25 @@ vec4 computePrimary(vec3 objectPosition, vec4 color, vec3 objectNormal)
 
 void main()
 {
+	// A display list retains one resident copy of its geometry. Attributes the
+	// captured draw never supplied are read here from the current state, which
+	// is what lets one chunk or glyph list be drawn under any current colour,
+	// normal or texture coordinate without duplicating its vertices.
+	vec4 color = uFlags4.x != 0u ? inColor : uCurrentColor;
+	vec3 normal = uFlags4.y != 0u ? inNormal : uCurrentNormal.xyz;
+	vec2 texCoord = uFlags4.z != 0u ? inTexCoord : uCurrentTexCoord.xy;
+	vec4 flatColor = uFlags4.x != 0u ? inFlatColor : uCurrentColor;
+	vec3 flatNormal = uFlags4.y != 0u ? inFlatNormal : uCurrentNormal.xyz;
+
 	vec4 eyePosition = uModelView * vec4(inPosition, 1.0);
 	vec4 glClip = uProjection * eyePosition;
 	gl_Position = vec4(glClip.xy, 0.5 * (glClip.z + glClip.w), glClip.w);
 	gl_PointSize = 1.0;
 
-	vec4 transformedTexCoord = uTexture * vec4(inTexCoord, 0.0, 1.0);
+	vec4 transformedTexCoord = uTexture * vec4(texCoord, 0.0, 1.0);
 	vTexCoord = transformedTexCoord.xyw;
-	vSmoothPrimary = computePrimary(inPosition, inColor, inNormal);
-	vFlatPrimary = computePrimary(inFlatPosition, inFlatColor, inFlatNormal);
+	vSmoothPrimary = computePrimary(inPosition, color, normal);
+	vFlatPrimary = computePrimary(inFlatPosition, flatColor, flatNormal);
 	vFogCoord = uFlags1.w == 2u ? length(eyePosition.xyz) :
 		(uFlags1.w == 1u ? eyePosition.z : abs(eyePosition.z));
 }

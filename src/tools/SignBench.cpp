@@ -2,15 +2,29 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
+#endif
+
 #include "client/Minecraft.h"
 #include "client/Timer.h"
 #include "client/renderer/Chunk.h"
+#include "backends/Backend.h"
 #include "java/File.h"
 #include "java/String.h"
 #include "java/System.h"
@@ -132,6 +146,75 @@ double percentile(std::vector<double> sorted, double fraction)
 	return sorted[index];
 }
 
+struct ProcessMemory
+{
+	std::uint64_t privateBytes = 0;
+	std::uint64_t workingSetBytes = 0;
+};
+
+ProcessMemory processMemory()
+{
+	ProcessMemory result;
+#if defined(_WIN32)
+	PROCESS_MEMORY_COUNTERS_EX counters = {};
+	counters.cb = sizeof(counters);
+	if (GetProcessMemoryInfo(GetCurrentProcess(),
+		reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&counters), sizeof(counters)))
+	{
+		result.privateBytes = static_cast<std::uint64_t>(counters.PrivateUsage);
+		result.workingSetBytes = static_cast<std::uint64_t>(counters.WorkingSetSize);
+	}
+#endif
+	return result;
+}
+
+struct TravelPosition
+{
+	int_t x = 0;
+	int_t z = 0;
+};
+
+void appendTravelSegment(std::vector<TravelPosition> &path, int_t &x, int_t &z,
+	int_t targetX, int_t targetZ)
+{
+	while (x != targetX)
+	{
+		x += targetX > x ? 1 : -1;
+		path.push_back({ x, z });
+	}
+	while (z != targetZ)
+	{
+		z += targetZ > z ? 1 : -1;
+		path.push_back({ x, z });
+	}
+}
+
+std::vector<TravelPosition> buildTravelPath(int_t radius)
+{
+	std::vector<TravelPosition> path;
+	int_t x = 0;
+	int_t z = 0;
+	appendTravelSegment(path, x, z, radius, 0);
+	appendTravelSegment(path, x, z, radius, radius);
+	appendTravelSegment(path, x, z, -radius, radius);
+	appendTravelSegment(path, x, z, -radius, -radius);
+	appendTravelSegment(path, x, z, radius, -radius);
+	appendTravelSegment(path, x, z, 0, 0);
+	return path;
+}
+
+void placeTravelPlayer(Player &player, const TravelPosition &position, double y)
+{
+	const double x = static_cast<double>(position.x * 16 + 8);
+	const double z = static_cast<double>(position.z * 16 + 8);
+	player.moveTo(x, y, z, 0.0f, 0.0f);
+	player.xo = player.xOld = x;
+	player.yo = player.yOld = y;
+	player.zo = player.zOld = z;
+	player.yRotO = player.yRot;
+	player.xRotO = player.xRot;
+}
+
 }
 
 int runSignBench(int frames, int signCount, bool blankText, bool finishEachFrame,
@@ -144,7 +227,10 @@ try
 		signCount = 4096;
 	signbench::g_blankText = blankText;
 
-	Minecraft minecraft(854, 480, false);
+	const int measuredFrameTarget = frames;
+	const int frameWidth = 854;
+	const int frameHeight = 480;
+	Minecraft minecraft(frameWidth, frameHeight, false);
 	minecraft.unattended = true;
 	std::cerr << "sign-bench: client initialised" << std::endl;
 	minecraft.init();
@@ -199,18 +285,19 @@ try
 	std::vector<double> lightTimes;
 	std::vector<double> renderTimes;
 	std::vector<double> finishTimes;
-	frameTimes.reserve(static_cast<size_t>(frames));
+	frameTimes.reserve(static_cast<size_t>(measuredFrameTarget));
 
-	// Same loop shape as the singleplayer client: the timer decides how many
-	// twenty-per-second ticks each frame owes, and the render uses the leftover
-	// partial tick (Minecraft.cpp:467-520).
-	Timer timer(20.0f);
+	// A deterministic tick cadence makes every backend render the same world
+	// state sequence. Real-time Timer scheduling made a slower backend perform
+	// more ticks during the same frame count, invalidating workload comparisons.
+	const int benchmarkTickInterval = 10;
 	const int warmupFrames = worldName.empty() ? 60 : 2000;
+	const int totalFrames = warmupFrames + measuredFrameTarget;
 	int_t warmupChunkUpdates = 0;
 	int_t measuredChunkUpdates = 0;
 	long_t gameTicks = 0;
 	long_t loopStartMs = System::currentTimeMillis();
-	for (int frame = 0; frame < frames; frame++)
+	for (int frame = 0; frame < totalFrames; frame++)
 	{
 		AABB::resetPool();
 		Vec3::resetPool();
@@ -219,9 +306,8 @@ try
 			break;
 
 		auto start = std::chrono::steady_clock::now();
-
-		timer.advanceTime();
-		for (int_t i = 0; i < timer.ticks; i++)
+		const int scheduledTicks = frame % benchmarkTickInterval == 0 ? 1 : 0;
+		for (int_t i = 0; i < scheduledTicks; i++)
 		{
 			minecraft.tick();
 			if (!worldName.empty())
@@ -236,7 +322,9 @@ try
 		level->updateLights();
 		auto afterLight = std::chrono::steady_clock::now();
 		lwjgl::Display::update();
-		minecraft.gameRenderer.render(timer.a);
+		const float partialTick = static_cast<float>(frame % benchmarkTickInterval) /
+			static_cast<float>(benchmarkTickInterval);
+		minecraft.gameRenderer.render(partialTick);
 		auto afterRender = std::chrono::steady_clock::now();
 
 		if (finishEachFrame)
@@ -290,14 +378,26 @@ try
 	};
 
 	emit("sign-bench");
+	emit("backend " + std::string(renderbackend::configuration().recordName));
+	emit("width " + std::to_string(frameWidth));
+	emit("height " + std::to_string(frameHeight));
+	emit("blank_text " + std::to_string(blankText ? 1 : 0));
+	const char *renderDiagnostics = std::getenv("A126_RENDER_DIAGNOSTICS");
+	const char *legacyValidation = std::getenv("A126_LEGACYGL_VALIDATE");
+	emit("render_diagnostics " + std::to_string(renderDiagnostics != nullptr &&
+		std::string(renderDiagnostics) == "1" ? 1 : 0));
+	emit("legacy_validation " + std::to_string(legacyValidation != nullptr &&
+		std::string(legacyValidation) == "1" ? 1 : 0));
 	emit("window_visible " + std::to_string(lwjgl::Display::isVisible() ? 1 : 0));
 	emit("finish_each_frame " + std::to_string(finishEachFrame ? 1 : 0));
 	emit("world " + (worldName.empty() ? std::string("generated") : worldName));
 	emit("signs " + std::to_string(placed));
 	emit("renderable_tile_entities "
 		+ std::to_string(minecraft.levelRenderer.renderableTileEntities.size()));
-	emit("warmup_frames " + std::to_string(frames < warmupFrames ? frames : warmupFrames));
+	emit("warmup_frames " + std::to_string(warmupFrames));
 	emit("measured_frames " + std::to_string(frameTimes.size()));
+	emit("requested_measured_frames " + std::to_string(measuredFrameTarget));
+	emit("tick_interval_frames " + std::to_string(benchmarkTickInterval));
 	emit("warmup_chunk_updates " + std::to_string(warmupChunkUpdates));
 	emit("chunk_updates " + std::to_string(measuredChunkUpdates));
 	emit("mean_ms " + std::to_string(mean));
@@ -319,6 +419,161 @@ try
 catch (const std::exception &e)
 {
 	std::cerr << "sign-bench failed: " << e.what() << std::endl;
+	return 1;
+}
+
+
+int runChunkTravelBench(int cycles, int radiusChunks, int framesPerChunk,
+	int settleFrames, int viewDistance, const std::string &worldName)
+try
+{
+	if (cycles <= 0)
+		cycles = 3;
+	if (radiusChunks <= 0)
+		radiusChunks = 24;
+	if (framesPerChunk <= 0)
+		framesPerChunk = 2;
+	if (settleFrames <= 0)
+		settleFrames = 120;
+	// Alpha's options value: 0 is FAR (400 blocks), 3 is TINY. Walking with a
+	// large view distance is the case the renderer has to survive, so that is
+	// the default here.
+	if (viewDistance < 0 || viewDistance > 3)
+		viewDistance = 0;
+
+	const int frameWidth = 854;
+	const int frameHeight = 480;
+	Minecraft minecraft(frameWidth, frameHeight, false);
+	minecraft.unattended = true;
+	minecraft.init();
+	if (lwjgl::Display::isVisible())
+	{
+		std::cerr << "chunk-travel-bench: unattended window became visible" << std::endl;
+		return 1;
+	}
+
+	minecraft.options.viewDistance = static_cast<int_t>(viewDistance);
+	std::shared_ptr<Level> level;
+	if (worldName.empty())
+	{
+		level = std::make_shared<Level>(u"chunk-travel-bench",
+			Dimension::Id_Normal, 1234567LL);
+		minecraft.setLevel(level, u"Chunk travel bench");
+	}
+	else
+	{
+		minecraft.selectLevel(String::fromUTF8(worldName));
+		level = minecraft.level;
+	}
+	if (minecraft.player == nullptr || level == nullptr)
+	{
+		std::cerr << "chunk-travel-bench: the world produced no player" << std::endl;
+		return 1;
+	}
+
+	minecraft.setScreen(nullptr);
+	minecraft.options.showDebugInfo = true;
+	const double playerY = minecraft.player->y;
+	const std::vector<signbench::TravelPosition> path =
+		signbench::buildTravelPath(static_cast<int_t>(radiusChunks));
+	const signbench::TravelPosition origin = {};
+	int frameNumber = 0;
+
+	auto renderFrames = [&](const signbench::TravelPosition &position, int count,
+		std::vector<double> *timings, int_t &chunkUpdates)
+	{
+		for (int frame = 0; frame < count; frame++, frameNumber++)
+		{
+			AABB::resetPool();
+			Vec3::resetPool();
+			if (lwjgl::Display::isCloseRequested())
+				throw std::runtime_error("chunk travel window was closed");
+			if (frameNumber % 10 == 0)
+				minecraft.tick();
+			signbench::placeTravelPlayer(*minecraft.player, position, playerY);
+
+			const std::chrono::steady_clock::time_point start =
+				std::chrono::steady_clock::now();
+			level->updateLights();
+			lwjgl::Display::update();
+			minecraft.gameRenderer.render(0.0f);
+			const std::chrono::steady_clock::time_point end =
+				std::chrono::steady_clock::now();
+			if (timings != nullptr)
+			{
+				timings->push_back(std::chrono::duration<double, std::milli>(
+					end - start).count());
+			}
+			chunkUpdates += Chunk::updates;
+			Chunk::updates = 0;
+		}
+	};
+
+	int_t baselineChunkUpdates = 0;
+	renderFrames(origin, settleFrames, nullptr, baselineChunkUpdates);
+	glFinish();
+	const signbench::ProcessMemory baseline = signbench::processMemory();
+
+	std::unique_ptr<File> logFile(File::open(u"chunk-travel-bench.log"));
+	std::unique_ptr<std::ostream> out(logFile->toStreamOut());
+	auto emit = [&](const std::string &line)
+	{
+		std::cout << line << '\n';
+		if (out != nullptr)
+			*out << line << '\n';
+	};
+
+	emit("chunk-travel-bench");
+	emit("backend " + std::string(renderbackend::configuration().recordName));
+	emit("world " + (worldName.empty() ? std::string("generated") : worldName));
+	emit("view_distance " + std::to_string(viewDistance));
+	emit("cycles " + std::to_string(cycles));
+	emit("radius_chunks " + std::to_string(radiusChunks));
+	emit("route_positions " + std::to_string(path.size()));
+	emit("frames_per_chunk " + std::to_string(framesPerChunk));
+	emit("settle_frames " + std::to_string(settleFrames));
+	emit("baseline_chunk_updates " + std::to_string(baselineChunkUpdates));
+	emit("baseline_private_bytes " + std::to_string(baseline.privateBytes));
+	emit("baseline_working_set_bytes " + std::to_string(baseline.workingSetBytes));
+
+	for (int cycle = 1; cycle <= cycles; cycle++)
+	{
+		std::vector<double> timings;
+		timings.reserve(path.size() * static_cast<std::size_t>(framesPerChunk) +
+			static_cast<std::size_t>(settleFrames));
+		int_t chunkUpdates = 0;
+		for (const signbench::TravelPosition &position : path)
+			renderFrames(position, framesPerChunk, &timings, chunkUpdates);
+		renderFrames(origin, settleFrames, &timings, chunkUpdates);
+		glFinish();
+
+		const signbench::ProcessMemory memory = signbench::processMemory();
+		std::vector<double> sorted = timings;
+		std::sort(sorted.begin(), sorted.end());
+		double total = 0.0;
+		for (double timing : timings)
+			total += timing;
+		const double mean = timings.empty() ? 0.0 :
+			total / static_cast<double>(timings.size());
+		const std::int64_t privateGrowth = static_cast<std::int64_t>(memory.privateBytes) -
+			static_cast<std::int64_t>(baseline.privateBytes);
+		const std::string prefix = "cycle_" + std::to_string(cycle) + "_";
+		emit(prefix + "frames " + std::to_string(timings.size()));
+		emit(prefix + "chunk_updates " + std::to_string(chunkUpdates));
+		emit(prefix + "mean_ms " + std::to_string(mean));
+		emit(prefix + "p95_ms " +
+			std::to_string(signbench::percentile(sorted, 0.95)));
+		emit(prefix + "private_bytes " + std::to_string(memory.privateBytes));
+		emit(prefix + "private_growth_bytes " + std::to_string(privateGrowth));
+		emit(prefix + "working_set_bytes " + std::to_string(memory.workingSetBytes));
+	}
+
+	minecraft.stop();
+	return 0;
+}
+catch (const std::exception &e)
+{
+	std::cerr << "chunk-travel-bench failed: " << e.what() << std::endl;
 	return 1;
 }
 

@@ -119,6 +119,17 @@ void shutdown()
 	initialized = false;
 }
 
+std::string getCachePath(const char *fileName)
+{
+	char *directory = SDL_GetPrefPath("a126cpp", "a126cpp");
+	if (directory == nullptr)
+		throw SDLException();
+	std::string path(directory);
+	SDL_free(directory);
+	path += fileName;
+	return path;
+}
+
 void createWindow(WindowGraphicsAPI graphicsAPI)
 {
 	if (windowHandle != nullptr)

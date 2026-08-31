@@ -138,6 +138,7 @@ public:
 	void finish() override { calls.push_back("finish"); }
 
 	bool wantsCanonicalGeometry() const override { return true; }
+	bool wantsLastGeometrySnapshot() const override { return true; }
 	void resolvedDraw(const legacygl::ResolvedDraw &command) override
 	{
 		resolvedCalls.push_back("draw");
@@ -182,6 +183,12 @@ private:
 	unsigned int nextName = 1;
 };
 
+class ResidentOnlyRecordingSink final : public RecordingSink
+{
+public:
+	bool wantsTransientCanonicalGeometry() const override { return false; }
+};
+
 void compileResidentTriangleList(GLuint list, GLenum mode, const float *vertices)
 {
 	glVertexPointer(3, GL_FLOAT, 0, vertices);
@@ -190,6 +197,40 @@ void compileResidentTriangleList(GLuint list, GLenum mode, const float *vertices
 	glDrawArrays(GL_TRIANGLES, 0, 3);
 	glEndList();
 	glDisableClientState(GL_VERTEX_ARRAY);
+}
+
+HEADLESS_TEST(legacygl_resolved, resident_only_sink_keeps_transient_raw_path)
+{
+	legacyglTest::begin();
+
+	ResidentOnlyRecordingSink sink;
+	legacygl::setSink(&sink);
+	const float vertices[] = {
+		0.0f, 0.0f, 0.0f,
+		1.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f
+	};
+	glVertexPointer(3, GL_FLOAT, 0, vertices);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	ctx.checkEqual(sink.countOf("drawArrays"), 1,
+		"transient draw still reaches the raw sink");
+	ctx.checkEqual(static_cast<long long>(sink.resolvedDraws.size()), 0,
+		"transient draw is not decoded for a resident-only sink");
+
+	const GLuint list = glGenLists(1);
+	compileResidentTriangleList(list, GL_COMPILE, vertices);
+	glCallList(list);
+	if (ctx.check(sink.resolvedDraws.size() == 1,
+		"display-list draw reaches the resolved resident path"))
+	{
+		ctx.check(sink.resolvedDraws[0].displayListExecution,
+			"resolved list draw is identified as display-list execution");
+		ctx.check(sink.resolvedDraws[0].geometryResidencyId != 0,
+			"resolved list draw carries a stable residency identity");
+	}
+	glDeleteLists(list, 1);
+	legacygl::setSink(legacygl::nullSink());
 }
 
 HEADLESS_TEST(legacygl_dispatch, every_inventoried_call_reaches_the_backend)
@@ -503,6 +544,8 @@ HEADLESS_TEST(legacygl_resolved, immediate_draw_carries_resolved_state)
 	if (ctx.check(sink.resolvedDraws.size() == 1, "the immediate draw emitted once"))
 	{
 		const legacygl::ResolvedDraw &draw = sink.resolvedDraws[0];
+		ctx.check(!draw.displayListExecution,
+			"direct immediate draw is identified as transient geometry");
 		ctx.checkEqualBits(draw.modelView.m[0], 2.0f, "model-view matrix is snapshotted");
 		ctx.checkEqualBits(draw.modelView.m[12], 1.0f, "model-view translation is snapshotted");
 		ctx.checkEqualBits(draw.projection.m[0], 3.0f, "projection matrix is snapshotted");
@@ -617,6 +660,8 @@ HEADLESS_TEST(legacygl_resolved, compile_only_list_defers_state_clear_and_draw)
 	if (ctx.check(sink.resolvedClears.size() == 1, "the list clear emitted exactly once"))
 	{
 		const legacygl::ResolvedClear &clear = sink.resolvedClears[0];
+		ctx.check(clear.displayListExecution,
+			"resolved list clear is identified as display-list execution");
 		ctx.checkEqual(clear.sequence, legacygl::context().sequence(),
 			"list clear carries the execution call sequence");
 		ctx.checkEqual(clear.mask, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT,
@@ -665,6 +710,9 @@ HEADLESS_TEST(legacygl_resolved, captured_geometry_identity_is_stable_across_rep
 	compileResidentTriangleList(child, GL_COMPILE_AND_EXECUTE, vertices);
 	ctx.checkEqual(static_cast<long long>(sink.resolvedDraws.size()), 1,
 		"GL_COMPILE_AND_EXECUTE emitted the captured draw once");
+	ctx.check(sink.resolvedDraws.empty() ||
+		sink.resolvedDraws[0].displayListExecution,
+		"compile-and-execute draw is identified as display-list execution");
 
 	std::uint64_t identity = 0;
 	if (!sink.resolvedDraws.empty())

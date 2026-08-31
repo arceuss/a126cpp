@@ -1,14 +1,19 @@
 #include "backends/Backend.h"
+#include "backends/Vulkan/PipelineCacheFile.h"
 #include "backends/Vulkan/Shaders.h"
 
 #include <algorithm>
 #include <array>
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+#include <chrono>
+#endif
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -17,10 +22,12 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include "backends/Platform/Platform.h"
 #include "legacygl/LegacyGL.h"
+#include "legacygl/PixelFormat.h"
 #include "legacygl/Sink.h"
 
 #define VK_NO_PROTOTYPES
@@ -86,6 +93,7 @@ namespace vulkanbackend
 	X(vkCreateGraphicsPipelines) \
 	X(vkCreateImage) \
 	X(vkCreateImageView) \
+	X(vkCreatePipelineCache) \
 	X(vkCreatePipelineLayout) \
 	X(vkCreateRenderPass) \
 	X(vkCreateSampler) \
@@ -101,6 +109,7 @@ namespace vulkanbackend
 	X(vkDestroyImage) \
 	X(vkDestroyImageView) \
 	X(vkDestroyPipeline) \
+	X(vkDestroyPipelineCache) \
 	X(vkDestroyPipelineLayout) \
 	X(vkDestroyRenderPass) \
 	X(vkDestroySampler) \
@@ -114,6 +123,7 @@ namespace vulkanbackend
 	X(vkGetBufferMemoryRequirements) \
 	X(vkGetDeviceQueue) \
 	X(vkGetImageMemoryRequirements) \
+	X(vkGetPipelineCacheData) \
 	X(vkGetSwapchainImagesKHR) \
 	X(vkInvalidateMappedMemoryRanges) \
 	X(vkMapMemory) \
@@ -136,6 +146,7 @@ A126_VULKAN_DEVICE_FUNCTIONS(A126_DEFINE_VULKAN_FUNCTION)
 
 static const int VULKAN_TEXTURE_LEVELS = 16;
 static const int VULKAN_FRAMES_IN_FLIGHT = 2;
+static const unsigned int VULKAN_PIPELINE_KEY_ABI_VERSION = 1;
 static const VkDeviceSize VULKAN_STREAM_CHUNK_SIZE = 4 * 1024 * 1024;
 static const VkDeviceSize VULKAN_RESIDENT_PAGE_SIZE = 16 * 1024 * 1024;
 static const char *VULKAN_PORTABILITY_SUBSET_EXTENSION = "VK_KHR_portability_subset";
@@ -188,6 +199,10 @@ struct alignas(16) VulkanGPUState
 	unsigned int flags1[4];
 	unsigned int flags2[4];
 	unsigned int flags3[4];
+	float currentColor[4];
+	float currentNormal[4];
+	float currentTexCoord[4];
+	unsigned int flags4[4];
 };
 
 static_assert(sizeof(VulkanGPUVertex) == 88, "Vulkan vertex ABI changed");
@@ -210,7 +225,11 @@ static_assert(offsetof(VulkanGPUState, flags0) == 1264, "Vulkan shader flags0 AB
 static_assert(offsetof(VulkanGPUState, flags1) == 1280, "Vulkan shader flags1 ABI changed");
 static_assert(offsetof(VulkanGPUState, flags2) == 1296, "Vulkan shader flags2 ABI changed");
 static_assert(offsetof(VulkanGPUState, flags3) == 1312, "Vulkan shader flags3 ABI changed");
-static_assert(sizeof(VulkanGPUState) == 1328, "Vulkan shader block ABI changed");
+static_assert(offsetof(VulkanGPUState, currentColor) == 1328, "Vulkan shader current color ABI changed");
+static_assert(offsetof(VulkanGPUState, currentNormal) == 1344, "Vulkan shader current normal ABI changed");
+static_assert(offsetof(VulkanGPUState, currentTexCoord) == 1360, "Vulkan shader current texture coordinate ABI changed");
+static_assert(offsetof(VulkanGPUState, flags4) == 1376, "Vulkan shader flags4 ABI changed");
+static_assert(sizeof(VulkanGPUState) == 1392, "Vulkan shader block ABI changed");
 
 struct BufferResource
 {
@@ -256,27 +275,18 @@ struct ResidentAllocation
 	VkDeviceSize size = 0;
 };
 
-struct ResidentGeometryVariantKey
-{
-	std::uint64_t residencyId = 0;
-	unsigned int missingAttributes = 0;
-	std::array<std::uint32_t, 4> color = {};
-	std::array<std::uint32_t, 3> normal = {};
-	std::array<std::uint32_t, 2> texCoord = {};
-
-	bool operator<(const ResidentGeometryVariantKey &other) const
-	{
-		return std::tie(residencyId, missingAttributes, color, normal, texCoord) <
-			std::tie(other.residencyId, other.missingAttributes, other.color,
-				other.normal, other.texCoord);
-	}
-};
-
+// Display-list geometry is immutable, so its identity alone keys the resident
+// copy. Attributes the draw omitted are supplied at execution time from the
+// uniform block, which is what keeps a chunk from being duplicated once per
+// distinct current colour, normal or texture coordinate.
 struct ResidentGeometryEntry
 {
 	std::shared_ptr<ResidentAllocation> allocation;
 	legacygl::Topology topology = legacygl::Topology::Triangles;
 	uint32_t vertexCount = 0;
+	bool hasColor = false;
+	bool hasNormal = false;
+	bool hasTexCoord = false;
 };
 
 struct LegacyDescriptorEntry
@@ -294,6 +304,9 @@ struct ImageResource
 	VkImageView view = VK_NULL_HANDLE;
 	uint32_t width = 0;
 	uint32_t height = 0;
+	VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+	VkAccessFlags access = 0;
+	VkPipelineStageFlags stages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 };
 
 struct VulkanTextureLevel
@@ -347,6 +360,17 @@ struct PipelineKey
 	bool depthBias = false;
 	bool stencilTest = false;
 
+	bool operator==(const PipelineKey &other) const
+	{
+		return std::tie(topology, depthTest, depthWrite, depthFunction, cullFace,
+			cullFaceMode, frontFaceMode, blend, blendSource, blendDestination,
+			logicOp, logicOpcode, colorWriteMask, depthBias, stencilTest) ==
+			std::tie(other.topology, other.depthTest, other.depthWrite, other.depthFunction,
+			other.cullFace, other.cullFaceMode, other.frontFaceMode, other.blend,
+			other.blendSource, other.blendDestination, other.logicOp, other.logicOpcode,
+			other.colorWriteMask, other.depthBias, other.stencilTest);
+	}
+
 	bool operator<(const PipelineKey &other) const
 	{
 		return std::tie(topology, depthTest, depthWrite, depthFunction, cullFace,
@@ -358,6 +382,145 @@ struct PipelineKey
 			other.colorWriteMask, other.depthBias, other.stencilTest);
 	}
 };
+
+enum class BoundPipelineDomain
+{
+	Legacy,
+	MaskedClear,
+	Present
+};
+
+struct CommandState
+{
+	VkPipeline pipeline = VK_NULL_HANDLE;
+	bool pipelineValid = false;
+	PipelineKey legacyPipelineKey;
+	unsigned int maskedClearWriteMask = 0;
+	BoundPipelineDomain pipelineDomain = BoundPipelineDomain::Legacy;
+	bool logicalPipelineValid = false;
+	float viewport[6] = {};
+	bool viewportValid = false;
+	int scissorOffset[2] = {};
+	uint32_t scissorExtent[2] = {};
+	bool scissorValid = false;
+	float lineWidth = 0.0f;
+	bool lineWidthValid = false;
+	float depthBias[3] = {};
+	bool depthBiasValid = false;
+};
+
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+enum class ImageBarrierReason : std::size_t
+{
+	TargetInitialization,
+	PresentToSample,
+	PresentToRender,
+	TextureNewToTransfer,
+	TextureReuseToTransfer,
+	TextureUploadToSample,
+	ReadbackToTransfer,
+	ReadbackToRender,
+	Count
+};
+
+enum class LegacyPassBreakReason : std::size_t
+{
+	Submit,
+	Present,
+	TextureUpload,
+	Readback,
+	Finish,
+	Shutdown,
+	SwapchainRecreate,
+	Count
+};
+
+enum class PipelineMetricDomain
+{
+	Legacy,
+	MaskedClear,
+	Present
+};
+
+enum class DescriptorMetricDomain
+{
+	Legacy,
+	Present
+};
+
+struct PipelineMetrics
+{
+	std::uint64_t lookups = 0;
+	std::uint64_t currentHits = 0;
+	std::uint64_t cacheHits = 0;
+	std::uint64_t creates = 0;
+	std::uint64_t createNanoseconds = 0;
+	std::uint64_t binds = 0;
+	std::uint64_t redundantBindCandidates = 0;
+};
+
+struct DescriptorMetrics
+{
+	std::uint64_t lookups = 0;
+	std::uint64_t hits = 0;
+	std::uint64_t allocations = 0;
+	std::uint64_t invalidations = 0;
+};
+
+struct CommandObservation
+{
+	VkPipeline pipeline = VK_NULL_HANDLE;
+	bool pipelineValid = false;
+	PipelineKey legacyPipelineKey;
+	unsigned int maskedClearWriteMask = 0;
+	PipelineMetricDomain pipelineDomain = PipelineMetricDomain::Legacy;
+	bool logicalPipelineValid = false;
+	float viewport[6] = {};
+	bool viewportValid = false;
+	int scissorOffset[2] = {};
+	uint32_t scissorExtent[2] = {};
+	bool scissorValid = false;
+	float lineWidth = 0.0f;
+	bool lineWidthValid = false;
+	float depthBias[3] = {};
+	bool depthBiasValid = false;
+};
+
+struct VulkanDiagnostics
+{
+	PipelineMetrics legacyPipelines;
+	PipelineMetrics maskedClearPipelines;
+	PipelineMetrics presentPipelines;
+	DescriptorMetrics legacyDescriptors;
+	DescriptorMetrics presentDescriptors;
+	std::uint64_t viewportEmits = 0;
+	std::uint64_t viewportRedundantCandidates = 0;
+	std::uint64_t scissorEmits = 0;
+	std::uint64_t scissorRedundantCandidates = 0;
+	std::uint64_t lineWidthEmits = 0;
+	std::uint64_t lineWidthRedundantCandidates = 0;
+	std::uint64_t depthBiasEmits = 0;
+	std::uint64_t depthBiasRedundantCandidates = 0;
+	std::uint64_t imageBarriersEmitted = 0;
+	std::uint64_t imageBarriersSkipped = 0;
+	std::array<std::uint64_t, static_cast<std::size_t>(ImageBarrierReason::Count)>
+		imageBarrierReasons = {};
+	std::uint64_t legacyPassBegins = 0;
+	std::uint64_t legacyPassEnds = 0;
+	std::uint64_t presentPassBegins = 0;
+	std::uint64_t presentPassEnds = 0;
+	std::array<std::uint64_t, static_cast<std::size_t>(LegacyPassBreakReason::Count)>
+		legacyPassBreakReasons = {};
+	std::uint64_t imagesRetired = 0;
+	std::uint64_t imagesReclaimed = 0;
+	std::uint64_t residentAllocationsRetired = 0;
+	std::uint64_t residentAllocationsReclaimed = 0;
+	std::uint64_t transientBuffersRetired = 0;
+	std::uint64_t transientBuffersReclaimed = 0;
+	std::uint64_t fenceWaits = 0;
+	std::uint64_t finishDrains = 0;
+};
+#endif
 
 class LogicalNameAllocator
 {
@@ -427,6 +590,11 @@ struct FrameResources
 	std::vector<std::shared_ptr<ResidentAllocation>> residentAllocations;
 	std::vector<BufferResource> transientBuffers;
 	std::vector<ImageResource> retiredImages;
+	CommandState commandState;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	CommandObservation observation;
+	std::size_t presentDescriptorAllocations = 0;
+#endif
 	bool commandRecording = false;
 	bool legacyPassActive = false;
 	bool inFlight = false;
@@ -442,6 +610,9 @@ struct State
 	VkPhysicalDeviceMemoryProperties memoryProperties = {};
 	VkPhysicalDeviceFeatures physicalFeatures = {};
 	VkDevice device = VK_NULL_HANDLE;
+	VkPipelineCache pipelineCache = VK_NULL_HANDLE;
+	PipelineCacheIdentity pipelineCacheIdentity;
+	std::filesystem::path pipelineCachePath;
 	QueueFamilies queueFamilies;
 	VkQueue graphicsQueue = VK_NULL_HANDLE;
 	VkQueue presentQueue = VK_NULL_HANDLE;
@@ -476,7 +647,7 @@ struct State
 	std::map<unsigned int, VkPipeline> clearPipelines;
 	std::map<SamplerKey, VkSampler> samplers;
 	std::map<unsigned int, VulkanTexture> textures;
-	std::map<ResidentGeometryVariantKey, ResidentGeometryEntry> residentGeometry;
+	std::unordered_map<std::uint64_t, ResidentGeometryEntry> residentGeometry;
 	std::vector<std::unique_ptr<ResidentPage>> residentPages;
 	ImageResource fallbackTexture;
 
@@ -494,6 +665,14 @@ struct State
 	VkDeviceSize residentGeometryBytes = 0;
 	VkDeviceSize residentGeometryPeakBytes = 0;
 	std::uint64_t drawableSizeQueries = 0;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	VulkanDiagnostics diagnostics;
+	std::set<PipelineKey> observedPipelineKeys;
+	std::set<unsigned int> observedMaskedClearPipelineKeys;
+	std::string pipelineKeyDumpPath;
+	bool diagnosticsEnabled = false;
+	bool collectPipelineKeys = false;
+#endif
 	bool streamMemoryTypeReported = false;
 	bool residentMemoryTypeReported = false;
 	int drawableWidth = 0;
@@ -517,10 +696,469 @@ static FrameResources &currentFrame()
 	return state.frames[state.currentFrame];
 }
 
-static void submitAndWait();
+static void resetCommandState(FrameResources &frame)
+{
+	frame.commandState = CommandState();
+}
+
+static VkPipeline currentLegacyPipeline(const PipelineKey &key)
+{
+	const CommandState &command = currentFrame().commandState;
+	if (!command.pipelineValid || !command.logicalPipelineValid ||
+		command.pipelineDomain != BoundPipelineDomain::Legacy ||
+		!(command.legacyPipelineKey == key))
+	{
+		return VK_NULL_HANDLE;
+	}
+	return command.pipeline;
+}
+
+static void bindGraphicsPipeline(VkPipeline pipeline, BoundPipelineDomain domain,
+	const PipelineKey *legacyKey = nullptr, unsigned int maskedClearWriteMask = 0)
+{
+	CommandState &command = currentFrame().commandState;
+	if (!command.pipelineValid || command.pipeline != pipeline)
+	{
+		vkCmdBindPipeline(currentFrame().commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+			pipeline);
+	}
+	command.pipeline = pipeline;
+	command.pipelineValid = true;
+	command.pipelineDomain = domain;
+	command.logicalPipelineValid = true;
+	if (legacyKey != nullptr)
+		command.legacyPipelineKey = *legacyKey;
+	command.maskedClearWriteMask = maskedClearWriteMask;
+}
+
+static void setViewportState(const VkViewport &viewport)
+{
+	CommandState &command = currentFrame().commandState;
+	const float values[6] = { viewport.x, viewport.y, viewport.width, viewport.height,
+		viewport.minDepth, viewport.maxDepth };
+	if (!command.viewportValid || !std::equal(values, values + 6, command.viewport))
+	{
+		vkCmdSetViewport(currentFrame().commandBuffer, 0, 1, &viewport);
+		std::copy(values, values + 6, command.viewport);
+		command.viewportValid = true;
+	}
+}
+
+static void setScissorState(const VkRect2D &scissor)
+{
+	CommandState &command = currentFrame().commandState;
+	if (!command.scissorValid || command.scissorOffset[0] != scissor.offset.x ||
+		command.scissorOffset[1] != scissor.offset.y ||
+		command.scissorExtent[0] != scissor.extent.width ||
+		command.scissorExtent[1] != scissor.extent.height)
+	{
+		vkCmdSetScissor(currentFrame().commandBuffer, 0, 1, &scissor);
+		command.scissorOffset[0] = scissor.offset.x;
+		command.scissorOffset[1] = scissor.offset.y;
+		command.scissorExtent[0] = scissor.extent.width;
+		command.scissorExtent[1] = scissor.extent.height;
+		command.scissorValid = true;
+	}
+}
+
+static void setLineWidthState(float lineWidth)
+{
+	CommandState &command = currentFrame().commandState;
+	if (!command.lineWidthValid || command.lineWidth != lineWidth)
+	{
+		vkCmdSetLineWidth(currentFrame().commandBuffer, lineWidth);
+		command.lineWidth = lineWidth;
+		command.lineWidthValid = true;
+	}
+}
+
+static void setDepthBiasState(float constantFactor, float clamp, float slopeFactor)
+{
+	CommandState &command = currentFrame().commandState;
+	if (!command.depthBiasValid || command.depthBias[0] != constantFactor ||
+		command.depthBias[1] != clamp || command.depthBias[2] != slopeFactor)
+	{
+		vkCmdSetDepthBias(currentFrame().commandBuffer, constantFactor, clamp, slopeFactor);
+		command.depthBias[0] = constantFactor;
+		command.depthBias[1] = clamp;
+		command.depthBias[2] = slopeFactor;
+		command.depthBiasValid = true;
+	}
+}
+
+static void appendShaderABI(std::vector<unsigned char> &bytes, unsigned char stage,
+	const std::uint32_t *code, std::size_t byteSize)
+{
+	bytes.push_back(stage);
+	const std::uint64_t encodedSize = static_cast<std::uint64_t>(byteSize);
+	for (int i = 0; i < 8; i++)
+		bytes.push_back(static_cast<unsigned char>((encodedSize >> (i * 8)) & 0xff));
+	const unsigned char *shaderBytes = reinterpret_cast<const unsigned char *>(code);
+	bytes.insert(bytes.end(), shaderBytes, shaderBytes + byteSize);
+}
+
+static std::uint64_t pipelineShaderABI()
+{
+	std::vector<unsigned char> bytes;
+	std::size_t byteSize = 0;
+	const std::uint32_t *code = legacyVertexShaderCode(byteSize);
+	appendShaderABI(bytes, 0, code, byteSize);
+	code = legacyFragmentShaderCode(byteSize);
+	appendShaderABI(bytes, 1, code, byteSize);
+	code = clearVertexShaderCode(byteSize);
+	appendShaderABI(bytes, 2, code, byteSize);
+	code = clearFragmentShaderCode(byteSize);
+	appendShaderABI(bytes, 3, code, byteSize);
+	code = presentVertexShaderCode(byteSize);
+	appendShaderABI(bytes, 4, code, byteSize);
+	code = presentFragmentShaderCode(byteSize);
+	appendShaderABI(bytes, 5, code, byteSize);
+	return pipelineCacheChecksum(bytes.data(), bytes.size());
+}
+
+static PipelineCacheIdentity currentPipelineCacheIdentity()
+{
+	static_assert(VK_UUID_SIZE == PIPELINE_CACHE_UUID_SIZE,
+		"Vulkan pipeline cache UUID size changed");
+	PipelineCacheIdentity identity;
+	identity.apiVersion = state.physicalProperties.apiVersion;
+	identity.keySchemaVersion = VULKAN_PIPELINE_KEY_ABI_VERSION;
+	identity.shaderABI = pipelineShaderABI();
+	identity.vendorID = state.physicalProperties.vendorID;
+	identity.deviceID = state.physicalProperties.deviceID;
+	identity.driverVersion = state.physicalProperties.driverVersion;
+	std::memcpy(identity.uuid, state.physicalProperties.pipelineCacheUUID,
+		PIPELINE_CACHE_UUID_SIZE);
+	return identity;
+}
+
+static std::filesystem::path configuredPipelineCachePath()
+{
+	const char *configured = std::getenv("A126_VULKAN_PIPELINE_CACHE");
+	if (configured != nullptr && std::strcmp(configured, "0") == 0)
+		return std::filesystem::path();
+	if (configured != nullptr && configured[0] != '\0')
+		return std::filesystem::path(configured);
+	return std::filesystem::path(platform::getCachePath("vulkan-pipeline-cache.bin"));
+}
+
+static void createPipelineCache()
+{
+	try
+	{
+		state.pipelineCachePath = configuredPipelineCachePath();
+	}
+	catch (const std::exception &)
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnosticsEnabled)
+			std::cout << "vulkan diagnostics: pipeline_cache.load=path-error\n";
+#endif
+		return;
+	}
+	if (state.pipelineCachePath.empty())
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnosticsEnabled)
+			std::cout << "vulkan diagnostics: pipeline_cache.load=disabled\n";
+#endif
+		return;
+	}
+
+	state.pipelineCacheIdentity = currentPipelineCacheIdentity();
+	PipelineCacheFileLoad loaded;
+	try
+	{
+		loaded = loadPipelineCacheFile(state.pipelineCachePath, state.pipelineCacheIdentity);
+	}
+	catch (const std::exception &)
+	{
+		loaded.status = PipelineCacheFileStatus::ReadError;
+		loaded.payload.clear();
+	}
+	VkPipelineCacheCreateInfo createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+	if (loaded.status == PipelineCacheFileStatus::Accepted)
+	{
+		createInfo.initialDataSize = loaded.payload.size();
+		createInfo.pInitialData = loaded.payload.empty() ? nullptr : loaded.payload.data();
+	}
+	VkResult result = vkCreatePipelineCache(state.device, &createInfo, nullptr,
+		&state.pipelineCache);
+	if (result != VK_SUCCESS && createInfo.initialDataSize != 0)
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnosticsEnabled)
+		{
+			std::cout << "vulkan diagnostics: pipeline_cache.driver_rejected=" <<
+				static_cast<int>(result) << "\n";
+		}
+#endif
+		state.pipelineCache = VK_NULL_HANDLE;
+		createInfo.initialDataSize = 0;
+		createInfo.pInitialData = nullptr;
+		result = vkCreatePipelineCache(state.device, &createInfo, nullptr,
+			&state.pipelineCache);
+	}
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+	{
+		std::cout << "vulkan diagnostics: pipeline_cache.load=" <<
+			pipelineCacheFileStatusName(loaded.status) <<
+			", bytes=" << loaded.payload.size() <<
+			", create_result=" << static_cast<int>(result) << '\n';
+	}
+#endif
+	if (result != VK_SUCCESS)
+	{
+		state.pipelineCache = VK_NULL_HANDLE;
+		state.pipelineCachePath.clear();
+	}
+}
+
+static void savePipelineCache()
+{
+	if (state.pipelineCache == VK_NULL_HANDLE || state.pipelineCachePath.empty())
+		return;
+
+	std::vector<unsigned char> payload;
+	VkResult result = VK_INCOMPLETE;
+	for (int attempt = 0; attempt < 4 && result == VK_INCOMPLETE; attempt++)
+	{
+		std::size_t byteSize = 0;
+		result = vkGetPipelineCacheData(state.device, state.pipelineCache, &byteSize, nullptr);
+		if (result != VK_SUCCESS)
+			break;
+		if (byteSize > PIPELINE_CACHE_MAX_PAYLOAD_SIZE)
+		{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+			if (state.diagnosticsEnabled)
+				std::cout << "vulkan diagnostics: pipeline_cache.save=payload-too-large\n";
+#endif
+			return;
+		}
+		payload.resize(byteSize);
+		result = vkGetPipelineCacheData(state.device, state.pipelineCache, &byteSize,
+			payload.empty() ? nullptr : payload.data());
+		if (result == VK_SUCCESS)
+			payload.resize(byteSize);
+	}
+	if (result != VK_SUCCESS)
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnosticsEnabled)
+		{
+			std::cout << "vulkan diagnostics: pipeline_cache.save=driver-error, result=" <<
+				static_cast<int>(result) << '\n';
+		}
+#endif
+		return;
+	}
+
+	PipelineCacheFileStatus status = PipelineCacheFileStatus::WriteError;
+	try
+	{
+		status = savePipelineCacheFile(state.pipelineCachePath, state.pipelineCacheIdentity,
+			payload.data(), payload.size());
+	}
+	catch (const std::exception &)
+	{
+		status = PipelineCacheFileStatus::WriteError;
+	}
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+	{
+		std::cout << "vulkan diagnostics: pipeline_cache.save=" <<
+			pipelineCacheFileStatusName(status) << ", bytes=" << payload.size() << '\n';
+	}
+#endif
+}
+
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+static PipelineMetrics &pipelineMetrics(PipelineMetricDomain domain)
+{
+	switch (domain)
+	{
+		case PipelineMetricDomain::Legacy: return state.diagnostics.legacyPipelines;
+		case PipelineMetricDomain::MaskedClear: return state.diagnostics.maskedClearPipelines;
+		case PipelineMetricDomain::Present: return state.diagnostics.presentPipelines;
+	}
+	return state.diagnostics.legacyPipelines;
+}
+
+static DescriptorMetrics &descriptorMetrics(DescriptorMetricDomain domain)
+{
+	return domain == DescriptorMetricDomain::Legacy ? state.diagnostics.legacyDescriptors :
+		state.diagnostics.presentDescriptors;
+}
+
+static void resetCommandObservation(FrameResources &frame)
+{
+	if (state.diagnosticsEnabled)
+		frame.observation = CommandObservation();
+}
+
+static void observeLegacyPipelineLookup(const PipelineKey &key)
+{
+	if (!state.diagnosticsEnabled)
+		return;
+	PipelineMetrics &metrics = state.diagnostics.legacyPipelines;
+	metrics.lookups++;
+	const CommandObservation &observation = currentFrame().observation;
+	if (observation.logicalPipelineValid &&
+		observation.pipelineDomain == PipelineMetricDomain::Legacy &&
+		observation.legacyPipelineKey == key)
+	{
+		metrics.currentHits++;
+	}
+}
+
+static void observeMaskedClearPipelineLookup(unsigned int writeMask)
+{
+	if (!state.diagnosticsEnabled)
+		return;
+	PipelineMetrics &metrics = state.diagnostics.maskedClearPipelines;
+	metrics.lookups++;
+	const CommandObservation &observation = currentFrame().observation;
+	if (observation.logicalPipelineValid &&
+		observation.pipelineDomain == PipelineMetricDomain::MaskedClear &&
+		observation.maskedClearWriteMask == writeMask)
+	{
+		metrics.currentHits++;
+	}
+	state.observedMaskedClearPipelineKeys.insert(writeMask);
+}
+
+static void observePresentPipelineLookup()
+{
+	if (!state.diagnosticsEnabled)
+		return;
+	PipelineMetrics &metrics = state.diagnostics.presentPipelines;
+	metrics.lookups++;
+	const CommandObservation &observation = currentFrame().observation;
+	if (observation.logicalPipelineValid &&
+		observation.pipelineDomain == PipelineMetricDomain::Present)
+	{
+		metrics.currentHits++;
+	}
+}
+
+static void observePipelineBind(VkPipeline pipeline, PipelineMetricDomain domain,
+	const PipelineKey *legacyKey = nullptr, unsigned int maskedClearWriteMask = 0)
+{
+	if (!state.diagnosticsEnabled)
+		return;
+	CommandObservation &observation = currentFrame().observation;
+	PipelineMetrics &metrics = pipelineMetrics(domain);
+	metrics.binds++;
+	if (observation.pipelineValid && observation.pipeline == pipeline)
+		metrics.redundantBindCandidates++;
+	observation.pipeline = pipeline;
+	observation.pipelineValid = true;
+	observation.pipelineDomain = domain;
+	observation.logicalPipelineValid = true;
+	if (legacyKey != nullptr)
+		observation.legacyPipelineKey = *legacyKey;
+	observation.maskedClearWriteMask = maskedClearWriteMask;
+}
+
+static void observeViewport(const VkViewport &viewport)
+{
+	if (!state.diagnosticsEnabled)
+		return;
+	CommandObservation &observation = currentFrame().observation;
+	state.diagnostics.viewportEmits++;
+	const float values[6] = { viewport.x, viewport.y, viewport.width, viewport.height,
+		viewport.minDepth, viewport.maxDepth };
+	if (observation.viewportValid &&
+		std::equal(values, values + 6, observation.viewport))
+	{
+		state.diagnostics.viewportRedundantCandidates++;
+	}
+	std::copy(values, values + 6, observation.viewport);
+	observation.viewportValid = true;
+}
+
+static void observeScissor(const VkRect2D &scissor)
+{
+	if (!state.diagnosticsEnabled)
+		return;
+	CommandObservation &observation = currentFrame().observation;
+	state.diagnostics.scissorEmits++;
+	if (observation.scissorValid && observation.scissorOffset[0] == scissor.offset.x &&
+		observation.scissorOffset[1] == scissor.offset.y &&
+		observation.scissorExtent[0] == scissor.extent.width &&
+		observation.scissorExtent[1] == scissor.extent.height)
+	{
+		state.diagnostics.scissorRedundantCandidates++;
+	}
+	observation.scissorOffset[0] = scissor.offset.x;
+	observation.scissorOffset[1] = scissor.offset.y;
+	observation.scissorExtent[0] = scissor.extent.width;
+	observation.scissorExtent[1] = scissor.extent.height;
+	observation.scissorValid = true;
+}
+
+static void observeLineWidth(float lineWidth)
+{
+	if (!state.diagnosticsEnabled)
+		return;
+	CommandObservation &observation = currentFrame().observation;
+	state.diagnostics.lineWidthEmits++;
+	if (observation.lineWidthValid && observation.lineWidth == lineWidth)
+		state.diagnostics.lineWidthRedundantCandidates++;
+	observation.lineWidth = lineWidth;
+	observation.lineWidthValid = true;
+}
+
+static void observeDepthBias(float constantFactor, float clamp, float slopeFactor)
+{
+	if (!state.diagnosticsEnabled)
+		return;
+	CommandObservation &observation = currentFrame().observation;
+	state.diagnostics.depthBiasEmits++;
+	if (observation.depthBiasValid && observation.depthBias[0] == constantFactor &&
+		observation.depthBias[1] == clamp && observation.depthBias[2] == slopeFactor)
+	{
+		state.diagnostics.depthBiasRedundantCandidates++;
+	}
+	observation.depthBias[0] = constantFactor;
+	observation.depthBias[1] = clamp;
+	observation.depthBias[2] = slopeFactor;
+	observation.depthBiasValid = true;
+}
+
+static void observeImageBarriers(ImageBarrierReason reason, std::uint64_t count)
+{
+	if (!state.diagnosticsEnabled)
+		return;
+	state.diagnostics.imageBarriersEmitted += count;
+	state.diagnostics.imageBarrierReasons[static_cast<std::size_t>(reason)] += count;
+}
+#endif
+
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+#define A126_VULKAN_DIAGNOSTIC_PARAMETER(type, name) type name
+#define A126_VULKAN_DIAGNOSTIC_ARGUMENT(value) value
+#define A126_VULKAN_DIAGNOSTIC_TRAILING_PARAMETER(type, name) , type name
+#define A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT(value) , value
+#else
+#define A126_VULKAN_DIAGNOSTIC_PARAMETER(type, name)
+#define A126_VULKAN_DIAGNOSTIC_ARGUMENT(value)
+#define A126_VULKAN_DIAGNOSTIC_TRAILING_PARAMETER(type, name)
+#define A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT(value)
+#endif
+
+static void submitAndWait(
+	A126_VULKAN_DIAGNOSTIC_PARAMETER(LegacyPassBreakReason, reason));
 static void imageBarrier(VkImage image, VkImageAspectFlags aspect, VkImageLayout oldLayout,
 	VkImageLayout newLayout, VkAccessFlags sourceAccess, VkAccessFlags destinationAccess,
-	VkPipelineStageFlags sourceStage, VkPipelineStageFlags destinationStage);
+	VkPipelineStageFlags sourceStage, VkPipelineStageFlags destinationStage
+	A126_VULKAN_DIAGNOSTIC_TRAILING_PARAMETER(ImageBarrierReason, reason));
+static void transitionImage(ImageResource &image, VkImageAspectFlags aspect,
+	VkImageLayout newLayout, VkAccessFlags destinationAccess,
+	VkPipelineStageFlags destinationStage
+	A126_VULKAN_DIAGNOSTIC_TRAILING_PARAMETER(ImageBarrierReason, reason));
 static VkPipeline presentPipeline();
 static void setFullscreenViewport(VkExtent2D extent);
 
@@ -849,6 +1487,21 @@ static bool deviceSuitable(VkPhysicalDevice device, QueueFamilies &queueFamilies
 	vkGetPhysicalDeviceFeatures(device, &features);
 	if (features.logicOp != VK_TRUE)
 		return false;
+	VkFormatProperties colorFormatProperties = {};
+	vkGetPhysicalDeviceFormatProperties(device, VK_FORMAT_R8G8B8A8_UNORM,
+		&colorFormatProperties);
+	const VkFormatFeatureFlags requiredColorFeatures =
+		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+		VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+		VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+		VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
+		VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+		VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+	if ((colorFormatProperties.optimalTilingFeatures & requiredColorFeatures) !=
+		requiredColorFeatures)
+	{
+		return false;
+	}
 	queueFamilies = findQueueFamilies(device);
 	if (!queueFamilies.complete())
 		return false;
@@ -891,7 +1544,7 @@ static void selectPhysicalDevice()
 	}
 	if (state.physicalDevice == VK_NULL_HANDLE)
 		throw std::runtime_error("no Vulkan 1.1 device with graphics, presentation, "
-			"swapchain, and logic-op support was found");
+			"swapchain, logic-op, and required RGBA8 format support was found");
 	state.physicalProperties = bestProperties;
 	vkGetPhysicalDeviceMemoryProperties(state.physicalDevice, &state.memoryProperties);
 	vkGetPhysicalDeviceFeatures(state.physicalDevice, &state.physicalFeatures);
@@ -991,6 +1644,18 @@ static void createDevice()
 	{
 		std::cout << "vulkan: line rasterization=default-fallback\n";
 	}
+	const bool legacyDitherAvailable =
+		deviceExtensionAvailable(state.physicalDevice, "VK_EXT_legacy_dithering");
+	std::cout << "vulkan: capability_report color_target=VK_FORMAT_R8G8B8A8_UNORM"
+		" texture_storage=VK_FORMAT_R8G8B8A8_UNORM sampled=native"
+		" linear_filter=native transfer_src=native transfer_dst=native"
+		" logic_op=native line_rasterization=" <<
+		(state.lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT ?
+			"bresenham" : "default-fallback") <<
+		" wide_lines=" << (state.wideLinesSupported ? "native" : "width1-fallback") <<
+		" legacy_dither=" <<
+		(legacyDitherAvailable ? "available-not-enabled" : "unavailable-no-emulation") <<
+		" dynamic_state=core\n";
 }
 
 static VkSurfaceFormatKHR chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR> &formats)
@@ -1239,6 +1904,10 @@ static void destroyResidentAllocation(ResidentAllocation *allocation)
 {
 	if (allocation == nullptr)
 		return;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+		state.diagnostics.residentAllocationsReclaimed++;
+#endif
 	if (allocation->page != nullptr)
 		releaseResidentRange(*allocation->page, allocation->offset, allocation->size);
 	if (state.residentGeometryBytes >= allocation->size)
@@ -1308,13 +1977,11 @@ static std::shared_ptr<ResidentAllocation> allocateResidentGeometry(VkDeviceSize
 
 static void releaseResidentGeometry(std::uint64_t residencyId)
 {
-	for (auto entry = state.residentGeometry.begin(); entry != state.residentGeometry.end();)
-	{
-		if (entry->first.residencyId == residencyId)
-			entry = state.residentGeometry.erase(entry);
-		else
-			++entry;
-	}
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled && state.residentGeometry.count(residencyId) != 0)
+		state.diagnostics.residentAllocationsRetired++;
+#endif
+	state.residentGeometry.erase(residencyId);
 }
 
 static StreamAllocation allocateStreamBuffer(VkDeviceSize size, VkDeviceSize alignment)
@@ -1758,7 +2425,8 @@ static void recreateSwapchain()
 {
 	if (state.device == VK_NULL_HANDLE)
 		return;
-	submitAndWait();
+	submitAndWait(A126_VULKAN_DIAGNOSTIC_ARGUMENT(
+		LegacyPassBreakReason::SwapchainRecreate));
 	requireSuccess(vkDeviceWaitIdle(state.device), "vkDeviceWaitIdle");
 	destroyRenderTargets();
 	destroySwapchain();
@@ -1914,7 +2582,8 @@ static VkDescriptorPool createDescriptorPool()
 	return pool;
 }
 
-static VkDescriptorSet allocateDescriptorSet(VkDescriptorSetLayout layout)
+static VkDescriptorSet allocateDescriptorSet(VkDescriptorSetLayout layout
+	A126_VULKAN_DIAGNOSTIC_TRAILING_PARAMETER(DescriptorMetricDomain, domain))
 {
 	FrameResources &frame = currentFrame();
 	for (;;)
@@ -1929,7 +2598,17 @@ static VkDescriptorSet allocateDescriptorSet(VkDescriptorSetLayout layout)
 		VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 		const VkResult result = vkAllocateDescriptorSets(state.device, &allocateInfo, &descriptorSet);
 		if (result == VK_SUCCESS)
+		{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+			if (state.diagnosticsEnabled)
+			{
+				descriptorMetrics(domain).allocations++;
+				if (domain == DescriptorMetricDomain::Present)
+					frame.presentDescriptorAllocations++;
+			}
+#endif
 			return descriptorSet;
+		}
 		if (result != VK_ERROR_OUT_OF_POOL_MEMORY && result != VK_ERROR_FRAGMENTED_POOL)
 			requireSuccess(result, "vkAllocateDescriptorSets");
 		frame.activeDescriptorPool++;
@@ -1939,12 +2618,31 @@ static VkDescriptorSet allocateDescriptorSet(VkDescriptorSetLayout layout)
 static void cleanupSubmittedResources(FrameResources &frame)
 {
 	frame.residentAllocations.clear();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+	{
+		state.diagnostics.transientBuffersRetired += frame.transientBuffers.size();
+		state.diagnostics.transientBuffersReclaimed += frame.transientBuffers.size();
+	}
+#endif
 	for (BufferResource &buffer : frame.transientBuffers)
 		destroyBuffer(buffer);
 	frame.transientBuffers.clear();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+		state.diagnostics.imagesReclaimed += frame.retiredImages.size();
+#endif
 	for (ImageResource &image : frame.retiredImages)
 		destroyImage(image);
 	frame.retiredImages.clear();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+	{
+		state.diagnostics.legacyDescriptors.invalidations += frame.legacyDescriptorCache.size();
+		state.diagnostics.presentDescriptors.invalidations += frame.presentDescriptorAllocations;
+	}
+	frame.presentDescriptorAllocations = 0;
+#endif
 	frame.legacyDescriptorCache.clear();
 	for (VkDescriptorPool pool : frame.descriptorPools)
 		requireSuccess(vkResetDescriptorPool(state.device, pool, 0), "vkResetDescriptorPool");
@@ -1956,6 +2654,10 @@ static void waitForFrame(FrameResources &frame)
 {
 	if (!frame.inFlight)
 		return;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+		state.diagnostics.fenceWaits++;
+#endif
 	requireSuccess(vkWaitForFences(state.device, 1, &frame.fence, VK_TRUE,
 		std::numeric_limits<uint64_t>::max()), "vkWaitForFences");
 	cleanupSubmittedResources(frame);
@@ -1974,6 +2676,10 @@ static void beginCommandRecording()
 	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	requireSuccess(vkBeginCommandBuffer(frame.commandBuffer, &beginInfo), "vkBeginCommandBuffer");
 	frame.commandRecording = true;
+	resetCommandState(frame);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	resetCommandObservation(frame);
+#endif
 
 	if (state.targetsNeedTransition)
 	{
@@ -2008,6 +2714,17 @@ static void beginCommandRecording()
 		vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
 			VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, 0, nullptr, 0, nullptr, 2, barriers);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		observeImageBarriers(ImageBarrierReason::TargetInitialization, 2);
+#endif
+		state.colorTarget.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		state.colorTarget.access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		state.colorTarget.stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		state.depthTarget.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		state.depthTarget.access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		state.depthTarget.stages = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
 		state.targetsNeedTransition = false;
 	}
 }
@@ -2025,23 +2742,36 @@ static void beginLegacyPass()
 	beginInfo.renderArea.extent = state.targetExtent;
 	vkCmdBeginRenderPass(frame.commandBuffer, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
 	frame.legacyPassActive = true;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+		state.diagnostics.legacyPassBegins++;
+#endif
 }
 
-static void endLegacyPass()
+static void endLegacyPass(
+	A126_VULKAN_DIAGNOSTIC_PARAMETER(LegacyPassBreakReason, reason))
 {
 	FrameResources &frame = currentFrame();
 	if (!frame.legacyPassActive)
 		return;
 	vkCmdEndRenderPass(frame.commandBuffer);
 	frame.legacyPassActive = false;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+	{
+		state.diagnostics.legacyPassEnds++;
+		state.diagnostics.legacyPassBreakReasons[static_cast<std::size_t>(reason)]++;
+	}
+#endif
 }
 
-static void submitAndWait()
+static void submitAndWait(
+	A126_VULKAN_DIAGNOSTIC_PARAMETER(LegacyPassBreakReason, reason))
 {
 	FrameResources &frame = currentFrame();
 	if (frame.commandRecording)
 	{
-		endLegacyPass();
+		endLegacyPass(A126_VULKAN_DIAGNOSTIC_ARGUMENT(reason));
 		requireSuccess(vkEndCommandBuffer(frame.commandBuffer), "vkEndCommandBuffer");
 		flushStreamBuffers(frame);
 		requireSuccess(vkResetFences(state.device, 1, &frame.fence), "vkResetFences");
@@ -2063,6 +2793,10 @@ static void retireImage(ImageResource &image)
 	if (image.image == VK_NULL_HANDLE)
 		return;
 	beginCommandRecording();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+		state.diagnostics.imagesRetired++;
+#endif
 	currentFrame().retiredImages.push_back(image);
 	image = ImageResource();
 }
@@ -2072,6 +2806,12 @@ static void destroyResources()
 	if (state.device != VK_NULL_HANDLE)
 	{
 		vkDeviceWaitIdle(state.device);
+		if (state.initialized)
+			savePipelineCache();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnosticsEnabled)
+			state.diagnostics.residentAllocationsRetired += state.residentGeometry.size();
+#endif
 		state.residentGeometry.clear();
 		for (FrameResources &frame : state.frames)
 		{
@@ -2079,12 +2819,30 @@ static void destroyResources()
 			frame.legacyPassActive = false;
 			frame.inFlight = false;
 			frame.residentAllocations.clear();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+			if (state.diagnosticsEnabled)
+			{
+				state.diagnostics.transientBuffersRetired += frame.transientBuffers.size();
+				state.diagnostics.transientBuffersReclaimed += frame.transientBuffers.size();
+			}
+#endif
 			for (BufferResource &buffer : frame.transientBuffers)
 				destroyBuffer(buffer);
 			frame.transientBuffers.clear();
 			for (StreamChunk &chunk : frame.streamChunks)
 				destroyBuffer(chunk.buffer);
 			frame.streamChunks.clear();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+			if (state.diagnosticsEnabled)
+			{
+				state.diagnostics.imagesReclaimed += frame.retiredImages.size();
+				state.diagnostics.legacyDescriptors.invalidations +=
+					frame.legacyDescriptorCache.size();
+				state.diagnostics.presentDescriptors.invalidations +=
+					frame.presentDescriptorAllocations;
+			}
+			frame.presentDescriptorAllocations = 0;
+#endif
 			for (ImageResource &image : frame.retiredImages)
 				destroyImage(image);
 			frame.retiredImages.clear();
@@ -2135,6 +2893,8 @@ static void destroyResources()
 			vkDestroyDescriptorSetLayout(state.device, state.legacyDescriptorSetLayout, nullptr);
 		if (state.commandPool != VK_NULL_HANDLE)
 			vkDestroyCommandPool(state.device, state.commandPool, nullptr);
+		if (state.pipelineCache != VK_NULL_HANDLE)
+			vkDestroyPipelineCache(state.device, state.pipelineCache, nullptr);
 		vkDestroyDevice(state.device, nullptr);
 	}
 	if (state.surface != VK_NULL_HANDLE && state.instance != VK_NULL_HANDLE)
@@ -2155,6 +2915,15 @@ static void initialize()
 {
 	if (state.initialized)
 		return;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	const char *diagnostics = std::getenv("A126_RENDER_DIAGNOSTICS");
+	state.diagnosticsEnabled = diagnostics != nullptr && std::strcmp(diagnostics, "1") == 0;
+	const char *pipelineKeyDump = std::getenv("A126_PIPELINE_KEY_DUMP");
+	if (pipelineKeyDump != nullptr && pipelineKeyDump[0] != '\0')
+		state.pipelineKeyDumpPath = pipelineKeyDump;
+	state.collectPipelineKeys = state.diagnosticsEnabled || !state.pipelineKeyDumpPath.empty();
+#endif
+	state.residentGeometry.reserve(8192);
 	try
 	{
 		platform::createWindow(platform::WindowGraphicsAPI::Vulkan);
@@ -2163,6 +2932,7 @@ static void initialize()
 		platform::createVulkanSurface(reinterpret_cast<void *>(state.instance), &state.surface);
 		selectPhysicalDevice();
 		createDevice();
+		createPipelineCache();
 		createCommandResources();
 		createRendererResources();
 		if (createSwapchain())
@@ -2202,13 +2972,18 @@ static void present()
 		requireSuccess(acquireResult, "vkAcquireNextImageKHR");
 	VkSemaphore renderingFinished = state.renderingFinished[imageIndex];
 
-	endLegacyPass();
+	endLegacyPass(A126_VULKAN_DIAGNOSTIC_ARGUMENT(LegacyPassBreakReason::Present));
 	beginCommandRecording();
-	imageBarrier(state.colorTarget.image, VK_IMAGE_ASPECT_COLOR_BIT,
-		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-	VkDescriptorSet descriptorSet = allocateDescriptorSet(state.presentDescriptorSetLayout);
+	transitionImage(state.colorTarget, VK_IMAGE_ASPECT_COLOR_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_SHADER_READ_BIT,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+		A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT(ImageBarrierReason::PresentToSample));
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+		state.diagnostics.presentDescriptors.lookups++;
+#endif
+	VkDescriptorSet descriptorSet = allocateDescriptorSet(state.presentDescriptorSetLayout
+		A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT(DescriptorMetricDomain::Present));
 	VkDescriptorImageInfo imageInfo = {};
 	imageInfo.sampler = state.presentSampler;
 	imageInfo.imageView = state.colorTarget.view;
@@ -2228,17 +3003,28 @@ static void present()
 	renderPassBeginInfo.framebuffer = state.framebuffers[imageIndex];
 	renderPassBeginInfo.renderArea.extent = state.swapchainExtent;
 	vkCmdBeginRenderPass(frame.commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-	vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, presentPipeline());
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+		state.diagnostics.presentPassBegins++;
+#endif
+	const VkPipeline fullscreenPresentPipeline = presentPipeline();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	observePipelineBind(fullscreenPresentPipeline, PipelineMetricDomain::Present);
+#endif
+	bindGraphicsPipeline(fullscreenPresentPipeline, BoundPipelineDomain::Present);
 	setFullscreenViewport(state.swapchainExtent);
 	vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		state.presentPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 	vkCmdDraw(frame.commandBuffer, 3, 1, 0, 0);
 	vkCmdEndRenderPass(frame.commandBuffer);
-	imageBarrier(state.colorTarget.image, VK_IMAGE_ASPECT_COLOR_BIT,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-		VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+		state.diagnostics.presentPassEnds++;
+#endif
+	transitionImage(state.colorTarget, VK_IMAGE_ASPECT_COLOR_BIT,
+		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+		VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+		A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT(ImageBarrierReason::PresentToRender));
 	requireSuccess(vkEndCommandBuffer(frame.commandBuffer), "vkEndCommandBuffer");
 
 	flushStreamBuffers(frame);
@@ -2278,12 +3064,200 @@ static void present()
 	}
 }
 
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+static const char *pipelineTopologyName(legacygl::Topology topology)
+{
+	switch (topology)
+	{
+		case legacygl::Topology::Points: return "points";
+		case legacygl::Topology::Lines: return "lines";
+		case legacygl::Topology::Triangles: return "triangles";
+	}
+	return "unknown";
+}
+
+static const char *formatName(VkFormat format)
+{
+	switch (format)
+	{
+		case VK_FORMAT_R8G8B8A8_UNORM: return "VK_FORMAT_R8G8B8A8_UNORM";
+		case VK_FORMAT_D24_UNORM_S8_UINT: return "VK_FORMAT_D24_UNORM_S8_UINT";
+		case VK_FORMAT_D32_SFLOAT_S8_UINT: return "VK_FORMAT_D32_SFLOAT_S8_UINT";
+		case VK_FORMAT_D32_SFLOAT: return "VK_FORMAT_D32_SFLOAT";
+		case VK_FORMAT_UNDEFINED: return "VK_FORMAT_UNDEFINED";
+		default: return "VK_FORMAT_UNKNOWN";
+	}
+}
+
+static void writePipelineKeyDump()
+{
+	if (state.pipelineKeyDumpPath.empty())
+		return;
+	std::FILE *output = std::fopen(state.pipelineKeyDumpPath.c_str(), "wb");
+	if (output == nullptr)
+	{
+		std::fprintf(stderr, "vulkan: could not open pipeline-key dump '%s'\n",
+			state.pipelineKeyDumpPath.c_str());
+		return;
+	}
+	std::fprintf(output, "pipeline_key_dump_version=1\n");
+	std::fprintf(output, "backend=vulkan\n");
+	std::fprintf(output, "backend_abi=%u\n", VULKAN_PIPELINE_KEY_ABI_VERSION);
+	std::fprintf(output, "target_format=%s\n", formatName(VK_FORMAT_R8G8B8A8_UNORM));
+	std::fprintf(output, "target_format_value=%d\n", static_cast<int>(VK_FORMAT_R8G8B8A8_UNORM));
+	std::fprintf(output, "depth_format=%s\n", formatName(state.depthFormat));
+	std::fprintf(output, "depth_format_value=%d\n", static_cast<int>(state.depthFormat));
+	std::fprintf(output, "samples=1\n");
+	std::fprintf(output, "unique_keys=%zu\n", state.observedPipelineKeys.size());
+	std::size_t index = 0;
+	for (const PipelineKey &key : state.observedPipelineKeys)
+	{
+		std::fprintf(output,
+			"key[%zu] topology=%s depth_test=%u depth_write=%u depth_function=0x%x "
+			"cull_face=%u cull_face_mode=0x%x front_face_mode=0x%x blend=%u "
+			"blend_source=0x%x blend_destination=0x%x logic_op=%u logic_opcode=0x%x "
+			"color_write_mask=0x%x depth_bias=%u stencil_test=%u\n",
+			index, pipelineTopologyName(key.topology), key.depthTest ? 1u : 0u,
+			key.depthWrite ? 1u : 0u, key.depthFunction, key.cullFace ? 1u : 0u,
+			key.cullFaceMode, key.frontFaceMode, key.blend ? 1u : 0u, key.blendSource,
+			key.blendDestination, key.logicOp ? 1u : 0u, key.logicOpcode,
+			key.colorWriteMask, key.depthBias ? 1u : 0u, key.stencilTest ? 1u : 0u);
+		index++;
+	}
+	if (std::fclose(output) != 0)
+	{
+		std::fprintf(stderr, "vulkan: failed to finish pipeline-key dump '%s'\n",
+			state.pipelineKeyDumpPath.c_str());
+	}
+}
+
+static void reportDiagnostics()
+{
+	if (!state.diagnosticsEnabled)
+		return;
+	static const char *imageBarrierReasonNames[] = {
+		"target_initialization",
+		"present_to_sample",
+		"present_to_render",
+		"texture_new_to_transfer",
+		"texture_reuse_to_transfer",
+		"texture_upload_to_sample",
+		"readback_to_transfer",
+		"readback_to_render"
+	};
+	static const char *legacyPassBreakReasonNames[] = {
+		"submit",
+		"present",
+		"texture_upload",
+		"readback",
+		"finish",
+		"shutdown",
+		"swapchain_recreate"
+	};
+	const VulkanDiagnostics &diagnostics = state.diagnostics;
+	const PipelineMetrics *pipelineDomains[] = {
+		&diagnostics.legacyPipelines,
+		&diagnostics.maskedClearPipelines,
+		&diagnostics.presentPipelines
+	};
+	const char *pipelineDomainNames[] = { "legacy", "masked_clear", "present" };
+	const std::size_t pipelineUniqueKeys[] = {
+		state.observedPipelineKeys.size(),
+		state.observedMaskedClearPipelineKeys.size(),
+		diagnostics.presentPipelines.lookups == 0 ? 0u : 1u
+	};
+	for (std::size_t i = 0; i < 3; i++)
+	{
+		const PipelineMetrics &metrics = *pipelineDomains[i];
+		std::cout << "vulkan diagnostics: pipeline." << pipelineDomainNames[i] <<
+			".lookups=" << metrics.lookups <<
+			", pipeline." << pipelineDomainNames[i] << ".current_hits=" << metrics.currentHits <<
+			", pipeline." << pipelineDomainNames[i] << ".cache_hits=" << metrics.cacheHits <<
+			", pipeline." << pipelineDomainNames[i] << ".creates=" << metrics.creates <<
+			", pipeline." << pipelineDomainNames[i] << ".create_ns_total=" <<
+				metrics.createNanoseconds <<
+			", pipeline." << pipelineDomainNames[i] << ".unique_keys=" << pipelineUniqueKeys[i] <<
+			", pipeline." << pipelineDomainNames[i] << ".bind_requests=" << metrics.binds <<
+			", pipeline." << pipelineDomainNames[i] << ".binds_emitted=" <<
+				metrics.binds - metrics.redundantBindCandidates <<
+			", pipeline." << pipelineDomainNames[i] << ".binds_suppressed=" <<
+				metrics.redundantBindCandidates << '\n';
+	}
+	const DescriptorMetrics *descriptorDomains[] = {
+		&diagnostics.legacyDescriptors,
+		&diagnostics.presentDescriptors
+	};
+	const char *descriptorDomainNames[] = { "legacy", "present" };
+	for (std::size_t i = 0; i < 2; i++)
+	{
+		const DescriptorMetrics &metrics = *descriptorDomains[i];
+		std::cout << "vulkan diagnostics: descriptor." << descriptorDomainNames[i] <<
+			".lookups=" << metrics.lookups <<
+			", descriptor." << descriptorDomainNames[i] << ".hits=" << metrics.hits <<
+			", descriptor." << descriptorDomainNames[i] << ".allocations=" << metrics.allocations <<
+			", descriptor." << descriptorDomainNames[i] << ".invalidations=" <<
+				metrics.invalidations << '\n';
+	}
+	std::cout << "vulkan diagnostics: dynamic.viewport_requests=" << diagnostics.viewportEmits <<
+		", dynamic.viewport_emits=" << diagnostics.viewportEmits -
+			diagnostics.viewportRedundantCandidates <<
+		", dynamic.viewport_suppressed=" << diagnostics.viewportRedundantCandidates <<
+		", dynamic.scissor_requests=" << diagnostics.scissorEmits <<
+		", dynamic.scissor_emits=" << diagnostics.scissorEmits -
+			diagnostics.scissorRedundantCandidates <<
+		", dynamic.scissor_suppressed=" << diagnostics.scissorRedundantCandidates <<
+		", dynamic.line_width_requests=" << diagnostics.lineWidthEmits <<
+		", dynamic.line_width_emits=" << diagnostics.lineWidthEmits -
+			diagnostics.lineWidthRedundantCandidates <<
+		", dynamic.line_width_suppressed=" << diagnostics.lineWidthRedundantCandidates <<
+		", dynamic.depth_bias_requests=" << diagnostics.depthBiasEmits <<
+		", dynamic.depth_bias_emits=" << diagnostics.depthBiasEmits -
+			diagnostics.depthBiasRedundantCandidates <<
+		", dynamic.depth_bias_suppressed=" << diagnostics.depthBiasRedundantCandidates << '\n';
+	std::cout << "vulkan diagnostics: barrier.image_count=" << diagnostics.imageBarriersEmitted <<
+		", barrier.image_skipped=" << diagnostics.imageBarriersSkipped <<
+		", barrier.buffer_count=0\n";
+	for (std::size_t i = 0; i < static_cast<std::size_t>(ImageBarrierReason::Count); i++)
+	{
+		std::cout << "vulkan diagnostics: barrier.by_reason[" << imageBarrierReasonNames[i] <<
+			"]=" << diagnostics.imageBarrierReasons[i] << '\n';
+	}
+	std::cout << "vulkan diagnostics: render_pass.legacy.begin_count=" <<
+		diagnostics.legacyPassBegins << ", render_pass.legacy.end_count=" <<
+		diagnostics.legacyPassEnds << '\n';
+	std::cout << "vulkan diagnostics: render_pass.present.begin_count=" <<
+		diagnostics.presentPassBegins << ", render_pass.present.end_count=" <<
+		diagnostics.presentPassEnds << '\n';
+	for (std::size_t i = 0; i < static_cast<std::size_t>(LegacyPassBreakReason::Count); i++)
+	{
+		std::cout << "vulkan diagnostics: render_pass.legacy.break_reason[" <<
+			legacyPassBreakReasonNames[i] << "]=" << diagnostics.legacyPassBreakReasons[i] << '\n';
+	}
+	std::cout << "vulkan diagnostics: retire.images_queued=" << diagnostics.imagesRetired <<
+		", retire.images_reclaimed=" << diagnostics.imagesReclaimed <<
+		", retire.resident_allocations_queued=" << diagnostics.residentAllocationsRetired <<
+		", retire.resident_allocations_reclaimed=" <<
+			diagnostics.residentAllocationsReclaimed <<
+		", retire.transient_buffers_queued=" << diagnostics.transientBuffersRetired <<
+		", retire.transient_buffers_reclaimed=" << diagnostics.transientBuffersReclaimed << '\n';
+	std::cout << "vulkan diagnostics: retire.objects_queued=" << diagnostics.imagesRetired +
+		diagnostics.residentAllocationsRetired + diagnostics.transientBuffersRetired <<
+		", retire.objects_reclaimed=" << diagnostics.imagesReclaimed +
+		diagnostics.residentAllocationsReclaimed + diagnostics.transientBuffersReclaimed << '\n';
+	std::cout << "vulkan diagnostics: sync.fence_waits=" << diagnostics.fenceWaits <<
+		", sync.finish_drains=" << diagnostics.finishDrains << '\n';
+}
+#endif
+
 static void shutdown()
 {
 	if (!state.initialized && state.instance == VK_NULL_HANDLE)
 		return;
 	if (state.initialized)
-		submitAndWait();
+		submitAndWait(A126_VULKAN_DIAGNOSTIC_ARGUMENT(LegacyPassBreakReason::Shutdown));
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	writePipelineKeyDump();
+#endif
 	const std::uint64_t residentCacheHits = state.residentGeometryCacheHits;
 	const std::uint64_t residentCacheMisses = state.residentGeometryCacheMisses;
 	const VkDeviceSize residentBytes = state.residentGeometryPeakBytes;
@@ -2296,6 +3270,9 @@ static void shutdown()
 	const std::uint64_t textureImageReuses = state.textureImageReuses;
 	const std::uint64_t textureUploadBytes = state.textureUploadBytes;
 	const std::uint64_t drawableSizeQueries = state.drawableSizeQueries;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	reportDiagnostics();
+#endif
 	state = State();
 	std::cout << "vulkan: shutdown, validation errors=" << validationErrors <<
 		", descriptor cache hits=" << descriptorCacheHits <<
@@ -2320,86 +3297,10 @@ static void copy4(float *destination, const float *source)
 	std::memcpy(destination, source, sizeof(float) * 4);
 }
 
-static int pixelComponents(unsigned int format)
-{
-	switch (format)
-	{
-		case GL_RGBA:
-		case GL_BGRA_EXT:
-			return 4;
-		case GL_RGB:
-		case GL_BGR_EXT:
-			return 3;
-		case GL_LUMINANCE_ALPHA:
-			return 2;
-		case GL_ALPHA:
-		case GL_LUMINANCE:
-			return 1;
-		default:
-			return 0;
-	}
-}
-
 static std::size_t alignedRowSize(std::size_t rowSize, int alignment)
 {
 	const std::size_t value = static_cast<std::size_t>(alignment);
 	return (rowSize + value - 1) / value * value;
-}
-
-static void decodePixel(const unsigned char *source, unsigned int format, unsigned char *rgba)
-{
-	switch (format)
-	{
-		case GL_RGBA:
-			rgba[0] = source[0]; rgba[1] = source[1]; rgba[2] = source[2]; rgba[3] = source[3];
-			break;
-		case GL_BGRA_EXT:
-			rgba[0] = source[2]; rgba[1] = source[1]; rgba[2] = source[0]; rgba[3] = source[3];
-			break;
-		case GL_RGB:
-			rgba[0] = source[0]; rgba[1] = source[1]; rgba[2] = source[2]; rgba[3] = 255;
-			break;
-		case GL_BGR_EXT:
-			rgba[0] = source[2]; rgba[1] = source[1]; rgba[2] = source[0]; rgba[3] = 255;
-			break;
-		case GL_LUMINANCE_ALPHA:
-			rgba[0] = source[0]; rgba[1] = source[0]; rgba[2] = source[0]; rgba[3] = source[1];
-			break;
-		case GL_ALPHA:
-			rgba[0] = 255; rgba[1] = 255; rgba[2] = 255; rgba[3] = source[0];
-			break;
-		default:
-			rgba[0] = source[0]; rgba[1] = source[0]; rgba[2] = source[0]; rgba[3] = 255;
-			break;
-	}
-}
-
-static void encodePixel(const unsigned char *rgba, unsigned int format, unsigned char *destination)
-{
-	switch (format)
-	{
-		case GL_RGBA:
-			destination[0] = rgba[0]; destination[1] = rgba[1]; destination[2] = rgba[2]; destination[3] = rgba[3];
-			break;
-		case GL_BGRA_EXT:
-			destination[0] = rgba[2]; destination[1] = rgba[1]; destination[2] = rgba[0]; destination[3] = rgba[3];
-			break;
-		case GL_RGB:
-			destination[0] = rgba[0]; destination[1] = rgba[1]; destination[2] = rgba[2];
-			break;
-		case GL_BGR_EXT:
-			destination[0] = rgba[2]; destination[1] = rgba[1]; destination[2] = rgba[0];
-			break;
-		case GL_LUMINANCE_ALPHA:
-			destination[0] = rgba[0]; destination[1] = rgba[3];
-			break;
-		case GL_ALPHA:
-			destination[0] = rgba[3];
-			break;
-		default:
-			destination[0] = rgba[0];
-			break;
-	}
 }
 
 static unsigned int alphaFunction(unsigned int function)
@@ -2484,38 +3385,6 @@ static VulkanGPUVertex makeGPUVertex(const legacygl::Vertex &vertex, const legac
 	return result;
 }
 
-static std::uint32_t floatBits(float value)
-{
-	std::uint32_t result = 0;
-	std::memcpy(&result, &value, sizeof(result));
-	return result;
-}
-
-static ResidentGeometryVariantKey residentGeometryKey(const legacygl::ResolvedDraw &command)
-{
-	ResidentGeometryVariantKey key;
-	key.residencyId = command.geometryResidencyId;
-	const legacygl::Geometry &geometry = *command.geometry;
-	const legacygl::Vertex &resolved = geometry.vertices.front();
-	if (!geometry.hasColor)
-	{
-		key.missingAttributes |= 1u;
-		key.color = { floatBits(resolved.r), floatBits(resolved.g), floatBits(resolved.b),
-			floatBits(resolved.a) };
-	}
-	if (!geometry.hasNormal)
-	{
-		key.missingAttributes |= 2u;
-		key.normal = { floatBits(resolved.nx), floatBits(resolved.ny), floatBits(resolved.nz) };
-	}
-	if (!geometry.hasTexCoord)
-	{
-		key.missingAttributes |= 4u;
-		key.texCoord = { floatBits(resolved.s), floatBits(resolved.t) };
-	}
-	return key;
-}
-
 static void writeGPUVertices(const legacygl::ResolvedDraw &command, int verticesPerPrimitive,
 	void *destination)
 {
@@ -2539,12 +3408,14 @@ static const ResidentGeometryEntry &residentGeometryEntry(
 	const legacygl::ResolvedDraw &command, int verticesPerPrimitive,
 	std::size_t vertexCount, VkDeviceSize vertexBytes)
 {
-	const ResidentGeometryVariantKey key = residentGeometryKey(command);
-	auto found = state.residentGeometry.find(key);
+	auto found = state.residentGeometry.find(command.geometryResidencyId);
 	if (found != state.residentGeometry.end())
 	{
 		if (found->second.topology != command.primitives->topology ||
-			found->second.vertexCount != vertexCount)
+			found->second.vertexCount != vertexCount ||
+			found->second.hasColor != command.geometry->hasColor ||
+			found->second.hasNormal != command.geometry->hasNormal ||
+			found->second.hasTexCoord != command.geometry->hasTexCoord)
 		{
 			throw std::runtime_error("Vulkan resident geometry identity changed while cached");
 		}
@@ -2560,11 +3431,15 @@ static const ResidentGeometryEntry &residentGeometryEntry(
 		static_cast<VkDeviceSize>(alignof(VulkanGPUVertex)));
 	entry.topology = command.primitives->topology;
 	entry.vertexCount = static_cast<uint32_t>(vertexCount);
+	entry.hasColor = command.geometry->hasColor;
+	entry.hasNormal = command.geometry->hasNormal;
+	entry.hasTexCoord = command.geometry->hasTexCoord;
 	void *destination = static_cast<unsigned char *>(entry.allocation->page->buffer.mapped) +
 		entry.allocation->offset;
 	writeGPUVertices(command, verticesPerPrimitive, destination);
 	flushBufferRange(entry.allocation->page->buffer, entry.allocation->offset, vertexBytes);
-	return state.residentGeometry.emplace(key, std::move(entry)).first->second;
+	return state.residentGeometry.emplace(command.geometryResidencyId,
+		std::move(entry)).first->second;
 }
 
 static void fillGPUState(const legacygl::ResolvedDraw &command, VulkanGPUState &gpuState)
@@ -2621,6 +3496,18 @@ static void fillGPUState(const legacygl::ResolvedDraw &command, VulkanGPUState &
 	gpuState.flags3[0] = colorMaterialFace(command.lighting.colorMaterialFace);
 	gpuState.flags3[1] = colorMaterialMode(command.lighting.colorMaterialMode);
 	gpuState.flags3[2] = command.texture.complete ? 1u : 0u;
+	gpuState.currentColor[0] = command.currentAttributes.r;
+	gpuState.currentColor[1] = command.currentAttributes.g;
+	gpuState.currentColor[2] = command.currentAttributes.b;
+	gpuState.currentColor[3] = command.currentAttributes.a;
+	gpuState.currentNormal[0] = command.currentAttributes.nx;
+	gpuState.currentNormal[1] = command.currentAttributes.ny;
+	gpuState.currentNormal[2] = command.currentAttributes.nz;
+	gpuState.currentTexCoord[0] = command.currentAttributes.s;
+	gpuState.currentTexCoord[1] = command.currentAttributes.t;
+	gpuState.flags4[0] = command.geometry->hasColor ? 1u : 0u;
+	gpuState.flags4[1] = command.geometry->hasNormal ? 1u : 0u;
+	gpuState.flags4[2] = command.geometry->hasTexCoord ? 1u : 0u;
 }
 
 static VkPrimitiveTopology primitiveTopology(legacygl::Topology topology)
@@ -2821,12 +3708,12 @@ static VkPipeline createLegacyPipeline(const PipelineKey &key)
 	createInfo.layout = state.legacyPipelineLayout;
 	createInfo.renderPass = state.legacyRenderPass;
 	VkPipeline pipeline = VK_NULL_HANDLE;
-	requireSuccess(vkCreateGraphicsPipelines(state.device, VK_NULL_HANDLE, 1, &createInfo, nullptr,
+	requireSuccess(vkCreateGraphicsPipelines(state.device, state.pipelineCache, 1, &createInfo, nullptr,
 		&pipeline), "vkCreateGraphicsPipelines(legacy)");
 	return pipeline;
 }
 
-static VkPipeline legacyPipeline(const legacygl::ResolvedDraw &command)
+static PipelineKey legacyPipelineKey(const legacygl::ResolvedDraw &command)
 {
 	PipelineKey key;
 	key.topology = command.primitives->topology;
@@ -2845,19 +3732,55 @@ static VkPipeline legacyPipeline(const legacygl::ResolvedDraw &command)
 	key.depthBias = command.enables.polygonOffsetFill &&
 		command.primitives->topology == legacygl::Topology::Triangles;
 	key.stencilTest = command.enables.stencilTest;
+	return key;
+}
+
+static VkPipeline legacyPipeline(const PipelineKey &key)
+{
 	if (key.logicOp && !state.logicOpSupported)
 		throw std::runtime_error("Vulkan device cannot emulate enabled GL_COLOR_LOGIC_OP");
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	observeLegacyPipelineLookup(key);
+	if (state.collectPipelineKeys)
+		state.observedPipelineKeys.insert(key);
+#endif
+	const VkPipeline current = currentLegacyPipeline(key);
+	if (current != VK_NULL_HANDLE)
+		return current;
 	auto found = state.pipelines.find(key);
 	if (found != state.pipelines.end())
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnosticsEnabled)
+			state.diagnostics.legacyPipelines.cacheHits++;
+#endif
 		return found->second;
+	}
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	std::chrono::steady_clock::time_point creationStart;
+	if (state.diagnosticsEnabled)
+		creationStart = std::chrono::steady_clock::now();
+#endif
 	VkPipeline pipeline = createLegacyPipeline(key);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+	{
+		const std::chrono::steady_clock::time_point creationEnd =
+			std::chrono::steady_clock::now();
+		state.diagnostics.legacyPipelines.creates++;
+		state.diagnostics.legacyPipelines.createNanoseconds += static_cast<std::uint64_t>(
+			std::chrono::duration_cast<std::chrono::nanoseconds>(
+			creationEnd - creationStart).count());
+	}
+#endif
 	state.pipelines.emplace(key, pipeline);
 	return pipeline;
 }
 
 static void imageBarrier(VkImage image, VkImageAspectFlags aspect, VkImageLayout oldLayout,
 	VkImageLayout newLayout, VkAccessFlags sourceAccess, VkAccessFlags destinationAccess,
-	VkPipelineStageFlags sourceStage, VkPipelineStageFlags destinationStage)
+	VkPipelineStageFlags sourceStage, VkPipelineStageFlags destinationStage
+	A126_VULKAN_DIAGNOSTIC_TRAILING_PARAMETER(ImageBarrierReason, reason))
 {
 	VkImageMemoryBarrier barrier = {};
 	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -2873,11 +3796,38 @@ static void imageBarrier(VkImage image, VkImageAspectFlags aspect, VkImageLayout
 	barrier.dstAccessMask = destinationAccess;
 	vkCmdPipelineBarrier(currentFrame().commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0,
 		nullptr, 1, &barrier);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	observeImageBarriers(reason, 1);
+#endif
+}
+
+static void transitionImage(ImageResource &image, VkImageAspectFlags aspect,
+	VkImageLayout newLayout, VkAccessFlags destinationAccess,
+	VkPipelineStageFlags destinationStage
+	A126_VULKAN_DIAGNOSTIC_TRAILING_PARAMETER(ImageBarrierReason, reason))
+{
+	if (image.image == VK_NULL_HANDLE)
+		throw std::runtime_error("Vulkan image transition received a null resource");
+	if (image.layout == newLayout && image.access == destinationAccess &&
+		image.stages == destinationStage)
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnosticsEnabled)
+			state.diagnostics.imageBarriersSkipped++;
+#endif
+		return;
+	}
+	imageBarrier(image.image, aspect, image.layout, newLayout, image.access,
+		destinationAccess, image.stages, destinationStage
+		A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT(reason));
+	image.layout = newLayout;
+	image.access = destinationAccess;
+	image.stages = destinationStage;
 }
 
 static void uploadRGBAImage(ImageResource &image, const unsigned char *pixels, int width, int height)
 {
-	endLegacyPass();
+	endLegacyPass(A126_VULKAN_DIAGNOSTIC_ARGUMENT(LegacyPassBreakReason::TextureUpload));
 	beginCommandRecording();
 	const uint32_t imageWidth = static_cast<uint32_t>(width);
 	const uint32_t imageHeight = static_cast<uint32_t>(height);
@@ -2904,18 +3854,17 @@ static void uploadRGBAImage(ImageResource &image, const unsigned char *pixels, i
 	copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	copy.imageSubresource.layerCount = 1;
 	copy.imageExtent = { imageWidth, imageHeight, 1 };
-	imageBarrier(image.image, VK_IMAGE_ASPECT_COLOR_BIT,
-		reuseImage ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
-		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		reuseImage ? VK_ACCESS_SHADER_READ_BIT : 0, VK_ACCESS_TRANSFER_WRITE_BIT,
-		reuseImage ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-		VK_PIPELINE_STAGE_TRANSFER_BIT);
+	transitionImage(image, VK_IMAGE_ASPECT_COLOR_BIT,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_PIPELINE_STAGE_TRANSFER_BIT
+		A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT(reuseImage ?
+			ImageBarrierReason::TextureReuseToTransfer : ImageBarrierReason::TextureNewToTransfer));
 	vkCmdCopyBufferToImage(currentFrame().commandBuffer, staging.buffer, image.image,
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-	imageBarrier(image.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
-		VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+	transitionImage(image, VK_IMAGE_ASPECT_COLOR_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_SHADER_READ_BIT,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+		A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT(ImageBarrierReason::TextureUploadToSample));
 }
 
 static void ensureFallbackTexture()
@@ -3035,12 +3984,20 @@ struct TextureBinding
 static VkDescriptorSet legacyDescriptorSet(VkBuffer uniformBuffer, const TextureBinding &texture)
 {
 	FrameResources &frame = currentFrame();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+		state.diagnostics.legacyDescriptors.lookups++;
+#endif
 	for (const LegacyDescriptorEntry &entry : frame.legacyDescriptorCache)
 	{
 		if (entry.uniformBuffer == uniformBuffer && entry.imageView == texture.view &&
 			entry.sampler == texture.sampler)
 		{
 			state.legacyDescriptorCacheHits++;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+			if (state.diagnosticsEnabled)
+				state.diagnostics.legacyDescriptors.hits++;
+#endif
 			return entry.descriptorSet;
 		}
 	}
@@ -3050,7 +4007,8 @@ static VkDescriptorSet legacyDescriptorSet(VkBuffer uniformBuffer, const Texture
 	entry.uniformBuffer = uniformBuffer;
 	entry.imageView = texture.view;
 	entry.sampler = texture.sampler;
-	entry.descriptorSet = allocateDescriptorSet(state.legacyDescriptorSetLayout);
+	entry.descriptorSet = allocateDescriptorSet(state.legacyDescriptorSetLayout
+		A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT(DescriptorMetricDomain::Legacy));
 	VkDescriptorBufferInfo bufferInfo = {};
 	bufferInfo.buffer = uniformBuffer;
 	bufferInfo.range = sizeof(VulkanGPUState);
@@ -3166,31 +4124,81 @@ static VkPipeline createFullscreenPipeline(VkShaderModule vertexShader, VkShader
 	createInfo.layout = layout;
 	createInfo.renderPass = renderPass;
 	VkPipeline pipeline = VK_NULL_HANDLE;
-	requireSuccess(vkCreateGraphicsPipelines(state.device, VK_NULL_HANDLE, 1, &createInfo, nullptr,
+	requireSuccess(vkCreateGraphicsPipelines(state.device, state.pipelineCache, 1, &createInfo, nullptr,
 		&pipeline), "vkCreateGraphicsPipelines(fullscreen)");
 	return pipeline;
 }
 
 static VkPipeline clearPipeline(unsigned int writeMask)
 {
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	observeMaskedClearPipelineLookup(writeMask);
+#endif
 	auto found = state.clearPipelines.find(writeMask);
 	if (found != state.clearPipelines.end())
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnosticsEnabled)
+			state.diagnostics.maskedClearPipelines.cacheHits++;
+#endif
 		return found->second;
+	}
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	std::chrono::steady_clock::time_point creationStart;
+	if (state.diagnosticsEnabled)
+		creationStart = std::chrono::steady_clock::now();
+#endif
 	VkPipeline pipeline = createFullscreenPipeline(state.clearVertexShader, state.clearFragmentShader,
 		state.clearPipelineLayout, state.legacyRenderPass, writeMask);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnosticsEnabled)
+	{
+		const std::chrono::steady_clock::time_point creationEnd =
+			std::chrono::steady_clock::now();
+		state.diagnostics.maskedClearPipelines.creates++;
+		state.diagnostics.maskedClearPipelines.createNanoseconds += static_cast<std::uint64_t>(
+			std::chrono::duration_cast<std::chrono::nanoseconds>(
+			creationEnd - creationStart).count());
+	}
+#endif
 	state.clearPipelines.emplace(writeMask, pipeline);
 	return pipeline;
 }
 
 static VkPipeline presentPipeline()
 {
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	observePresentPipelineLookup();
+#endif
 	if (state.presentPipeline == VK_NULL_HANDLE)
 	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		std::chrono::steady_clock::time_point creationStart;
+		if (state.diagnosticsEnabled)
+			creationStart = std::chrono::steady_clock::now();
+#endif
 		state.presentPipeline = createFullscreenPipeline(state.presentVertexShader,
 			state.presentFragmentShader, state.presentPipelineLayout, state.renderPass,
 			VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
 			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnosticsEnabled)
+		{
+			const std::chrono::steady_clock::time_point creationEnd =
+				std::chrono::steady_clock::now();
+			state.diagnostics.presentPipelines.creates++;
+			state.diagnostics.presentPipelines.createNanoseconds += static_cast<std::uint64_t>(
+				std::chrono::duration_cast<std::chrono::nanoseconds>(
+				creationEnd - creationStart).count());
+		}
+#endif
 	}
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	else if (state.diagnosticsEnabled)
+	{
+		state.diagnostics.presentPipelines.cacheHits++;
+	}
+#endif
 	return state.presentPipeline;
 }
 
@@ -3202,8 +4210,14 @@ static void setFullscreenViewport(VkExtent2D extent)
 	viewport.maxDepth = 1.0f;
 	VkRect2D scissor = {};
 	scissor.extent = extent;
-	vkCmdSetViewport(currentFrame().commandBuffer, 0, 1, &viewport);
-	vkCmdSetScissor(currentFrame().commandBuffer, 0, 1, &scissor);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	observeViewport(viewport);
+#endif
+	setViewportState(viewport);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	observeScissor(scissor);
+#endif
+	setScissorState(scissor);
 }
 
 class VulkanSink final : public legacygl::Sink
@@ -3338,7 +4352,13 @@ public:
 	void finish() override
 	{
 		if (state.device != VK_NULL_HANDLE)
-			submitAndWait();
+		{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+			if (state.diagnosticsEnabled)
+				state.diagnostics.finishDrains++;
+#endif
+			submitAndWait(A126_VULKAN_DIAGNOSTIC_ARGUMENT(LegacyPassBreakReason::Finish));
+		}
 	}
 
 	bool wantsCanonicalGeometry() const override
@@ -3406,8 +4426,13 @@ public:
 			for (int i = 0; i < 4; i++)
 				push.color[i] = command.color[i];
 			push.depth = static_cast<float>(command.depth);
-			vkCmdBindPipeline(currentFrame().commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-				clearPipeline(writeMask));
+			const VkPipeline maskedClearPipeline = clearPipeline(writeMask);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+			observePipelineBind(maskedClearPipeline, PipelineMetricDomain::MaskedClear,
+				nullptr, writeMask);
+#endif
+			bindGraphicsPipeline(maskedClearPipeline, BoundPipelineDomain::MaskedClear,
+				nullptr, writeMask);
 			setFullscreenViewport(state.targetExtent);
 			vkCmdPushConstants(currentFrame().commandBuffer, state.clearPipelineLayout,
 				VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
@@ -3474,8 +4499,12 @@ public:
 		const uint32_t uniformOffset = static_cast<uint32_t>(uniformUpload.offset);
 		const VkDescriptorSet descriptorSet = legacyDescriptorSet(uniformUpload.buffer, texture);
 
-		vkCmdBindPipeline(currentFrame().commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			legacyPipeline(command));
+		const PipelineKey key = legacyPipelineKey(command);
+		const VkPipeline pipeline = legacyPipeline(key);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		observePipelineBind(pipeline, PipelineMetricDomain::Legacy, &key);
+#endif
+		bindGraphicsPipeline(pipeline, BoundPipelineDomain::Legacy, &key);
 		VkViewport viewport = {};
 		viewport.x = static_cast<float>(command.pipeline.viewport[0]);
 		viewport.y = static_cast<float>(static_cast<int>(state.targetExtent.height) -
@@ -3488,8 +4517,14 @@ public:
 		viewport.maxDepth = 1.0f;
 		VkRect2D scissor = {};
 		scissor.extent = state.targetExtent;
-		vkCmdSetViewport(currentFrame().commandBuffer, 0, 1, &viewport);
-		vkCmdSetScissor(currentFrame().commandBuffer, 0, 1, &scissor);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		observeViewport(viewport);
+#endif
+		setViewportState(viewport);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		observeScissor(scissor);
+#endif
+		setScissorState(scissor);
 		float lineWidth = command.pipeline.lineWidth;
 		if (!state.wideLinesSupported || lineWidth < state.physicalProperties.limits.lineWidthRange[0] ||
 			lineWidth > state.physicalProperties.limits.lineWidthRange[1])
@@ -3502,8 +4537,15 @@ public:
 				lineWidthFallbackReported = true;
 			}
 		}
-		vkCmdSetLineWidth(currentFrame().commandBuffer, lineWidth);
-		vkCmdSetDepthBias(currentFrame().commandBuffer, command.pipeline.polygonOffsetUnits, 0.0f,
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		observeLineWidth(lineWidth);
+#endif
+		setLineWidthState(lineWidth);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		observeDepthBias(command.pipeline.polygonOffsetUnits, 0.0f,
+			command.pipeline.polygonOffsetFactor);
+#endif
+		setDepthBiasState(command.pipeline.polygonOffsetUnits, 0.0f,
 			command.pipeline.polygonOffsetFactor);
 		vkCmdBindVertexBuffers(currentFrame().commandBuffer, 0, 1, &vertexBuffer, &vertexOffset);
 		vkCmdBindDescriptorSets(currentFrame().commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -3525,9 +4567,18 @@ public:
 			level.rgba.assign(static_cast<std::size_t>(command.width) *
 				static_cast<std::size_t>(command.height) * 4, 0);
 		}
+		const legacygl::PixelTransferFormat *transfer =
+			legacygl::unsignedBytePixelTransferFormat(command.sourceFormat);
+		legacygl::PixelStorageFormat storage;
+		if (command.sourceType != GL_UNSIGNED_BYTE || transfer == nullptr ||
+			!legacygl::pixelStorageFormat(command.internalFormat, storage) ||
+			storage.physical != legacygl::PhysicalPixelFormat::RGBA8)
+		{
+			throw std::runtime_error("Vulkan texture upload received an unsupported pixel format");
+		}
 		if (command.pixels != nullptr && command.width > 0 && command.height > 0)
 		{
-			const int components = pixelComponents(command.sourceFormat);
+			const int components = transfer->components;
 			const std::size_t sourceRow = alignedRowSize(static_cast<std::size_t>(command.width) *
 				static_cast<std::size_t>(components), command.unpackAlignment);
 			const unsigned char *source = static_cast<const unsigned char *>(command.pixels);
@@ -3536,9 +4587,14 @@ public:
 				for (int x = 0; x < command.width; x++)
 				{
 					unsigned char rgba[4];
-					decodePixel(source + static_cast<std::size_t>(y) * sourceRow +
-						static_cast<std::size_t>(x) * static_cast<std::size_t>(components),
-						command.sourceFormat, rgba);
+					if (!legacygl::decodeUnsignedBytePixel(
+						source + static_cast<std::size_t>(y) * sourceRow +
+							static_cast<std::size_t>(x) * static_cast<std::size_t>(components),
+						command.sourceFormat, rgba) ||
+						!legacygl::applyIntendedPixelFormat(storage.intended, rgba))
+					{
+						throw std::runtime_error("Vulkan texture upload conversion failed");
+					}
 					const std::size_t destination = (static_cast<std::size_t>(command.y + y) *
 						static_cast<std::size_t>(level.width) + static_cast<std::size_t>(command.x + x)) * 4;
 					std::memcpy(level.rgba.data() + destination, rgba, 4);
@@ -3553,16 +4609,21 @@ public:
 		if (command.pixels == nullptr || command.width <= 0 || command.height <= 0 ||
 			!ensureRenderTargets())
 			return;
-		endLegacyPass();
+		const legacygl::PixelTransferFormat *transfer =
+			legacygl::unsignedBytePixelTransferFormat(command.format);
+		if (command.type != GL_UNSIGNED_BYTE || transfer == nullptr)
+			throw std::runtime_error("Vulkan readback received an unsupported pixel format");
+
+		endLegacyPass(A126_VULKAN_DIAGNOSTIC_ARGUMENT(LegacyPassBreakReason::Readback));
 		beginCommandRecording();
 		const VkDeviceSize byteSize = static_cast<VkDeviceSize>(command.width) *
 			static_cast<VkDeviceSize>(command.height) * 4;
 		BufferResource readback = createBuffer(byteSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
-		imageBarrier(state.colorTarget.image, VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+		transitionImage(state.colorTarget, VK_IMAGE_ASPECT_COLOR_BIT,
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT,
+			VK_PIPELINE_STAGE_TRANSFER_BIT
+			A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT(ImageBarrierReason::ReadbackToTransfer));
 		VkBufferImageCopy copy = {};
 		copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		copy.imageSubresource.layerCount = 1;
@@ -3572,15 +4633,14 @@ public:
 			static_cast<uint32_t>(command.height), 1 };
 		vkCmdCopyImageToBuffer(currentFrame().commandBuffer, state.colorTarget.image,
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.buffer, 1, &copy);
-		imageBarrier(state.colorTarget.image, VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-		submitAndWait();
+		transitionImage(state.colorTarget, VK_IMAGE_ASPECT_COLOR_BIT,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+			A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT(ImageBarrierReason::ReadbackToRender));
+		submitAndWait(A126_VULKAN_DIAGNOSTIC_ARGUMENT(LegacyPassBreakReason::Readback));
 		invalidateBuffer(readback);
 
-		const int components = pixelComponents(command.format);
+		const int components = transfer->components;
 		const std::size_t stride = alignedRowSize(static_cast<std::size_t>(command.width) *
 			static_cast<std::size_t>(components), command.packAlignment);
 		unsigned char *destination = static_cast<unsigned char *>(command.pixels);
@@ -3591,8 +4651,12 @@ public:
 				const unsigned char *source = static_cast<const unsigned char *>(readback.mapped) +
 					(static_cast<std::size_t>(command.height - 1 - y) *
 					static_cast<std::size_t>(command.width) + static_cast<std::size_t>(x)) * 4;
-				encodePixel(source, command.format, destination + static_cast<std::size_t>(y) * stride +
-					static_cast<std::size_t>(x) * static_cast<std::size_t>(components));
+				if (!legacygl::encodeUnsignedBytePixel(source, command.format,
+					destination + static_cast<std::size_t>(y) * stride +
+						static_cast<std::size_t>(x) * static_cast<std::size_t>(components)))
+				{
+					throw std::runtime_error("Vulkan readback conversion failed");
+				}
 			}
 		}
 		destroyBuffer(readback);
@@ -3606,6 +4670,11 @@ private:
 };
 
 static VulkanSink sinkInstance;
+
+#undef A126_VULKAN_DIAGNOSTIC_PARAMETER
+#undef A126_VULKAN_DIAGNOSTIC_ARGUMENT
+#undef A126_VULKAN_DIAGNOSTIC_TRAILING_PARAMETER
+#undef A126_VULKAN_DIAGNOSTIC_TRAILING_ARGUMENT
 
 }
 

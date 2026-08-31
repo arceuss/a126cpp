@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "client/multiplayer/MultiPlayerChunkCache.h"
 #include "nbt/CompoundTag.h"
 #include "nbt/ListTag.h"
 
@@ -189,6 +190,57 @@ HEADLESS_TEST(chunks, tile_entity_replacement_keeps_one_registration)
 	chunk->removeTileEntity(2, 65, 2);
 	ctx.checkEqual(static_cast<long long>(level.tileEntityList.size()), 0,
 		"removal must unregister the tile entity");
+}
+
+HEADLESS_TEST(chunks, multiplayer_cache_reuses_and_releases_chunk_ownership)
+{
+	headless::initGameRegistries();
+	Level level(u"multiplayer-chunk-cache", Dimension::Id_Normal, 1776LL);
+	MultiPlayerChunkCache cache(level);
+
+	std::shared_ptr<LevelChunk> first = cache.create(4, -7);
+	std::shared_ptr<LevelChunk> duplicate = cache.create(4, -7);
+	ctx.check(first == duplicate,
+		"repeated visibility for one coordinate must reuse its loaded chunk");
+	ctx.checkEqual(static_cast<long long>(cache.loadedChunkCount()), 1,
+		"duplicate visibility must retain one chunk");
+
+	for (int cycle = 0; cycle < 8; cycle++)
+	{
+		for (int_t x = -16; x < 16; x++)
+			cache.create(x, cycle);
+		ctx.checkEqual(static_cast<long long>(cache.loadedChunkCount()), 33,
+			"travel strip resident count before unload");
+		for (int_t x = -16; x < 16; x++)
+			cache.drop(x, cycle);
+		ctx.checkEqual(static_cast<long long>(cache.loadedChunkCount()), 1,
+			"travel strip resident count after unload");
+	}
+
+	// Beta resolves an unloaded coordinate to the shared blank chunk
+	// (MultiPlayerChunkCache.java:52-57). Querying must never register a
+	// chunk: the client asks about coordinates outside the loaded set
+	// constantly, and retaining one chunk per query is what made a server
+	// session grow without bound.
+	for (int_t x = 0; x < 512; x++)
+	{
+		std::shared_ptr<LevelChunk> queried = cache.getChunk(x, 4096);
+		if (!ctx.check(queried != nullptr && queried->isEmpty(),
+			"an unloaded coordinate must resolve to the blank chunk"))
+			return;
+		if (!ctx.check(!cache.hasChunk(x, 4096),
+			"querying an unloaded coordinate must not register it"))
+			return;
+	}
+	ctx.checkEqual(static_cast<long long>(cache.loadedChunkCount()), 1,
+		"512 queries of unloaded coordinates must retain nothing");
+
+	cache.drop(4, -7);
+	ctx.checkEqual(static_cast<long long>(cache.loadedChunkCount()), 0,
+		"all multiplayer chunks released");
+	cache.drop(999, 999);
+	ctx.checkEqual(static_cast<long long>(cache.loadedChunkCount()), 0,
+		"unloading an absent coordinate must not allocate a chunk");
 }
 
 static void checkStoredEntityCount(headless::TestContext &ctx, int count)

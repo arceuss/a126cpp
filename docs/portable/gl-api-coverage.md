@@ -29,14 +29,16 @@ declaration but no call site.
   is the behavioural oracle.
 - **tests** - covered by a `legacygl_*` headless test.
 
-OpenGL 4.6, Vulkan and D3D12 support the complete inventoried stream through
-four resolved commands: draw, texture upload, clear and readback. Logical
-object names and `glFinish` are handled directly by each sink. Per-entry-point
-columns for the translated backends would therefore repeat the core column
-without showing where translation actually occurs; the 129-case GPU fixture
-and backend deny scans are their coverage gates. The shared/Core OpenGL scans
-reject fixed-function and compatibility-era entry points. The Vulkan and D3D12
-scans reject every `gl*` or `glad_gl*` function call.
+OpenGL 2.1, OpenGL 4.6, Vulkan and D3D12 support the complete inventoried
+stream through four resolved commands: draw, texture upload, clear and
+readback. Logical object names and `glFinish` are handled directly by each
+sink. Per-entry-point columns for translated backends would therefore repeat
+the core column without showing where translation actually occurs; the
+153-case GPU fixture and backend deny scans are their coverage gates. The
+shared/Core OpenGL scans reject fixed-function and compatibility-era entry
+points. The Vulkan and D3D12 scans reject every `gl*` or `glad_gl*` function
+call. GL2.1 deliberately lowers resolved state through compatibility entry
+points below the facade while retaining static list geometry in VBOs.
 
 ## Entry points
 
@@ -153,7 +155,8 @@ unrestricted GL access; each translated tree is checked separately:
 | file | why |
 |---|---|
 | `backends/NativeGL/` | the native compatibility backend; this is where frontend calls become compatibility-driver calls |
-| `backends/OpenGL/` | OpenGL context creation, loader initialization and profile verification shared by NativeGL and GL46 |
+| `backends/OpenGL/` | OpenGL context creation, loader initialization and profile verification shared by NativeGL, GL2.1 and GL46 |
+| `backends/OpenGL21/` | resolved compatibility lowering and display-list VBO residency; fixed-function calls are intentional below the facade |
 | `backends/OpenGL46/` | the translated backend; only modern Core entry points are permitted here |
 | `backends/Vulkan/` | the translated Vulkan backend; no OpenGL entry point is permitted here |
 | `backends/D3D12/` | the translated Direct3D backend; no OpenGL entry point is permitted here |

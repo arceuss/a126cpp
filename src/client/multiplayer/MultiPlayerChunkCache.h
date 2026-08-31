@@ -5,7 +5,6 @@
 #include "world/level/chunk/EmptyLevelChunk.h"
 #include <memory>
 #include <unordered_map>
-#include <vector>
 
 class Level;
 
@@ -37,7 +36,6 @@ private:
 
 	std::shared_ptr<LevelChunk> emptyChunk;
 	std::unordered_map<ChunkPos, std::shared_ptr<LevelChunk>, ChunkPosHash> loadedChunks;
-	std::vector<std::shared_ptr<LevelChunk>> loadedChunkList;
 	Level& level;
 
 public:
@@ -54,4 +52,5 @@ public:
 	// Beta 1.2: drop() and create() methods for chunk management
 	void drop(int_t x, int_t z);
 	std::shared_ptr<LevelChunk> create(int_t x, int_t z);
+	std::size_t loadedChunkCount() const { return loadedChunks.size(); }
 };

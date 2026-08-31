@@ -555,6 +555,9 @@ private:
 	GLenum compilingListModeValue = GL_COMPILE;
 	GLuint nextListName = 1;
 	std::uint64_t nextGeometryResidencyId = 1;
+	// Canonical primitives for immutable display-list geometry, keyed by its
+	// residency identity. Cleared with the list that owns it.
+	std::unordered_map<std::uint64_t, PrimitiveBatch> canonicalPrimitiveCache;
 	int executionDepth = 0;
 
 	ArrayState vertexArrayState;

@@ -60,6 +60,21 @@ int main(int argc, char *argv[])
 		return runSignBench(frames, signs, blankText, finishEachFrame, worldName);
 	}
 
+	// Developer fixture: walks the production renderer through a repeating
+	// chunk route and records frame time and process memory by cycle. Usage:
+	// --chunk-travel-bench [cycles] [radiusChunks] [framesPerChunk] [settleFrames]
+	//                      [viewDistance] [world]
+	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--chunk-travel-bench") == 0)
+	{
+		int cycles = (firstArgument + 1 < argc) ? std::atoi(argv[firstArgument + 1]) : 0;
+		int radius = (firstArgument + 2 < argc) ? std::atoi(argv[firstArgument + 2]) : 0;
+		int framesPerChunk = (firstArgument + 3 < argc) ? std::atoi(argv[firstArgument + 3]) : 0;
+		int settleFrames = (firstArgument + 4 < argc) ? std::atoi(argv[firstArgument + 4]) : 0;
+		int viewDistance = (firstArgument + 5 < argc) ? std::atoi(argv[firstArgument + 5]) : 0;
+		std::string worldName = (firstArgument + 6 < argc) ? argv[firstArgument + 6] : "";
+		return runChunkTravelBench(cycles, radius, framesPerChunk, settleFrames,
+			viewDistance, worldName);
+	}
 	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--timer-probe") == 0)
 		return runTimerProbe((firstArgument + 1 < argc) ? std::atoi(argv[firstArgument + 1]) : 0);
 

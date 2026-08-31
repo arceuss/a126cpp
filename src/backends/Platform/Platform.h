@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 namespace platform
 {
 
@@ -12,6 +14,7 @@ enum class WindowGraphicsAPI
 
 void initialize();
 void shutdown();
+std::string getCachePath(const char *fileName);
 
 // The selected renderer chooses the graphics API, while the platform owns the
 // native window and all window-system operations.

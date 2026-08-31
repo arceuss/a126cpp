@@ -117,8 +117,10 @@ struct ResolvedDraw
 {
 	long long sequence = 0;
 	std::uint64_t geometryResidencyId = 0;
+	bool displayListExecution = false;
 	const Geometry *geometry = nullptr;
 	const PrimitiveBatch *primitives = nullptr;
+	Vertex currentAttributes;
 	Mat4 modelView;
 	Mat4 projection;
 	Mat4 textureMatrix;
@@ -134,6 +136,7 @@ struct ResolvedDraw
 struct ResolvedClear
 {
 	long long sequence = 0;
+	bool displayListExecution = false;
 	unsigned int mask = 0;
 	float color[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	double depth = 1.0;
@@ -146,6 +149,7 @@ struct ResolvedClear
 struct ResolvedTextureUpload
 {
 	long long sequence = 0;
+	bool displayListExecution = false;
 	unsigned int texture = 0;
 	bool subImage = false;
 	int level = 0;

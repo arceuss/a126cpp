@@ -227,6 +227,7 @@ static bool isBackendSourcePath(const std::string &relativePath)
 {
 	return hasPrefix(relativePath, "backends/NativeGL/") ||
 		hasPrefix(relativePath, "backends/D3D12/") ||
+		hasPrefix(relativePath, "backends/OpenGL21/") ||
 		hasPrefix(relativePath, "backends/OpenGL46/") ||
 		hasPrefix(relativePath, "backends/OpenGL/") ||
 		hasPrefix(relativePath, "backends/Vulkan/") ||
@@ -349,9 +350,10 @@ int main(int argc, char **argv)
 		scanSource(readFile(it->path()), relative, usedFunctions, usedConstants);
 	}
 
-	// Translated backends are below the facade boundary, so their implementation
-	// calls must not expand the frontend inventory. OpenGL backends may use modern
-	// GL only; the Vulkan and D3D12 backends may not call OpenGL at all.
+	// Backends are below the facade boundary, so their implementation calls
+	// must not expand the frontend inventory. The GL2.1 compatibility lowerer
+	// deliberately uses fixed-function calls; Core OpenGL may use modern GL
+	// only, and Vulkan/D3D12 may not call OpenGL at all.
 	static const char *coreBackendDirectories[] = { "OpenGL46", "OpenGL", "Vulkan", "D3D12" };
 	for (const char *directory : coreBackendDirectories)
 	{

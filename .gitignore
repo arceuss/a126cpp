@@ -3,6 +3,7 @@ build*/
 bin/
 out/
 cmake-build-*/
+profile-results/
 ref/
 external_old/
 

@@ -6,14 +6,25 @@
 
 #include <algorithm>
 #include <array>
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+#include <chrono>
+#endif
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <cstring>
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+#include <fstream>
+#include <iomanip>
+#endif
 #include <iostream>
 #include <limits>
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+#include <locale>
+#endif
 #include <map>
 #include <memory>
 #include <set>
@@ -21,9 +32,12 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "backends/Platform/Platform.h"
 #include "legacygl/LegacyGL.h"
+#include "legacygl/PixelFormat.h"
 #include "legacygl/Sink.h"
 
 #include <d3d12.h>
@@ -96,6 +110,10 @@ struct alignas(16) D3D12GPUState
 	unsigned int flags1[4];
 	unsigned int flags2[4];
 	unsigned int flags3[4];
+	float currentColor[4];
+	float currentNormal[4];
+	float currentTexCoord[4];
+	unsigned int flags4[4];
 };
 
 static_assert(sizeof(D3D12GPUVertex) == 88, "D3D12 vertex ABI changed");
@@ -118,7 +136,11 @@ static_assert(offsetof(D3D12GPUState, flags0) == 1264, "D3D12 shader flags0 ABI 
 static_assert(offsetof(D3D12GPUState, flags1) == 1280, "D3D12 shader flags1 ABI changed");
 static_assert(offsetof(D3D12GPUState, flags2) == 1296, "D3D12 shader flags2 ABI changed");
 static_assert(offsetof(D3D12GPUState, flags3) == 1312, "D3D12 shader flags3 ABI changed");
-static_assert(sizeof(D3D12GPUState) == 1328, "D3D12 shader block ABI changed");
+static_assert(offsetof(D3D12GPUState, currentColor) == 1328, "D3D12 shader current color ABI changed");
+static_assert(offsetof(D3D12GPUState, currentNormal) == 1344, "D3D12 shader current normal ABI changed");
+static_assert(offsetof(D3D12GPUState, currentTexCoord) == 1360, "D3D12 shader current texture coordinate ABI changed");
+static_assert(offsetof(D3D12GPUState, flags4) == 1376, "D3D12 shader flags4 ABI changed");
+static_assert(sizeof(D3D12GPUState) == 1392, "D3D12 shader block ABI changed");
 
 struct UploadChunk
 {
@@ -143,7 +165,9 @@ struct FrameResources
 	ComPtr<ID3D12CommandAllocator> allocator;
 	std::vector<UploadChunk> uploadChunks;
 	std::vector<ComPtr<ID3D12Resource>> retainedResources;
+	std::unordered_set<ID3D12Resource *> retainedResourceSet;
 	std::vector<std::shared_ptr<ResidentAllocation>> residentAllocations;
+	std::unordered_set<ResidentAllocation *> retainedAllocationSet;
 	std::vector<UINT> retiredSrvDescriptors;
 	UINT64 fenceValue = 0;
 };
@@ -195,6 +219,11 @@ struct SamplerKey
 		return std::tie(minFilter, magFilter, wrapS, wrapT) <
 			std::tie(other.minFilter, other.magFilter, other.wrapS, other.wrapT);
 	}
+
+	bool operator==(const SamplerKey &other) const
+	{
+		return !(*this < other) && !(other < *this);
+	}
 };
 
 struct ResidentFreeRange
@@ -217,27 +246,16 @@ struct ResidentAllocation
 	UINT64 size = 0;
 };
 
-struct ResidentGeometryVariantKey
-{
-	std::uint64_t residencyId = 0;
-	unsigned int missingAttributes = 0;
-	std::array<std::uint32_t, 4> color = {};
-	std::array<std::uint32_t, 3> normal = {};
-	std::array<std::uint32_t, 2> texCoord = {};
-
-	bool operator<(const ResidentGeometryVariantKey &other) const
-	{
-		return std::tie(residencyId, missingAttributes, color, normal, texCoord) <
-			std::tie(other.residencyId, other.missingAttributes, other.color, other.normal, other.texCoord);
-	}
-};
-
 struct ResidentGeometryEntry
 {
 	std::shared_ptr<ResidentAllocation> allocation;
 	legacygl::Topology topology = legacygl::Topology::Triangles;
 	UINT vertexCount = 0;
+	bool hasColor = false;
+	bool hasNormal = false;
+	bool hasTexCoord = false;
 };
+
 
 struct PipelineKey
 {
@@ -271,7 +289,94 @@ struct PipelineKey
 			other.colorWriteMask, other.stencilTest, other.depthBias,
 			other.polygonOffsetFactor, other.polygonOffsetUnits);
 	}
+
+	bool operator==(const PipelineKey &other) const
+	{
+		return !(*this < other) && !(other < *this);
+	}
 };
+
+struct CommandListState
+{
+	PipelineKey legacyPipelineKey;
+	ID3D12RootSignature *rootSignature = nullptr;
+	D3D_PRIMITIVE_TOPOLOGY topology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
+	D3D12_VIEWPORT viewport = {};
+	D3D12_RECT scissor = {};
+	D3D12_GPU_DESCRIPTOR_HANDLE samplerTable = {};
+	bool legacyPipelineValid = false;
+	bool rootSignatureValid = false;
+	bool topologyValid = false;
+	bool viewportValid = false;
+	bool scissorValid = false;
+	bool samplerTableValid = false;
+	bool legacyDescriptorHeapsValid = false;
+};
+
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+enum class RenderTargetPassEmulation
+{
+	Offscreen,
+	PartialClear,
+	Present
+};
+
+struct Diagnostics
+{
+	std::uint64_t legacyPipelineRequests = 0;
+	std::uint64_t legacyPipelineCurrentHits = 0;
+	std::uint64_t legacyPipelineMapLookups = 0;
+	std::uint64_t legacyPipelineMapHits = 0;
+	std::uint64_t legacyPipelineCreates = 0;
+	std::uint64_t legacyPipelineCreationNanoseconds = 0;
+	std::uint64_t legacyPipelineActualBinds = 0;
+	std::uint64_t rootSignatureRequests = 0;
+	std::uint64_t rootSignatureCurrentHits = 0;
+	std::uint64_t rootSignatureActualBinds = 0;
+	std::uint64_t topologyRequests = 0;
+	std::uint64_t topologyCurrentHits = 0;
+	std::uint64_t topologyActualBinds = 0;
+	std::uint64_t viewportRequests = 0;
+	std::uint64_t viewportCurrentHits = 0;
+	std::uint64_t viewportActualSets = 0;
+	std::uint64_t scissorRequests = 0;
+	std::uint64_t scissorCurrentHits = 0;
+	std::uint64_t scissorActualSets = 0;
+	std::uint64_t samplerRequests = 0;
+	std::uint64_t samplerCurrentHits = 0;
+	std::uint64_t samplerMapLookups = 0;
+	std::uint64_t samplerMapHits = 0;
+	std::uint64_t samplerAllocations = 0;
+	std::uint64_t samplerTableRequests = 0;
+	std::uint64_t samplerTableCurrentHits = 0;
+	std::uint64_t samplerTableActualBinds = 0;
+	std::uint64_t srvAllocationLookups = 0;
+	std::uint64_t srvFreeListHits = 0;
+	std::uint64_t srvAllocations = 0;
+	std::uint64_t srvFreshAllocations = 0;
+	std::uint64_t srvInvalidationsRetired = 0;
+	std::uint64_t srvDescriptorsReclaimed = 0;
+	std::uint64_t retainedResourceRequests = 0;
+	std::uint64_t retainedResourceDuplicates = 0;
+	std::uint64_t retainedResourceReferences = 0;
+	std::uint64_t reclaimedResourceReferences = 0;
+	std::uint64_t retainedResidentAllocationReferences = 0;
+	std::uint64_t reclaimedResidentAllocationReferences = 0;
+	std::uint64_t transitionsEmitted = 0;
+	std::uint64_t transitionsSkipped = 0;
+	std::uint64_t renderTargetPassEmulationBegins = 0;
+	std::uint64_t renderTargetPassEmulationEnds = 0;
+	std::uint64_t offscreenPassEmulations = 0;
+	std::uint64_t partialClearPassEmulations = 0;
+	std::uint64_t presentPassEmulations = 0;
+	std::uint64_t fenceWaitChecks = 0;
+	std::uint64_t fenceWaits = 0;
+	std::uint64_t fenceWaitNanoseconds = 0;
+	std::uint64_t flushDrains = 0;
+	std::uint64_t finishDrains = 0;
+	bool enabled = false;
+};
+#endif
 
 class LogicalNameAllocator
 {
@@ -320,6 +425,7 @@ struct State
 	std::array<FrameResources, D3D12_FRAMES_IN_FLIGHT> frames;
 	UINT frameSlot = 0;
 	ComPtr<ID3D12GraphicsCommandList> commandList;
+	CommandListState commandListState;
 	bool commandListOpen = false;
 
 	ComPtr<ID3D12Fence> fence;
@@ -362,12 +468,19 @@ struct State
 	TextureStorage fallbackTexture;
 	std::map<unsigned int, D3D12Texture> textures;
 	std::map<SamplerKey, UINT> samplers;
+	SamplerKey currentSamplerKey;
+	UINT currentSamplerIndex = 0;
+	bool currentSamplerValid = false;
 	std::vector<std::unique_ptr<ResidentPage>> residentPages;
-	std::map<ResidentGeometryVariantKey, ResidentGeometryEntry> residentGeometry;
+	std::unordered_map<std::uint64_t, ResidentGeometryEntry> residentGeometry;
 	std::uint64_t residentGeometryCacheHits = 0;
 	std::uint64_t residentGeometryCacheMisses = 0;
 	UINT64 residentGeometryBytes = 0;
 	UINT64 residentGeometryPeakBytes = 0;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	Diagnostics diagnostics;
+	std::string pipelineKeyDumpPath;
+#endif
 
 	ComPtr<ID3D12InfoQueue> infoQueue;
 	UINT64 debugMessagesRead = 0;
@@ -379,6 +492,170 @@ struct State
 };
 
 static State state;
+
+static bool sameViewport(const D3D12_VIEWPORT &left, const D3D12_VIEWPORT &right)
+{
+	return left.TopLeftX == right.TopLeftX && left.TopLeftY == right.TopLeftY &&
+		left.Width == right.Width && left.Height == right.Height &&
+		left.MinDepth == right.MinDepth && left.MaxDepth == right.MaxDepth;
+}
+
+static bool sameScissor(const D3D12_RECT &left, const D3D12_RECT &right)
+{
+	return left.left == right.left && left.top == right.top &&
+		left.right == right.right && left.bottom == right.bottom;
+}
+
+static void invalidateCommandListState()
+{
+	state.commandListState = CommandListState();
+}
+
+static void bindLegacyRootSignature()
+{
+	ID3D12RootSignature *rootSignature = state.legacyRootSignature.Get();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.rootSignatureRequests++;
+#endif
+	if (state.commandListState.rootSignatureValid &&
+		state.commandListState.rootSignature == rootSignature)
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.rootSignatureCurrentHits++;
+#endif
+		return;
+	}
+	state.commandListState.samplerTableValid = false;
+	state.commandList->SetGraphicsRootSignature(rootSignature);
+	state.commandListState.rootSignature = rootSignature;
+	state.commandListState.rootSignatureValid = true;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.rootSignatureActualBinds++;
+#endif
+}
+
+static void bindLegacySamplerTable(D3D12_GPU_DESCRIPTOR_HANDLE sampler)
+{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.samplerTableRequests++;
+#endif
+	if (state.commandListState.samplerTableValid &&
+		state.commandListState.samplerTable.ptr == sampler.ptr)
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.samplerTableCurrentHits++;
+#endif
+		return;
+	}
+	state.commandList->SetGraphicsRootDescriptorTable(2, sampler);
+	state.commandListState.samplerTable = sampler;
+	state.commandListState.samplerTableValid = true;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.samplerTableActualBinds++;
+#endif
+}
+
+static void bindLegacyTopology(D3D_PRIMITIVE_TOPOLOGY topology)
+{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.topologyRequests++;
+#endif
+	if (state.commandListState.topologyValid && state.commandListState.topology == topology)
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.topologyCurrentHits++;
+#endif
+		return;
+	}
+	state.commandList->IASetPrimitiveTopology(topology);
+	state.commandListState.topology = topology;
+	state.commandListState.topologyValid = true;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.topologyActualBinds++;
+#endif
+}
+
+static void bindLegacyDynamicState(const D3D12_VIEWPORT &viewport, const D3D12_RECT &scissor)
+{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+	{
+		state.diagnostics.viewportRequests++;
+		state.diagnostics.scissorRequests++;
+	}
+#endif
+	if (state.commandListState.viewportValid &&
+		sameViewport(state.commandListState.viewport, viewport))
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.viewportCurrentHits++;
+#endif
+	}
+	else
+	{
+		state.commandList->RSSetViewports(1, &viewport);
+		state.commandListState.viewport = viewport;
+		state.commandListState.viewportValid = true;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.viewportActualSets++;
+#endif
+	}
+	if (state.commandListState.scissorValid && sameScissor(state.commandListState.scissor, scissor))
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.scissorCurrentHits++;
+#endif
+	}
+	else
+	{
+		state.commandList->RSSetScissorRects(1, &scissor);
+		state.commandListState.scissor = scissor;
+		state.commandListState.scissorValid = true;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.scissorActualSets++;
+#endif
+	}
+}
+
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+static void observeRenderTargetPassEmulationBegin(RenderTargetPassEmulation pass)
+{
+	if (!state.diagnostics.enabled)
+		return;
+	state.diagnostics.renderTargetPassEmulationBegins++;
+	switch (pass)
+	{
+	case RenderTargetPassEmulation::Offscreen:
+		state.diagnostics.offscreenPassEmulations++;
+		break;
+	case RenderTargetPassEmulation::PartialClear:
+		state.diagnostics.partialClearPassEmulations++;
+		break;
+	case RenderTargetPassEmulation::Present:
+		state.diagnostics.presentPassEmulations++;
+		break;
+	}
+}
+
+static void observeRenderTargetPassEmulationEnd()
+{
+	if (state.diagnostics.enabled)
+		state.diagnostics.renderTargetPassEmulationEnds++;
+}
+#endif
 
 static std::uint32_t floatBits(float value)
 {
@@ -459,6 +736,44 @@ static D3D12_GPU_DESCRIPTOR_HANDLE gpuDescriptor(ID3D12DescriptorHeap *heap, UIN
 static FrameResources &currentFrame()
 {
 	return state.frames[state.frameSlot];
+}
+
+static void retainResource(const ComPtr<ID3D12Resource> &resource)
+{
+	if (resource == nullptr)
+		return;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.retainedResourceRequests++;
+#endif
+	FrameResources &frame = currentFrame();
+	if (!frame.retainedResourceSet.insert(resource.Get()).second)
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.retainedResourceDuplicates++;
+#endif
+		return;
+	}
+	frame.retainedResources.push_back(resource);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.retainedResourceReferences++;
+#endif
+}
+
+static void retainResidentAllocation(const std::shared_ptr<ResidentAllocation> &allocation)
+{
+	if (allocation == nullptr)
+		return;
+	FrameResources &frame = currentFrame();
+	if (!frame.retainedAllocationSet.insert(allocation.get()).second)
+		return;
+	frame.residentAllocations.push_back(allocation);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.retainedResidentAllocationReferences++;
+#endif
 }
 
 static bool collectDebugMessages()
@@ -779,11 +1094,33 @@ static void createShadersAndPipelines()
 		state.presentPixelShader.Get(), D3D12_COLOR_WRITE_ENABLE_ALL);
 }
 
+static bool supportsFormat(ID3D12Device *device, DXGI_FORMAT format,
+	D3D12_FORMAT_SUPPORT1 required)
+{
+	D3D12_FEATURE_DATA_FORMAT_SUPPORT support = {};
+	support.Format = format;
+	return SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT,
+		&support, sizeof(support))) && (support.Support1 & required) == required;
+}
+
 static bool supportsRequiredDeviceFeatures(ID3D12Device *device)
 {
 	D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
+	const D3D12_FORMAT_SUPPORT1 colorResourceRequired =
+		static_cast<D3D12_FORMAT_SUPPORT1>(D3D12_FORMAT_SUPPORT1_TEXTURE2D);
+	const D3D12_FORMAT_SUPPORT1 colorRequired = static_cast<D3D12_FORMAT_SUPPORT1>(
+		D3D12_FORMAT_SUPPORT1_TEXTURE2D | D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE |
+		D3D12_FORMAT_SUPPORT1_RENDER_TARGET | D3D12_FORMAT_SUPPORT1_BLENDABLE);
+	const D3D12_FORMAT_SUPPORT1 logicColorRequired = static_cast<D3D12_FORMAT_SUPPORT1>(
+		D3D12_FORMAT_SUPPORT1_TEXTURE2D | D3D12_FORMAT_SUPPORT1_RENDER_TARGET);
+	const D3D12_FORMAT_SUPPORT1 depthRequired = static_cast<D3D12_FORMAT_SUPPORT1>(
+		D3D12_FORMAT_SUPPORT1_TEXTURE2D | D3D12_FORMAT_SUPPORT1_DEPTH_STENCIL);
 	return SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS,
-		&options, sizeof(options))) && options.OutputMergerLogicOp;
+		&options, sizeof(options))) && options.OutputMergerLogicOp &&
+		supportsFormat(device, D3D12_COLOR_RESOURCE_FORMAT, colorResourceRequired) &&
+		supportsFormat(device, D3D12_COLOR_FORMAT, colorRequired) &&
+		supportsFormat(device, D3D12_LOGIC_COLOR_FORMAT, logicColorRequired) &&
+		supportsFormat(device, D3D12_DEPTH_FORMAT, depthRequired);
 }
 
 static void createDevice()
@@ -835,10 +1172,15 @@ static void createDevice()
 		requireSuccess(D3D12CreateDevice(warp.Get(), D3D_FEATURE_LEVEL_11_0,
 			IID_PPV_ARGS(&device)), "D3D12CreateDevice(WARP)");
 		if (!supportsRequiredDeviceFeatures(device.Get()))
-			throw std::runtime_error("D3D12 WARP device does not support required output-merger logic operations");
+			throw std::runtime_error("D3D12 WARP device lacks required logic-op or format support");
 		state.device = device;
 		std::cout << "d3d12: adapter=WARP\n";
 	}
+	std::cout << "d3d12: capability_report feature_level=11_0"
+		" color_resource=DXGI_FORMAT_R8G8B8A8_TYPELESS"
+		" texture_storage=DXGI_FORMAT_R8G8B8A8_UNORM sampled=native"
+		" render_target=native logic_op=native line_width=width1-fallback"
+		" legacy_dither=unavailable-no-emulation resource_state=tracked\n";
 
 	if (state.validation && SUCCEEDED(state.device.As(&state.infoQueue)))
 	{
@@ -874,12 +1216,29 @@ static void createDevice()
 
 static void waitForFence(UINT64 value)
 {
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.fenceWaitChecks++;
+#endif
 	if (value == 0 || state.fence->GetCompletedValue() >= value)
 		return;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	const std::chrono::steady_clock::time_point start = state.diagnostics.enabled ?
+		std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+#endif
 	requireSuccess(state.fence->SetEventOnCompletion(value, state.fenceEvent),
 		"SetEventOnCompletion");
 	if (WaitForSingleObject(state.fenceEvent, INFINITE) != WAIT_OBJECT_0)
 		throw std::runtime_error("waiting for the D3D12 fence failed");
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+	{
+		state.diagnostics.fenceWaits++;
+		state.diagnostics.fenceWaitNanoseconds += static_cast<std::uint64_t>(
+			std::chrono::duration_cast<std::chrono::nanoseconds>(
+				std::chrono::steady_clock::now() - start).count());
+	}
+#endif
 }
 
 static void beginFrame()
@@ -887,15 +1246,26 @@ static void beginFrame()
 	FrameResources &frame = currentFrame();
 	waitForFence(frame.fenceValue);
 	frame.fenceValue = 0;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+	{
+		state.diagnostics.srvDescriptorsReclaimed += frame.retiredSrvDescriptors.size();
+		state.diagnostics.reclaimedResourceReferences += frame.retainedResources.size();
+		state.diagnostics.reclaimedResidentAllocationReferences += frame.residentAllocations.size();
+	}
+#endif
 	state.freeSrvDescriptors.insert(state.freeSrvDescriptors.end(),
 		frame.retiredSrvDescriptors.begin(), frame.retiredSrvDescriptors.end());
 	frame.retiredSrvDescriptors.clear();
 	frame.retainedResources.clear();
+	frame.retainedResourceSet.clear();
 	frame.residentAllocations.clear();
+	frame.retainedAllocationSet.clear();
 	for (UploadChunk &chunk : frame.uploadChunks)
 		chunk.used = 0;
 	requireSuccess(frame.allocator->Reset(), "Reset(command allocator)");
 	requireSuccess(state.commandList->Reset(frame.allocator.Get(), nullptr), "Reset(command list)");
+	invalidateCommandListState();
 	state.commandListOpen = true;
 	state.drawableSizeCheckedForFrame = false;
 }
@@ -920,6 +1290,10 @@ static UINT64 signalCurrentFrame()
 
 static void flushAndWait()
 {
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.flushDrains++;
+#endif
 	closeAndExecute();
 	const UINT64 value = signalCurrentFrame();
 	waitForFence(value);
@@ -931,7 +1305,17 @@ static void transitionResource(ID3D12Resource *resource, D3D12_RESOURCE_STATES b
 	D3D12_RESOURCE_STATES after)
 {
 	if (before == after)
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.transitionsSkipped++;
+#endif
 		return;
+	}
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.transitionsEmitted++;
+#endif
 	D3D12_RESOURCE_BARRIER barrier = {};
 	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	barrier.Transition.pResource = resource;
@@ -939,6 +1323,13 @@ static void transitionResource(ID3D12Resource *resource, D3D12_RESOURCE_STATES b
 	barrier.Transition.StateBefore = before;
 	barrier.Transition.StateAfter = after;
 	state.commandList->ResourceBarrier(1, &barrier);
+}
+
+static void transitionTrackedResource(ID3D12Resource *resource,
+	D3D12_RESOURCE_STATES &currentState, D3D12_RESOURCE_STATES requiredState)
+{
+	transitionResource(resource, currentState, requiredState);
+	currentState = requiredState;
 }
 
 static void createTargetResources(int width, int height)
@@ -1088,86 +1479,10 @@ static void bindOffscreenTargets(bool withDepth, bool logicOp = false)
 	state.commandList->OMSetRenderTargets(1, &color, FALSE, withDepth ? &depth : nullptr);
 }
 
-static int pixelComponents(unsigned int format)
-{
-	switch (format)
-	{
-		case GL_RGBA:
-		case GL_BGRA_EXT:
-			return 4;
-		case GL_RGB:
-		case GL_BGR_EXT:
-			return 3;
-		case GL_LUMINANCE_ALPHA:
-			return 2;
-		case GL_ALPHA:
-		case GL_LUMINANCE:
-			return 1;
-		default:
-			return 0;
-	}
-}
-
 static std::size_t alignedRowSize(std::size_t rowSize, int alignment)
 {
 	const std::size_t value = static_cast<std::size_t>(alignment);
 	return (rowSize + value - 1) / value * value;
-}
-
-static void decodePixel(const unsigned char *source, unsigned int format, unsigned char *rgba)
-{
-	switch (format)
-	{
-		case GL_RGBA:
-			rgba[0] = source[0]; rgba[1] = source[1]; rgba[2] = source[2]; rgba[3] = source[3];
-			break;
-		case GL_BGRA_EXT:
-			rgba[0] = source[2]; rgba[1] = source[1]; rgba[2] = source[0]; rgba[3] = source[3];
-			break;
-		case GL_RGB:
-			rgba[0] = source[0]; rgba[1] = source[1]; rgba[2] = source[2]; rgba[3] = 255;
-			break;
-		case GL_BGR_EXT:
-			rgba[0] = source[2]; rgba[1] = source[1]; rgba[2] = source[0]; rgba[3] = 255;
-			break;
-		case GL_LUMINANCE_ALPHA:
-			rgba[0] = source[0]; rgba[1] = source[0]; rgba[2] = source[0]; rgba[3] = source[1];
-			break;
-		case GL_ALPHA:
-			rgba[0] = 255; rgba[1] = 255; rgba[2] = 255; rgba[3] = source[0];
-			break;
-		default:
-			rgba[0] = source[0]; rgba[1] = source[0]; rgba[2] = source[0]; rgba[3] = 255;
-			break;
-	}
-}
-
-static void encodePixel(const unsigned char *rgba, unsigned int format, unsigned char *destination)
-{
-	switch (format)
-	{
-		case GL_RGBA:
-			destination[0] = rgba[0]; destination[1] = rgba[1]; destination[2] = rgba[2]; destination[3] = rgba[3];
-			break;
-		case GL_BGRA_EXT:
-			destination[0] = rgba[2]; destination[1] = rgba[1]; destination[2] = rgba[0]; destination[3] = rgba[3];
-			break;
-		case GL_RGB:
-			destination[0] = rgba[0]; destination[1] = rgba[1]; destination[2] = rgba[2];
-			break;
-		case GL_BGR_EXT:
-			destination[0] = rgba[2]; destination[1] = rgba[1]; destination[2] = rgba[0];
-			break;
-		case GL_LUMINANCE_ALPHA:
-			destination[0] = rgba[0]; destination[1] = rgba[3];
-			break;
-		case GL_ALPHA:
-			destination[0] = rgba[3];
-			break;
-		default:
-			destination[0] = rgba[0];
-			break;
-	}
 }
 
 static unsigned char floatByte(float value)
@@ -1178,26 +1493,50 @@ static unsigned char floatByte(float value)
 
 static UINT allocateSrvDescriptor()
 {
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.srvAllocationLookups++;
+#endif
 	if (!state.freeSrvDescriptors.empty())
 	{
 		const UINT index = state.freeSrvDescriptors.back();
 		state.freeSrvDescriptors.pop_back();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+		{
+			state.diagnostics.srvFreeListHits++;
+			state.diagnostics.srvAllocations++;
+		}
+#endif
 		return index;
 	}
 	if (state.nextSrvDescriptor >= D3D12_SRV_DESCRIPTOR_COUNT)
 		throw std::runtime_error("D3D12 shader-resource descriptor heap is exhausted");
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+	{
+		state.diagnostics.srvAllocations++;
+		state.diagnostics.srvFreshAllocations++;
+	}
+#endif
 	return state.nextSrvDescriptor++;
 }
 
 static void retireSrvDescriptor(UINT index)
 {
 	if (index >= D3D12_FIRST_TEXTURE_SRV_DESCRIPTOR)
+	{
 		currentFrame().retiredSrvDescriptors.push_back(index);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.srvInvalidationsRetired++;
+#endif
+	}
 }
 
 static void uploadTexture(TextureStorage &storage, const unsigned char *rgba, int width, int height)
 {
-	currentFrame().retainedResources.push_back(storage.resource);
+	retainResource(storage.resource);
 	const UINT rowPitch = static_cast<UINT>(alignSize(static_cast<UINT64>(width) * 4,
 		D3D12_TEXTURE_DATA_PITCH_ALIGNMENT));
 	const UINT64 uploadSize = static_cast<UINT64>(rowPitch) * static_cast<UINT64>(height);
@@ -1210,8 +1549,8 @@ static void uploadTexture(TextureStorage &storage, const unsigned char *rgba, in
 			static_cast<std::size_t>(width) * 4);
 	}
 
-	transitionResource(storage.resource.Get(), storage.resourceState, D3D12_RESOURCE_STATE_COPY_DEST);
-	storage.resourceState = D3D12_RESOURCE_STATE_COPY_DEST;
+	transitionTrackedResource(storage.resource.Get(), storage.resourceState,
+		D3D12_RESOURCE_STATE_COPY_DEST);
 	D3D12_TEXTURE_COPY_LOCATION destination = {};
 	destination.pResource = storage.resource.Get();
 	destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
@@ -1225,9 +1564,8 @@ static void uploadTexture(TextureStorage &storage, const unsigned char *rgba, in
 	source.PlacedFootprint.Footprint.Depth = 1;
 	source.PlacedFootprint.Footprint.RowPitch = rowPitch;
 	state.commandList->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
-	transitionResource(storage.resource.Get(), storage.resourceState,
+	transitionTrackedResource(storage.resource.Get(), storage.resourceState,
 		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-	storage.resourceState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 }
 
 static void replaceTextureStorage(TextureStorage &storage, const unsigned char *rgba,
@@ -1237,7 +1575,7 @@ static void replaceTextureStorage(TextureStorage &storage, const unsigned char *
 	{
 		if (storage.resource != nullptr)
 		{
-			currentFrame().retainedResources.push_back(storage.resource);
+			retainResource(storage.resource);
 			retireSrvDescriptor(storage.srvIndex);
 		}
 		const D3D12_HEAP_PROPERTIES properties = heapProperties(D3D12_HEAP_TYPE_DEFAULT);
@@ -1295,10 +1633,33 @@ static D3D12_GPU_DESCRIPTOR_HANDLE samplerFor(unsigned int minFilter, unsigned i
 	key.magFilter = magFilter == GL_NEAREST ? GL_NEAREST : GL_LINEAR;
 	key.wrapS = wrapS;
 	key.wrapT = wrapT;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.samplerRequests++;
+#endif
+	if (state.currentSamplerValid && state.currentSamplerKey == key)
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.samplerCurrentHits++;
+#endif
+		return gpuDescriptor(state.samplerHeap.Get(), state.currentSamplerIndex,
+			state.samplerDescriptorSize);
+	}
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.samplerMapLookups++;
+#endif
 	auto found = state.samplers.find(key);
 	UINT index = 0;
 	if (found != state.samplers.end())
+	{
 		index = found->second;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.samplerMapHits++;
+#endif
+	}
 	else
 	{
 		if (state.nextSamplerDescriptor >= D3D12_SAMPLER_DESCRIPTOR_COUNT)
@@ -1316,7 +1677,14 @@ static D3D12_GPU_DESCRIPTOR_HANDLE samplerFor(unsigned int minFilter, unsigned i
 		state.device->CreateSampler(&description,
 			cpuDescriptor(state.samplerHeap.Get(), index, state.samplerDescriptorSize));
 		state.samplers.insert(std::make_pair(key, index));
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.samplerAllocations++;
+#endif
 	}
+	state.currentSamplerKey = key;
+	state.currentSamplerIndex = index;
+	state.currentSamplerValid = true;
 	return gpuDescriptor(state.samplerHeap.Get(), index, state.samplerDescriptorSize);
 }
 
@@ -1567,6 +1935,18 @@ static void fillGPUState(const legacygl::ResolvedDraw &command, D3D12GPUState &g
 	gpuState.flags3[0] = colorMaterialFace(command.lighting.colorMaterialFace);
 	gpuState.flags3[1] = colorMaterialMode(command.lighting.colorMaterialMode);
 	gpuState.flags3[2] = command.texture.complete ? 1u : 0u;
+	gpuState.currentColor[0] = command.currentAttributes.r;
+	gpuState.currentColor[1] = command.currentAttributes.g;
+	gpuState.currentColor[2] = command.currentAttributes.b;
+	gpuState.currentColor[3] = command.currentAttributes.a;
+	gpuState.currentNormal[0] = command.currentAttributes.nx;
+	gpuState.currentNormal[1] = command.currentAttributes.ny;
+	gpuState.currentNormal[2] = command.currentAttributes.nz;
+	gpuState.currentTexCoord[0] = command.currentAttributes.s;
+	gpuState.currentTexCoord[1] = command.currentAttributes.t;
+	gpuState.flags4[0] = command.geometry->hasColor ? 1u : 0u;
+	gpuState.flags4[1] = command.geometry->hasNormal ? 1u : 0u;
+	gpuState.flags4[2] = command.geometry->hasTexCoord ? 1u : 0u;
 }
 
 static D3D12GPUVertex makeGPUVertex(const legacygl::Vertex &vertex,
@@ -1585,18 +1965,24 @@ static D3D12GPUVertex makeGPUVertex(const legacygl::Vertex &vertex,
 	return result;
 }
 
+static const legacygl::Vertex &sourceVertex(const legacygl::ResolvedDraw &command,
+	std::size_t index)
+{
+	return command.geometry->vertices[index];
+}
+
 static void writeGPUVertices(const legacygl::ResolvedDraw &command, int verticesPerPrimitive,
 	void *destination)
 {
 	unsigned char *write = static_cast<unsigned char *>(destination);
 	for (const legacygl::CanonicalPrimitive &primitive : command.primitives->primitives)
 	{
-		const legacygl::Vertex &flat = command.geometry->vertices[
-			static_cast<std::size_t>(primitive.provoking)];
+		const legacygl::Vertex &flat = sourceVertex(command,
+			static_cast<std::size_t>(primitive.provoking));
 		for (int i = 0; i < verticesPerPrimitive; i++)
 		{
-			const legacygl::Vertex &vertex = command.geometry->vertices[
-				static_cast<std::size_t>(primitive.indices[i])];
+			const legacygl::Vertex &vertex = sourceVertex(command,
+				static_cast<std::size_t>(primitive.indices[i]));
 			const D3D12GPUVertex gpuVertex = makeGPUVertex(vertex, flat);
 			std::memcpy(write, &gpuVertex, sizeof(gpuVertex));
 			write += sizeof(gpuVertex);
@@ -1604,30 +1990,6 @@ static void writeGPUVertices(const legacygl::ResolvedDraw &command, int vertices
 	}
 }
 
-static ResidentGeometryVariantKey residentGeometryKey(const legacygl::ResolvedDraw &command)
-{
-	ResidentGeometryVariantKey key;
-	key.residencyId = command.geometryResidencyId;
-	const legacygl::Geometry &geometry = *command.geometry;
-	const legacygl::Vertex &resolved = geometry.vertices.front();
-	if (!geometry.hasColor)
-	{
-		key.missingAttributes |= 1u;
-		key.color = { floatBits(resolved.r), floatBits(resolved.g),
-			floatBits(resolved.b), floatBits(resolved.a) };
-	}
-	if (!geometry.hasNormal)
-	{
-		key.missingAttributes |= 2u;
-		key.normal = { floatBits(resolved.nx), floatBits(resolved.ny), floatBits(resolved.nz) };
-	}
-	if (!geometry.hasTexCoord)
-	{
-		key.missingAttributes |= 4u;
-		key.texCoord = { floatBits(resolved.s), floatBits(resolved.t) };
-	}
-	return key;
-}
 
 static bool allocateResidentRange(ResidentPage &page, UINT64 size,
 	UINT64 alignment, UINT64 &offset)
@@ -1745,12 +2107,14 @@ static const ResidentGeometryEntry &residentGeometryEntry(
 	const legacygl::ResolvedDraw &command, int verticesPerPrimitive,
 	UINT vertexCount, UINT64 vertexBytes)
 {
-	const ResidentGeometryVariantKey key = residentGeometryKey(command);
-	auto found = state.residentGeometry.find(key);
+	auto found = state.residentGeometry.find(command.geometryResidencyId);
 	if (found != state.residentGeometry.end())
 	{
 		if (found->second.topology != command.primitives->topology ||
-			found->second.vertexCount != vertexCount)
+			found->second.vertexCount != vertexCount ||
+			found->second.hasColor != command.geometry->hasColor ||
+			found->second.hasNormal != command.geometry->hasNormal ||
+			found->second.hasTexCoord != command.geometry->hasTexCoord)
 		{
 			throw std::runtime_error("D3D12 resident geometry identity changed while cached");
 		}
@@ -1763,29 +2127,25 @@ static const ResidentGeometryEntry &residentGeometryEntry(
 	entry.allocation = allocateResidentGeometry(vertexBytes, alignof(D3D12GPUVertex));
 	entry.topology = command.primitives->topology;
 	entry.vertexCount = vertexCount;
+	entry.hasColor = command.geometry->hasColor;
+	entry.hasNormal = command.geometry->hasNormal;
+	entry.hasTexCoord = command.geometry->hasTexCoord;
 	const UploadAllocation upload = allocateUpload(vertexBytes, alignof(D3D12GPUVertex));
 	writeGPUVertices(command, verticesPerPrimitive, upload.mapped);
 	ResidentPage &page = *entry.allocation->page;
-	transitionResource(page.resource.Get(), page.resourceState, D3D12_RESOURCE_STATE_COPY_DEST);
-	page.resourceState = D3D12_RESOURCE_STATE_COPY_DEST;
+	transitionTrackedResource(page.resource.Get(), page.resourceState,
+		D3D12_RESOURCE_STATE_COPY_DEST);
 	state.commandList->CopyBufferRegion(page.resource.Get(), entry.allocation->offset, upload.resource,
 		upload.offset, vertexBytes);
-	transitionResource(page.resource.Get(), page.resourceState,
+	transitionTrackedResource(page.resource.Get(), page.resourceState,
 		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-	page.resourceState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
-	auto inserted = state.residentGeometry.insert(std::make_pair(key, std::move(entry)));
+	auto inserted = state.residentGeometry.emplace(command.geometryResidencyId, std::move(entry));
 	return inserted.first->second;
 }
 
 static void releaseResidentGeometry(std::uint64_t residencyId)
 {
-	for (auto iterator = state.residentGeometry.begin(); iterator != state.residentGeometry.end(); )
-	{
-		if (iterator->first.residencyId == residencyId)
-			iterator = state.residentGeometry.erase(iterator);
-		else
-			++iterator;
-	}
+	state.residentGeometry.erase(residencyId);
 }
 
 static D3D12_COMPARISON_FUNC comparisonFunction(unsigned int function)
@@ -1993,15 +2353,62 @@ static PipelineKey pipelineKey(const legacygl::ResolvedDraw &command)
 	return key;
 }
 
-static ID3D12PipelineState *legacyPipeline(const legacygl::ResolvedDraw &command)
+static ID3D12PipelineState *legacyPipeline(const PipelineKey &key)
 {
-	const PipelineKey key = pipelineKey(command);
 	auto found = state.pipelines.find(key);
 	if (found != state.pipelines.end())
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.legacyPipelineMapHits++;
+#endif
 		return found->second.Get();
+	}
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	const std::chrono::steady_clock::time_point start = state.diagnostics.enabled ?
+		std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+#endif
 	ComPtr<ID3D12PipelineState> pipeline = createLegacyPipeline(key);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+	{
+		state.diagnostics.legacyPipelineCreates++;
+		state.diagnostics.legacyPipelineCreationNanoseconds += static_cast<std::uint64_t>(
+			std::chrono::duration_cast<std::chrono::nanoseconds>(
+				std::chrono::steady_clock::now() - start).count());
+	}
+#endif
 	auto inserted = state.pipelines.insert(std::make_pair(key, pipeline));
 	return inserted.first->second.Get();
+}
+
+static void bindLegacyPipeline(const legacygl::ResolvedDraw &command)
+{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.legacyPipelineRequests++;
+#endif
+	const PipelineKey key = pipelineKey(command);
+	if (state.commandListState.legacyPipelineValid &&
+		state.commandListState.legacyPipelineKey == key)
+	{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		if (state.diagnostics.enabled)
+			state.diagnostics.legacyPipelineCurrentHits++;
+#endif
+		return;
+	}
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.legacyPipelineMapLookups++;
+#endif
+	state.commandList->SetPipelineState(legacyPipeline(key));
+	state.commandListState.legacyPipelineKey = key;
+	state.commandListState.legacyPipelineValid = true;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (state.diagnostics.enabled)
+		state.diagnostics.legacyPipelineActualBinds++;
+#endif
 }
 
 static unsigned int colorWriteMask(const bool colorWrite[4])
@@ -2029,6 +2436,10 @@ static ID3D12PipelineState *clearPipeline(unsigned int writeMask)
 static void recordPartialColorClear(const legacygl::ResolvedClear &command,
 	unsigned int writeMask)
 {
+	invalidateCommandListState();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	observeRenderTargetPassEmulationBegin(RenderTargetPassEmulation::PartialClear);
+#endif
 	bindOffscreenTargets(false);
 	const D3D12_VIEWPORT viewport = fullViewport();
 	const D3D12_RECT scissor = fullScissor();
@@ -2039,17 +2450,23 @@ static void recordPartialColorClear(const legacygl::ResolvedClear &command,
 	state.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	state.commandList->SetGraphicsRoot32BitConstants(0, 4, command.color, 0);
 	state.commandList->DrawInstanced(3, 1, 0, 0);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	observeRenderTargetPassEmulationEnd();
+#endif
 }
 
 static void recordPresent()
 {
-	transitionResource(state.colorTarget.Get(), state.colorTargetState,
+	invalidateCommandListState();
+	transitionTrackedResource(state.colorTarget.Get(), state.colorTargetState,
 		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-	state.colorTargetState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 
 	const UINT index = state.swapChain->GetCurrentBackBufferIndex();
 	transitionResource(state.backBuffers[index].Get(), D3D12_RESOURCE_STATE_PRESENT,
 		D3D12_RESOURCE_STATE_RENDER_TARGET);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	observeRenderTargetPassEmulationBegin(RenderTargetPassEmulation::Present);
+#endif
 	const D3D12_CPU_DESCRIPTOR_HANDLE target = cpuDescriptor(state.rtvHeap.Get(), index + 1,
 		state.rtvDescriptorSize);
 	state.commandList->OMSetRenderTargets(1, &target, FALSE, nullptr);
@@ -2065,12 +2482,14 @@ static void recordPresent()
 	state.commandList->SetGraphicsRootDescriptorTable(1,
 		gpuDescriptor(state.srvHeap.Get(), 1, state.srvDescriptorSize));
 	state.commandList->DrawInstanced(3, 1, 0, 0);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	observeRenderTargetPassEmulationEnd();
+#endif
 
 	transitionResource(state.backBuffers[index].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
 		D3D12_RESOURCE_STATE_PRESENT);
-	transitionResource(state.colorTarget.Get(), state.colorTargetState,
+	transitionTrackedResource(state.colorTarget.Get(), state.colorTargetState,
 		D3D12_RESOURCE_STATE_RENDER_TARGET);
-	state.colorTargetState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 }
 
 static void submitFrame(bool display)
@@ -2091,9 +2510,11 @@ static void readBackColor(const legacygl::ResolvedReadback &command)
 {
 	if (command.type != GL_UNSIGNED_BYTE)
 		throw std::runtime_error("D3D12 readback only accepts GL_UNSIGNED_BYTE");
-	const int components = pixelComponents(command.format);
-	if (components == 0)
+	const legacygl::PixelTransferFormat *transfer =
+		legacygl::unsignedBytePixelTransferFormat(command.format);
+	if (transfer == nullptr)
 		throw std::runtime_error("D3D12 readback received an unsupported pixel format");
+	const int components = transfer->components;
 	if (command.x < 0 || command.y < 0 || command.x + command.width > state.targetWidth ||
 		command.y + command.height > state.targetHeight)
 	{
@@ -2111,9 +2532,8 @@ static void readBackColor(const legacygl::ResolvedReadback &command)
 		&description, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback)),
 		"CreateCommittedResource(readback)");
 
-	transitionResource(state.colorTarget.Get(), state.colorTargetState,
+	transitionTrackedResource(state.colorTarget.Get(), state.colorTargetState,
 		D3D12_RESOURCE_STATE_COPY_SOURCE);
-	state.colorTargetState = D3D12_RESOURCE_STATE_COPY_SOURCE;
 	D3D12_TEXTURE_COPY_LOCATION destination = {};
 	destination.pResource = readback.Get();
 	destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
@@ -2133,9 +2553,8 @@ static void readBackColor(const legacygl::ResolvedReadback &command)
 	sourceBox.bottom = static_cast<UINT>(state.targetHeight - command.y);
 	sourceBox.back = 1;
 	state.commandList->CopyTextureRegion(&destination, 0, 0, 0, &source, &sourceBox);
-	transitionResource(state.colorTarget.Get(), state.colorTargetState,
+	transitionTrackedResource(state.colorTarget.Get(), state.colorTargetState,
 		D3D12_RESOURCE_STATE_RENDER_TARGET);
-	state.colorTargetState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	flushAndWait();
 
 	void *mapped = nullptr;
@@ -2154,8 +2573,13 @@ static void readBackColor(const legacygl::ResolvedReadback &command)
 			static_cast<std::size_t>(y) * destinationStride;
 		for (int x = 0; x < command.width; x++)
 		{
-			encodePixel(sourceRow + static_cast<std::size_t>(x) * 4, command.format,
-				destinationRow + static_cast<std::size_t>(x) * static_cast<std::size_t>(components));
+			if (!legacygl::encodeUnsignedBytePixel(
+				sourceRow + static_cast<std::size_t>(x) * 4, command.format,
+				destinationRow + static_cast<std::size_t>(x) *
+					static_cast<std::size_t>(components)))
+			{
+				throw std::runtime_error("D3D12 readback conversion failed");
+			}
 		}
 	}
 	D3D12_RANGE writeRange = { 0, 0 };
@@ -2181,10 +2605,156 @@ static void releaseStateResources()
 	state = State();
 }
 
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+static const char *pipelineTopologyName(legacygl::Topology topology)
+{
+	switch (topology)
+	{
+	case legacygl::Topology::Points: return "points";
+	case legacygl::Topology::Lines: return "lines";
+	case legacygl::Topology::Triangles: return "triangles";
+	default: return "unknown";
+	}
+}
+
+static void dumpPipelineKeys()
+{
+	if (state.pipelineKeyDumpPath.empty())
+		return;
+	std::ofstream output(state.pipelineKeyDumpPath.c_str(),
+		std::ios::out | std::ios::binary | std::ios::trunc);
+	if (!output)
+	{
+		std::fprintf(stderr, "D3D12 pipeline-key dump could not open %s\n",
+			state.pipelineKeyDumpPath.c_str());
+		return;
+	}
+	output.imbue(std::locale::classic());
+	output << "d3d12_pipeline_keys_v1\n";
+	output << "count=" << state.pipelines.size() << '\n';
+	std::size_t index = 0;
+	for (const auto &entry : state.pipelines)
+	{
+		const PipelineKey &key = entry.first;
+		output << "key[" << index++ << "]" <<
+			" topology=" << pipelineTopologyName(key.topology) <<
+			" depth_test=" << (key.depthTest ? 1 : 0) <<
+			" depth_write=" << (key.depthWrite ? 1 : 0) <<
+			" depth_function=" << key.depthFunction <<
+			" cull_face=" << (key.cullFace ? 1 : 0) <<
+			" cull_face_mode=" << key.cullFaceMode <<
+			" front_face_mode=" << key.frontFaceMode <<
+			" blend=" << (key.blend ? 1 : 0) <<
+			" blend_source=" << key.blendSource <<
+			" blend_destination=" << key.blendDestination <<
+			" logic_op=" << (key.logicOp ? 1 : 0) <<
+			" logic_opcode=" << key.logicOpcode <<
+			" color_write_mask=" << key.colorWriteMask <<
+			" render_target_format=" <<
+				(key.logicOp ? D3D12_LOGIC_COLOR_FORMAT : D3D12_COLOR_FORMAT) <<
+			" depth_stencil_format=" << D3D12_DEPTH_FORMAT <<
+			" sample_count=1" <<
+			" sample_quality=0" <<
+			" stencil_test=" << (key.stencilTest ? 1 : 0) <<
+			" depth_bias=" << (key.depthBias ? 1 : 0) <<
+			" polygon_offset_factor_bits=0x" << std::hex << std::nouppercase << std::setw(8) <<
+				std::setfill('0') << key.polygonOffsetFactor <<
+			" polygon_offset_units_bits=0x" << std::setw(8) << key.polygonOffsetUnits <<
+			std::dec << std::setfill(' ') << '\n';
+	}
+	if (!output)
+	{
+		std::fprintf(stderr, "D3D12 pipeline-key dump failed while writing %s\n",
+			state.pipelineKeyDumpPath.c_str());
+	}
+}
+
+static void printDiagnostics()
+{
+	if (!state.diagnostics.enabled)
+		return;
+	const Diagnostics &diagnostics = state.diagnostics;
+	std::cout << "d3d12 diagnostics: legacy_pipeline_requests=" <<
+		diagnostics.legacyPipelineRequests <<
+		" legacy_pipeline_current_hits=" << diagnostics.legacyPipelineCurrentHits <<
+		" legacy_pipeline_map_lookups=" << diagnostics.legacyPipelineMapLookups <<
+		" legacy_pipeline_map_hits=" << diagnostics.legacyPipelineMapHits <<
+		" legacy_pipeline_creates=" << diagnostics.legacyPipelineCreates <<
+		" legacy_pipeline_creation_ns=" << diagnostics.legacyPipelineCreationNanoseconds <<
+		" legacy_pipeline_unique_keys=" << state.pipelines.size() <<
+		" legacy_pipeline_actual_binds=" << diagnostics.legacyPipelineActualBinds << '\n';
+	std::cout << "d3d12 diagnostics: legacy_root_requests=" << diagnostics.rootSignatureRequests <<
+		" legacy_root_current_hits=" << diagnostics.rootSignatureCurrentHits <<
+		" legacy_root_actual_binds=" << diagnostics.rootSignatureActualBinds <<
+		" legacy_topology_requests=" << diagnostics.topologyRequests <<
+		" legacy_topology_current_hits=" << diagnostics.topologyCurrentHits <<
+		" legacy_topology_actual_binds=" << diagnostics.topologyActualBinds <<
+		" legacy_viewport_requests=" << diagnostics.viewportRequests <<
+		" legacy_viewport_current_hits=" << diagnostics.viewportCurrentHits <<
+		" legacy_viewport_actual_sets=" << diagnostics.viewportActualSets <<
+		" legacy_scissor_requests=" << diagnostics.scissorRequests <<
+		" legacy_scissor_current_hits=" << diagnostics.scissorCurrentHits <<
+		" legacy_scissor_actual_sets=" << diagnostics.scissorActualSets << '\n';
+	std::cout << "d3d12 diagnostics: sampler_requests=" << diagnostics.samplerRequests <<
+		" sampler_current_hits=" << diagnostics.samplerCurrentHits <<
+		" sampler_map_lookups=" << diagnostics.samplerMapLookups <<
+		" sampler_map_hits=" << diagnostics.samplerMapHits <<
+		" sampler_allocations=" << diagnostics.samplerAllocations <<
+		" sampler_table_requests=" << diagnostics.samplerTableRequests <<
+		" sampler_table_current_hits=" << diagnostics.samplerTableCurrentHits <<
+		" sampler_table_actual_binds=" << diagnostics.samplerTableActualBinds <<
+		" srv_allocation_lookups=" << diagnostics.srvAllocationLookups <<
+		" srv_free_list_hits=" << diagnostics.srvFreeListHits <<
+		" srv_allocations=" << diagnostics.srvAllocations <<
+		" srv_fresh_allocations=" << diagnostics.srvFreshAllocations <<
+		" srv_invalidations_retired=" << diagnostics.srvInvalidationsRetired <<
+		" srv_reclaimed=" << diagnostics.srvDescriptorsReclaimed << '\n';
+	std::cout << "d3d12 diagnostics: retained_resource_requests=" <<
+		diagnostics.retainedResourceRequests <<
+		" retained_resource_duplicates=" << diagnostics.retainedResourceDuplicates <<
+		" retained_resource_references=" << diagnostics.retainedResourceReferences <<
+		" reclaimed_resource_references=" << diagnostics.reclaimedResourceReferences <<
+		" retained_resident_allocation_references=" <<
+		diagnostics.retainedResidentAllocationReferences <<
+		" reclaimed_resident_allocation_references=" <<
+		diagnostics.reclaimedResidentAllocationReferences <<
+		" transitions_emitted=" << diagnostics.transitionsEmitted <<
+		" transitions_skipped=" << diagnostics.transitionsSkipped << '\n';
+	std::cout << "d3d12 diagnostics: native_render_pass_begins=0" <<
+		" native_render_pass_ends=0" <<
+		" render_target_pass_emulation_begins=" <<
+		diagnostics.renderTargetPassEmulationBegins <<
+		" render_target_pass_emulation_ends=" << diagnostics.renderTargetPassEmulationEnds <<
+		" offscreen_pass_emulations=" << diagnostics.offscreenPassEmulations <<
+		" partial_clear_pass_emulations=" << diagnostics.partialClearPassEmulations <<
+		" present_pass_emulations=" << diagnostics.presentPassEmulations << '\n';
+	std::cout << "d3d12 diagnostics: fence_wait_checks=" << diagnostics.fenceWaitChecks <<
+		" fence_waits=" << diagnostics.fenceWaits <<
+		" fence_wait_ns=" << diagnostics.fenceWaitNanoseconds <<
+		" flush_drains=" << diagnostics.flushDrains <<
+		" finish_drains=" << diagnostics.finishDrains << '\n';
+}
+
+static void configureDiagnostics()
+{
+	const char *diagnostics = std::getenv("A126_RENDER_DIAGNOSTICS");
+	state.diagnostics.enabled = diagnostics != nullptr && std::strcmp(diagnostics, "1") == 0;
+	const char *pipelineKeyDump = std::getenv("A126_PIPELINE_KEY_DUMP");
+	if (pipelineKeyDump != nullptr && pipelineKeyDump[0] != '\0')
+		state.pipelineKeyDumpPath = pipelineKeyDump;
+}
+#endif
+
 static void initialize()
 {
 	if (state.initialized)
 		return;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	configureDiagnostics();
+#endif
+	state.residentGeometry.reserve(8192);
+	for (FrameResources &frame : state.frames)
+		frame.retainedResourceSet.reserve(32);
 	try
 	{
 		platform::createWindow(platform::WindowGraphicsAPI::Direct3D);
@@ -2223,6 +2793,9 @@ static void shutdown()
 {
 	if (!state.initialized && state.device == nullptr)
 		return;
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	bool queueDrained = false;
+#endif
 	if (state.commandQueue != nullptr && state.fence != nullptr)
 	{
 		if (state.commandListOpen)
@@ -2240,12 +2813,27 @@ static void shutdown()
 		{
 			const UINT64 value = signalCurrentFrame();
 			waitForFence(value);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+			queueDrained = true;
+#endif
 		}
 		catch (const std::exception &error)
 		{
 			std::fprintf(stderr, "D3D12 shutdown queue wait failed: %s\n", error.what());
 		}
 	}
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	if (queueDrained && state.diagnostics.enabled)
+	{
+		for (const FrameResources &frame : state.frames)
+		{
+			state.diagnostics.srvDescriptorsReclaimed += frame.retiredSrvDescriptors.size();
+			state.diagnostics.reclaimedResourceReferences += frame.retainedResources.size();
+			state.diagnostics.reclaimedResidentAllocationReferences +=
+				frame.residentAllocations.size();
+		}
+	}
+#endif
 	collectDebugMessages();
 	const std::uint64_t errors = state.validationErrors;
 	const std::uint64_t warnings = state.validationWarnings;
@@ -2253,6 +2841,10 @@ static void shutdown()
 	const std::uint64_t residentCacheMisses = state.residentGeometryCacheMisses;
 	const UINT64 residentBytes = state.residentGeometryPeakBytes;
 	const std::size_t residentPages = state.residentPages.size();
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+	dumpPipelineKeys();
+	printDiagnostics();
+#endif
 	releaseStateResources();
 	std::cout << "d3d12: shutdown, validation errors=" << errors <<
 		", warnings=" << warnings <<
@@ -2327,7 +2919,7 @@ public:
 			{
 				if (state.initialized && found->second.storage.resource != nullptr)
 				{
-					currentFrame().retainedResources.push_back(found->second.storage.resource);
+					retainResource(found->second.storage.resource);
 					retireSrvDescriptor(found->second.storage.srvIndex);
 				}
 				state.textures.erase(found);
@@ -2397,7 +2989,13 @@ public:
 	void finish() override
 	{
 		if (state.initialized)
+		{
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+			if (state.diagnostics.enabled)
+				state.diagnostics.finishDrains++;
+#endif
 			flushAndWait();
+		}
 	}
 
 	bool wantsCanonicalGeometry() const override
@@ -2474,7 +3072,7 @@ public:
 		D3D12GPUState gpuState = {};
 		fillGPUState(command, gpuState);
 		const TextureBinding texture = bindTextureState(command, gpuState);
-		currentFrame().retainedResources.push_back(texture.resource);
+		retainResource(texture.resource);
 
 		D3D12_VERTEX_BUFFER_VIEW vertexView = {};
 		if (command.geometryResidencyId == 0)
@@ -2487,7 +3085,7 @@ public:
 		{
 			const ResidentGeometryEntry &entry = residentGeometryEntry(command,
 				verticesPerPrimitive, drawVertexCount, vertexBytes);
-			currentFrame().residentAllocations.push_back(entry.allocation);
+			retainResidentAllocation(entry.allocation);
 			vertexView.BufferLocation = entry.allocation->page->resource->GetGPUVirtualAddress() +
 				entry.allocation->offset;
 		}
@@ -2511,19 +3109,32 @@ public:
 		viewport.Height = static_cast<float>(command.pipeline.viewport[3]);
 		viewport.MaxDepth = 1.0f;
 		const D3D12_RECT scissor = fullScissor();
-		state.commandList->RSSetViewports(1, &viewport);
-		state.commandList->RSSetScissorRects(1, &scissor);
+		bindLegacyDynamicState(viewport, scissor);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		observeRenderTargetPassEmulationBegin(RenderTargetPassEmulation::Offscreen);
+#endif
 		bindOffscreenTargets(true, command.enables.colorLogicOp);
-		ID3D12DescriptorHeap *heaps[] = { state.srvHeap.Get(), state.samplerHeap.Get() };
-		state.commandList->SetDescriptorHeaps(2, heaps);
-		state.commandList->SetGraphicsRootSignature(state.legacyRootSignature.Get());
-		state.commandList->SetPipelineState(legacyPipeline(command));
-		state.commandList->IASetPrimitiveTopology(primitiveTopology(command.primitives->topology));
+		// SetDescriptorHeaps can flush GPU state, so it is bound once per
+		// command list rather than once per draw. Every path that binds a
+		// different heap set invalidates the command-list state first.
+		if (!state.commandListState.legacyDescriptorHeapsValid)
+		{
+			ID3D12DescriptorHeap *heaps[] = { state.srvHeap.Get(), state.samplerHeap.Get() };
+			state.commandList->SetDescriptorHeaps(2, heaps);
+			state.commandListState.legacyDescriptorHeapsValid = true;
+		}
+		bindLegacyRootSignature();
+		bindLegacyPipeline(command);
+		const D3D_PRIMITIVE_TOPOLOGY topology = primitiveTopology(command.primitives->topology);
+		bindLegacyTopology(topology);
 		state.commandList->IASetVertexBuffers(0, 1, &vertexView);
 		state.commandList->SetGraphicsRootConstantBufferView(0, constants.gpuAddress);
 		state.commandList->SetGraphicsRootDescriptorTable(1, texture.srv);
-		state.commandList->SetGraphicsRootDescriptorTable(2, texture.sampler);
+		bindLegacySamplerTable(texture.sampler);
 		state.commandList->DrawInstanced(drawVertexCount, 1, 0, 0);
+#if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
+		observeRenderTargetPassEmulationEnd();
+#endif
 
 		if (command.primitives->topology == legacygl::Topology::Lines &&
 			command.pipeline.lineWidth != 1.0f && !state.lineWidthFallbackReported)
@@ -2549,11 +3160,18 @@ public:
 			level.rgba.assign(static_cast<std::size_t>(command.width) *
 				static_cast<std::size_t>(command.height) * 4, 0);
 		}
+		const legacygl::PixelTransferFormat *transfer =
+			legacygl::unsignedBytePixelTransferFormat(command.sourceFormat);
+		legacygl::PixelStorageFormat storage;
+		if (command.sourceType != GL_UNSIGNED_BYTE || transfer == nullptr ||
+			!legacygl::pixelStorageFormat(command.internalFormat, storage) ||
+			storage.physical != legacygl::PhysicalPixelFormat::RGBA8)
+		{
+			throw std::runtime_error("D3D12 texture upload received an unsupported pixel format");
+		}
 		if (command.pixels != nullptr && command.width > 0 && command.height > 0)
 		{
-			const int components = pixelComponents(command.sourceFormat);
-			if (components == 0)
-				throw std::runtime_error("D3D12 texture upload received an unsupported pixel format");
+			const int components = transfer->components;
 			const std::size_t sourceRow = alignedRowSize(static_cast<std::size_t>(command.width) *
 				static_cast<std::size_t>(components), command.unpackAlignment);
 			const unsigned char *source = static_cast<const unsigned char *>(command.pixels);
@@ -2562,9 +3180,14 @@ public:
 				for (int x = 0; x < command.width; x++)
 				{
 					unsigned char rgba[4];
-					decodePixel(source + static_cast<std::size_t>(y) * sourceRow +
-						static_cast<std::size_t>(x) * static_cast<std::size_t>(components),
-						command.sourceFormat, rgba);
+					if (!legacygl::decodeUnsignedBytePixel(
+						source + static_cast<std::size_t>(y) * sourceRow +
+							static_cast<std::size_t>(x) * static_cast<std::size_t>(components),
+						command.sourceFormat, rgba) ||
+						!legacygl::applyIntendedPixelFormat(storage.intended, rgba))
+					{
+						throw std::runtime_error("D3D12 texture upload conversion failed");
+					}
 					const std::size_t destination = (static_cast<std::size_t>(command.y + y) *
 						static_cast<std::size_t>(level.width) +
 						static_cast<std::size_t>(command.x + x)) * 4;

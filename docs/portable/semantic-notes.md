@@ -91,10 +91,11 @@ Vulkan Debug runs enabled `VK_LAYER_KHRONOS_validation` and shut down with zero
 validation errors. A full Debug D3D12 capture also reported zero validation
 errors; its 463 messages were performance-only clear warning ID 820.
 
-Each backend-specific GPU fixture records the same 129 alpha, texture, clamp,
+Each backend-specific GPU fixture records the same 153 alpha, texture, clamp,
 clear, readback, polygon, line, cull, depth, blend, logic-op, transform, shader,
-array, frame-lifetime and logical-object cases. All six pairwise comparisons
-pass on this machine. That includes distinct none/rescale/normalize signatures,
+array, frame-lifetime, format and logical-object cases. All ten pairwise
+comparisons pass on this machine. That includes distinct
+none/rescale/normalize signatures,
 all 16 logic operations, client- and buffer-backed 32-byte interleaved arrays,
 texture redefinition across asynchronous frame-slot reuse and deleting texture
 name zero without changing its default object. Exact cases remain exact;
@@ -106,8 +107,9 @@ runs of each backend. The six pairwise mismatch counts range from 55 pixels for
 GL46-to-Vulkan to 2,211 for NativeGL-to-D3D12, and alpha is exact in every pair.
 D3D12's differences are sparse edge/line components, including its classified
 width-2-to-width-1 fallback; they are not a state divergence or a reason to
-widen a tolerance. The final-render traces are byte-identical across all four
-backends; the complete measurements and hashes are in `parity-testing.md`.
+widen a tolerance. The established NativeGL/GL46/Vulkan/D3D12 final-render
+traces and the separate NativeGL/GL2.1 trace are byte-identical within their
+matched capture workloads; measurements and hashes are in `parity-testing.md`.
 
 ## Specification decisions
 
@@ -187,7 +189,7 @@ created by the first bind. Binding an unused nonzero name also creates an object
 Deleting the bound object rebinds zero; deleting zero or an unknown name is
 ignored. The GPU case `texture.zero-delete-preserves-default` was added after it
 caught a translated-backend regression that released the physical default
-texture for name zero; all four recorders now preserve the same texel before and
+texture for name zero; all five recorders now preserve the same texel before and
 after that delete.
 
 ### Matrix stack depths
@@ -267,22 +269,20 @@ frozen clock. This is capture-fixture control, not a renderer behaviour change.
 ### Dithering
 
 Legacy GL enables dithering by default, the facade tracks that state, and the
-renderer never changes it. NativeGL and GL46 preserve the driver's behaviour.
-Vulkan receives the enabled state in resolved draws, but the verified RTX 5070
-does not expose `VK_EXT_legacy_dithering`; D3D12 likewise has no equivalent
-fixed-function pipeline switch. Neither backend invents a shader dither.
-The parity policy is still unresolved, so current Gate D measurements record
-the API/device behaviour without treating sparse differences as a widened
-tolerance. The choices that must be settled before framebuffer goldens are
-listed in `parity-testing.md`.
+renderer never changes it. The parity policy preserves each API's native
+behaviour. NativeGL, GL2.1 and GL46 retain driver dithering. The verified Vulkan
+device does not expose `VK_EXT_legacy_dithering`; D3D12 has no corresponding
+fixed-function switch. Those paths report `unavailable-no-emulation` and do not
+invent shader dithering. Golden manifests record the selected path, and only
+pixels proven dither-dependent receive that classification.
 
 ### Polygon offset and line width
 
 The OpenGL 4.6 backend applies the canonical polygon-offset factor and units at
 draw lowering. Vulkan maps the canonical units to `depthBiasConstantFactor`, the
 factor to `depthBiasSlopeFactor`, and uses a zero clamp. D3D12 lowers the same
-canonical values into its rasterizer state. All ten coplanar cases pass all six
-backend comparisons on the tested NVIDIA configuration. A future API/device
+canonical values into its rasterizer state. All ten coplanar cases pass all ten
+backend pair comparisons on the tested NVIDIA configuration. A future API/device
 combination still has to pass that calibration; this result is not a portable
 constant asserted without evidence.
 
@@ -331,9 +331,6 @@ renderer path that starts using one fails loudly at the `gl-inventory` test or a
 - **Out-of-bounds readback.** Vulkan and D3D12 readback is verified for in-bounds
   rectangles. A future out-of-bounds `glReadPixels` call needs explicit GL
   clipping and untouched destination regions before an image-to-buffer copy.
-- **Dithering policy.** The translated explicit APIs have no verified equivalent
-  for the oracle's default-enabled state. The golden policy remains to be
-  selected; current sparse image differences do not decide it implicitly.
 - **Coverage breadth.** Framebuffer comparison currently covers one deterministic
   scene, one NVIDIA GPU/driver and no authoritative golden corpus. Sparse
   rasterization differences are classified, not promoted into a broad tolerance.

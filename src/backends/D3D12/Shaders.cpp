@@ -55,6 +55,10 @@ cbuffer LegacyFFPBlock : register(b0)
 	uint4 uFlags1;
 	uint4 uFlags2;
 	uint4 uFlags3;
+	float4 uCurrentColor;
+	float4 uCurrentNormal;
+	float4 uCurrentTexCoord;
+	uint4 uFlags4;
 };
 
 struct VertexInput
@@ -168,28 +172,38 @@ float3 transformNormal(float3 objectNormal)
 
 float4 computePrimary(float3 objectPosition, float4 color, float3 objectNormal)
 {
-	if (uFlags0.x == 0u)
-		return saturate(color);
+	float4 primary = saturate(color);
+	if (uFlags0.x != 0u)
+	{
+		MaterialState material = uFrontMaterial;
+		if (uFlags0.z != 0u &&
+			(uFlags3.x == CM_FRONT || uFlags3.x == CM_FRONT_AND_BACK))
+		{
+			applyColorMaterial(material, color, uFlags3.y);
+		}
 
-	MaterialState material = uFrontMaterial;
-	if (uFlags0.z != 0u && (uFlags3.x == CM_FRONT || uFlags3.x == CM_FRONT_AND_BACK))
-		applyColorMaterial(material, color, uFlags3.y);
-
-	float3 eyePosition = mul(uModelView, float4(objectPosition, 1.0)).xyz;
-	return computeLighting(material, transformNormal(objectNormal), eyePosition);
+		float3 eyePosition = mul(uModelView, float4(objectPosition, 1.0)).xyz;
+		primary = computeLighting(material, transformNormal(objectNormal), eyePosition);
+	}
+	return primary;
 }
 
 VertexOutput main(VertexInput input)
 {
-	VertexOutput output;
+	VertexOutput output = (VertexOutput)0;
+	float4 color = uFlags4.x != 0u ? input.color : uCurrentColor;
+	float3 normal = uFlags4.y != 0u ? input.normal : uCurrentNormal.xyz;
+	float2 texCoord = uFlags4.z != 0u ? input.texCoord : uCurrentTexCoord.xy;
+	float4 flatColor = uFlags4.x != 0u ? input.flatColor : uCurrentColor;
+	float3 flatNormal = uFlags4.y != 0u ? input.flatNormal : uCurrentNormal.xyz;
 	float4 eyePosition = mul(uModelView, float4(input.position, 1.0));
 	float4 glClip = mul(uProjection, eyePosition);
 	output.position = float4(glClip.xy, 0.5 * (glClip.z + glClip.w), glClip.w);
 
-	float4 transformedTexCoord = mul(uTexture, float4(input.texCoord, 0.0, 1.0));
+	float4 transformedTexCoord = mul(uTexture, float4(texCoord, 0.0, 1.0));
 	output.texCoord = transformedTexCoord.xyw;
-	output.smoothPrimary = computePrimary(input.position, input.color, input.normal);
-	output.flatPrimary = computePrimary(input.flatPosition, input.flatColor, input.flatNormal);
+	output.smoothPrimary = computePrimary(input.position, color, normal);
+	output.flatPrimary = computePrimary(input.flatPosition, flatColor, flatNormal);
 	output.fogCoord = uFlags1.w == 2u ? length(eyePosition.xyz) :
 		(uFlags1.w == 1u ? eyePosition.z : abs(eyePosition.z));
 	return output;
@@ -252,6 +266,10 @@ cbuffer LegacyFFPBlock : register(b0)
 	uint4 uFlags1;
 	uint4 uFlags2;
 	uint4 uFlags3;
+	float4 uCurrentColor;
+	float4 uCurrentNormal;
+	float4 uCurrentTexCoord;
+	uint4 uFlags4;
 };
 
 Texture2D<float4> uTextureSampler : register(t0);
@@ -277,43 +295,47 @@ float mapLegacyCoordinate(float coordinate, float sourceSize, float derivedSize,
 
 float4 sampleLegacyTexture(float2 coordinate)
 {
-	if (uFlags3.w == 0u)
-		return uTextureSampler.Sample(uSampler, coordinate);
-
-	float2 mapped = float2(
-		mapLegacyCoordinate(coordinate.x, uTextureSize.x, uTextureSize.z, uFlags2.z),
-		mapLegacyCoordinate(coordinate.y, uTextureSize.y, uTextureSize.w, uFlags2.w));
-	return uTextureSampler.Sample(uSampler, mapped);
+	float4 sampled = uTextureSampler.Sample(uSampler, coordinate);
+	if (uFlags3.w != 0u)
+	{
+		float2 mapped = float2(
+			mapLegacyCoordinate(coordinate.x, uTextureSize.x, uTextureSize.z, uFlags2.z),
+			mapLegacyCoordinate(coordinate.y, uTextureSize.y, uTextureSize.w, uFlags2.w));
+		sampled = uTextureSampler.Sample(uSampler, mapped);
+	}
+	return sampled;
 }
 
 bool alphaTestPass(float alpha, float reference, uint functionCode)
 {
-	if (functionCode == ALPHA_NEVER) return false;
-	if (functionCode == ALPHA_LESS) return alpha < reference;
-	if (functionCode == ALPHA_EQUAL) return alpha == reference;
-	if (functionCode == ALPHA_LEQUAL) return alpha <= reference;
-	if (functionCode == ALPHA_GREATER) return alpha > reference;
-	if (functionCode == ALPHA_NOTEQUAL) return alpha != reference;
-	if (functionCode == ALPHA_GEQUAL) return alpha >= reference;
-	return true;
+	bool passed = true;
+	if (functionCode == ALPHA_NEVER) passed = false;
+	else if (functionCode == ALPHA_LESS) passed = alpha < reference;
+	else if (functionCode == ALPHA_EQUAL) passed = alpha == reference;
+	else if (functionCode == ALPHA_LEQUAL) passed = alpha <= reference;
+	else if (functionCode == ALPHA_GREATER) passed = alpha > reference;
+	else if (functionCode == ALPHA_NOTEQUAL) passed = alpha != reference;
+	else if (functionCode == ALPHA_GEQUAL) passed = alpha >= reference;
+	return passed;
 }
 
 float fogFactor(float coordinate)
 {
+	float factor = 1.0;
 	if (uFlags1.z == FOG_LINEAR)
 	{
 		float denominator = uFogParams.y - uFogParams.x;
-		return denominator != 0.0 ? saturate((uFogParams.y - coordinate) / denominator) :
+		factor = denominator != 0.0 ? saturate((uFogParams.y - coordinate) / denominator) :
 			(coordinate < uFogParams.y ? 1.0 : 0.0);
 	}
-	if (uFlags1.z == FOG_EXP)
-		return saturate(exp(-uFogParams.z * coordinate));
-	if (uFlags1.z == FOG_EXP2)
+	else if (uFlags1.z == FOG_EXP)
+		factor = saturate(exp(-uFogParams.z * coordinate));
+	else if (uFlags1.z == FOG_EXP2)
 	{
 		float densityCoordinate = uFogParams.z * coordinate;
-		return saturate(exp(-(densityCoordinate * densityCoordinate)));
+		factor = saturate(exp(-(densityCoordinate * densityCoordinate)));
 	}
-	return 1.0;
+	return factor;
 }
 
 float4 shade(PixelInput input)

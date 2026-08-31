@@ -127,6 +127,12 @@ public:
 	// walks the client arrays itself, so decoding them again would be pure
 	// overhead on the reference path.
 	virtual bool wantsCanonicalGeometry() const { return false; }
+	// Some compatibility backends need canonical display-list geometry for
+	// static residency but keep transient draws on the original raw path.
+	virtual bool wantsTransientCanonicalGeometry() const { return wantsCanonicalGeometry(); }
+	// GPU-free semantic tests inspect Context::lastGeometry(). Production
+	// backends leave this off so fully supplied resident geometry stays borrowed.
+	virtual bool wantsLastGeometrySnapshot() const { return false; }
 
 	// Loader-neutral work emitted after the semantic core has validated each
 	// call and resolved all legacy state needed by a translated backend.

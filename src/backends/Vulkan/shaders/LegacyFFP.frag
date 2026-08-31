@@ -55,6 +55,10 @@ layout(std140, set = 0, binding = 0) uniform LegacyFFPBlock
 	uvec4 uFlags1;
 	uvec4 uFlags2;
 	uvec4 uFlags3;
+	vec4 uCurrentColor;
+	vec4 uCurrentNormal;
+	vec4 uCurrentTexCoord;
+	uvec4 uFlags4;
 };
 
 layout(set = 0, binding = 1) uniform sampler2D uTextureSampler;

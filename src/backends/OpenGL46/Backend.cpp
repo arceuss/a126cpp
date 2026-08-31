@@ -10,8 +10,10 @@
 #include "backends/OpenGL/Context.h"
 #include "backends/OpenGL46/Shaders.h"
 #include "legacygl/Sink.h"
+#include "legacygl/PixelFormat.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +23,8 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <stdexcept>
+#include <tuple>
 #include <vector>
 
 namespace legacygl
@@ -37,6 +41,17 @@ struct CoreGPUVertex
 	float flatPosition[3];
 	float flatColor[4];
 	float flatNormal[3];
+};
+
+struct CoreResidentGeometryEntry
+{
+	GLuint vertexArray = 0;
+	GLuint vertexBuffer = 0;
+	Topology topology = Topology::Triangles;
+	std::size_t vertexCount = 0;
+	bool hasColor = false;
+	bool hasNormal = false;
+	bool hasTexCoord = false;
 };
 
 struct alignas(16) CoreGPUMaterial
@@ -96,6 +111,12 @@ struct CoreTexture
 	unsigned int derivedWrapS = 0;
 	unsigned int derivedWrapT = 0;
 	unsigned char derivedBorder[4] = { 0, 0, 0, 0 };
+	// Last values pushed into the sampler object. Zero is not a legal filter or
+	// wrap enum, so the first use always writes.
+	GLenum samplerMinFilter = 0;
+	GLenum samplerMagFilter = 0;
+	GLenum samplerWrapS = 0;
+	GLenum samplerWrapT = 0;
 };
 
 class CoreLogicalNameAllocator
@@ -251,86 +272,10 @@ static unsigned char coreFloatByte(float value)
 	return static_cast<unsigned char>(std::lround(value * 255.0f));
 }
 
-static int corePixelComponents(unsigned int format)
-{
-	switch (format)
-	{
-		case GL_RGBA:
-		case GL_BGRA:
-			return 4;
-		case GL_RGB:
-		case GL_BGR:
-			return 3;
-		case GL_LUMINANCE_ALPHA:
-			return 2;
-		case GL_ALPHA:
-		case GL_LUMINANCE:
-			return 1;
-		default:
-			return 0;
-	}
-}
-
 static std::size_t coreAlignedRowSize(std::size_t rowSize, int alignment)
 {
 	const std::size_t value = static_cast<std::size_t>(alignment);
 	return (rowSize + value - 1) / value * value;
-}
-
-static void coreDecodePixel(const unsigned char *source, unsigned int format, unsigned char *rgba)
-{
-	switch (format)
-	{
-		case GL_RGBA:
-			rgba[0] = source[0]; rgba[1] = source[1]; rgba[2] = source[2]; rgba[3] = source[3];
-			break;
-		case GL_BGRA:
-			rgba[0] = source[2]; rgba[1] = source[1]; rgba[2] = source[0]; rgba[3] = source[3];
-			break;
-		case GL_RGB:
-			rgba[0] = source[0]; rgba[1] = source[1]; rgba[2] = source[2]; rgba[3] = 255;
-			break;
-		case GL_BGR:
-			rgba[0] = source[2]; rgba[1] = source[1]; rgba[2] = source[0]; rgba[3] = 255;
-			break;
-		case GL_LUMINANCE_ALPHA:
-			rgba[0] = source[0]; rgba[1] = source[0]; rgba[2] = source[0]; rgba[3] = source[1];
-			break;
-		case GL_ALPHA:
-			rgba[0] = 255; rgba[1] = 255; rgba[2] = 255; rgba[3] = source[0];
-			break;
-		default:
-			rgba[0] = source[0]; rgba[1] = source[0]; rgba[2] = source[0]; rgba[3] = 255;
-			break;
-	}
-}
-
-static void coreEncodePixel(const unsigned char *rgba, unsigned int format, unsigned char *destination)
-{
-	switch (format)
-	{
-		case GL_RGBA:
-			destination[0] = rgba[0]; destination[1] = rgba[1]; destination[2] = rgba[2]; destination[3] = rgba[3];
-			break;
-		case GL_BGRA:
-			destination[0] = rgba[2]; destination[1] = rgba[1]; destination[2] = rgba[0]; destination[3] = rgba[3];
-			break;
-		case GL_RGB:
-			destination[0] = rgba[0]; destination[1] = rgba[1]; destination[2] = rgba[2];
-			break;
-		case GL_BGR:
-			destination[0] = rgba[2]; destination[1] = rgba[1]; destination[2] = rgba[0];
-			break;
-		case GL_LUMINANCE_ALPHA:
-			destination[0] = rgba[0]; destination[1] = rgba[3];
-			break;
-		case GL_ALPHA:
-			destination[0] = rgba[3];
-			break;
-		default:
-			destination[0] = rgba[0];
-			break;
-	}
 }
 
 static GLuint coreCompileShader(GLenum type, const char *source)
@@ -495,6 +440,81 @@ static CoreGPUVertex coreGPUVertex(const Vertex &vertex, const Vertex &flat)
 	return result;
 }
 
+// Which optional attributes a draw supplies. The stream vertex array only has
+// to be respecified when this changes, which is what keeps an attribute-aware
+// layout from costing seven pointer calls on every transient draw.
+static unsigned int coreAttributeMask(const Geometry &geometry)
+{
+	return (geometry.hasColor ? 1u : 0u) | (geometry.hasNormal ? 2u : 0u) |
+		(geometry.hasTexCoord ? 4u : 0u);
+}
+
+// Redundant-state suppression, matching what the OpenGL 2.1 backend already
+// does. Terrain replays thousands of display lists per frame that share one
+// pipeline configuration, so applying it per draw cost roughly twenty GL calls
+// each.
+static bool coreSameEnables(const ResolvedEnableState &left, const ResolvedEnableState &right)
+{
+	static_assert(sizeof(ResolvedEnableState) == 16,
+		"ResolvedEnableState is compared as a packed bool block");
+	return std::memcmp(&left, &right, sizeof(ResolvedEnableState)) == 0;
+}
+
+static std::uint32_t coreFloatBits(float value)
+{
+	std::uint32_t result = 0;
+	std::memcpy(&result, &value, sizeof(result));
+	return result;
+}
+
+static bool coreSameBits(float left, float right)
+{
+	return coreFloatBits(left) == coreFloatBits(right);
+}
+
+static bool coreSamePipeline(const ResolvedPipelineState &left,
+	const ResolvedPipelineState &right)
+{
+	for (int i = 0; i < 4; i++)
+	{
+		if (left.colorWrite[i] != right.colorWrite[i] || left.viewport[i] != right.viewport[i])
+			return false;
+	}
+	return left.blendSource == right.blendSource &&
+		left.blendDestination == right.blendDestination &&
+		left.alphaFunction == right.alphaFunction &&
+		coreSameBits(left.alphaReference, right.alphaReference) &&
+		left.depthFunction == right.depthFunction &&
+		left.depthWrite == right.depthWrite &&
+		left.cullFaceMode == right.cullFaceMode &&
+		left.frontFaceMode == right.frontFaceMode &&
+		left.shadeModel == right.shadeModel &&
+		left.logicOpcode == right.logicOpcode &&
+		coreSameBits(left.lineWidth, right.lineWidth) &&
+		coreSameBits(left.polygonOffsetFactor, right.polygonOffsetFactor) &&
+		coreSameBits(left.polygonOffsetUnits, right.polygonOffsetUnits);
+}
+
+static std::vector<CoreGPUVertex> coreGPUVertices(const ResolvedDraw &command,
+	int verticesPerPrimitive)
+{
+	std::vector<CoreGPUVertex> vertices;
+	vertices.reserve(command.primitives->primitives.size() *
+		static_cast<std::size_t>(verticesPerPrimitive));
+	for (const CanonicalPrimitive &primitive : command.primitives->primitives)
+	{
+		const Vertex &flat = command.geometry->vertices[
+			static_cast<std::size_t>(primitive.provoking)];
+		for (int i = 0; i < verticesPerPrimitive; i++)
+		{
+			const Vertex &vertex = command.geometry->vertices[
+				static_cast<std::size_t>(primitive.indices[i])];
+			vertices.push_back(coreGPUVertex(vertex, flat));
+		}
+	}
+	return vertices;
+}
+
 class CoreGLSink : public Sink
 {
 public:
@@ -569,6 +589,7 @@ public:
 				if (found->second.handle != 0)
 					glDeleteTextures(1, &found->second.handle);
 				textures.erase(found);
+				textureBindingValid = false;
 			}
 		}
 	}
@@ -638,27 +659,127 @@ public:
 
 	bool wantsCanonicalGeometry() const override { return true; }
 
+	void releaseCanonicalGeometry(std::uint64_t residencyId) override
+	{
+		if (residencyId == 0)
+			return;
+		for (auto entry = residentGeometry.begin(); entry != residentGeometry.end();)
+		{
+			if (entry->first != residencyId)
+			{
+				++entry;
+				continue;
+			}
+			residentGeometryBytes -=
+				entry->second.vertexCount * sizeof(CoreGPUVertex);
+			residentGeometryReleases++;
+			glDeleteVertexArrays(1, &entry->second.vertexArray);
+			glDeleteBuffers(1, &entry->second.vertexBuffer);
+			entry = residentGeometry.erase(entry);
+		}
+	}
+
+	void releaseAllCanonicalGeometry()
+	{
+		for (auto &entry : residentGeometry)
+		{
+			glDeleteVertexArrays(1, &entry.second.vertexArray);
+			glDeleteBuffers(1, &entry.second.vertexBuffer);
+		}
+		residentGeometry.clear();
+		residentGeometryBytes = 0;
+	}
+
+	void shutdown()
+	{
+		std::fprintf(stdout,
+			"gl46: shutdown, resident cache hits=%llu, misses=%llu,"
+			" resident bytes=%llu, entries=%zu, explicit releases=%llu\n",
+			static_cast<unsigned long long>(residentCacheHits),
+			static_cast<unsigned long long>(residentCacheMisses),
+			static_cast<unsigned long long>(residentGeometryBytes),
+			residentGeometry.size(),
+			static_cast<unsigned long long>(residentGeometryReleases));
+		releaseAllCanonicalGeometry();
+		residentCacheHits = 0;
+		residentCacheMisses = 0;
+		residentGeometryReleases = 0;
+	}
 	void resolvedDraw(const ResolvedDraw &command) override
 	{
 		initialize();
-		if (command.geometry == nullptr || command.primitives == nullptr || command.geometry->vertices.empty())
+		if (command.geometry == nullptr || command.primitives == nullptr ||
+			command.geometry->vertices.empty())
 			return;
 
-		std::vector<CoreGPUVertex> vertices;
+		const Geometry &geometry = *command.geometry;
 		const int verticesPerPrimitive = command.primitives->topology == Topology::Points ? 1 :
 			(command.primitives->topology == Topology::Lines ? 2 : 3);
-		vertices.reserve(command.primitives->primitives.size() * static_cast<std::size_t>(verticesPerPrimitive));
-		for (const CanonicalPrimitive &primitive : command.primitives->primitives)
+		const std::size_t vertexCount = command.primitives->primitives.size() *
+			static_cast<std::size_t>(verticesPerPrimitive);
+		if (vertexCount == 0)
+			return;
+
+		GLuint drawVertexArray = vertexArray;
+		if (command.geometryResidencyId == 0)
 		{
-			const Vertex &flat = command.geometry->vertices[static_cast<std::size_t>(primitive.provoking)];
-			for (int i = 0; i < verticesPerPrimitive; i++)
+			const std::vector<CoreGPUVertex> vertices =
+				coreGPUVertices(command, verticesPerPrimitive);
+			const unsigned int attributeMask = coreAttributeMask(geometry);
+			if (!streamLayoutValid || streamAttributeMask != attributeMask)
 			{
-				const Vertex &vertex = command.geometry->vertices[static_cast<std::size_t>(primitive.indices[i])];
-				vertices.push_back(coreGPUVertex(vertex, flat));
+				configureVertexArray(vertexArray, vertexBuffer, geometry);
+				streamAttributeMask = attributeMask;
+				streamLayoutValid = true;
+			}
+			else
+			{
+				glBindVertexArray(vertexArray);
+				glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+			}
+			glBufferData(GL_ARRAY_BUFFER,
+				static_cast<GLsizeiptr>(vertices.size() * sizeof(CoreGPUVertex)),
+				vertices.data(), GL_STREAM_DRAW);
+		}
+		else
+		{
+			auto found = residentGeometry.find(command.geometryResidencyId);
+			if (found != residentGeometry.end())
+			{
+				residentCacheHits++;
+				if (found->second.topology != command.primitives->topology ||
+					found->second.vertexCount != vertexCount ||
+					found->second.hasColor != geometry.hasColor ||
+					found->second.hasNormal != geometry.hasNormal ||
+					found->second.hasTexCoord != geometry.hasTexCoord)
+				{
+					throw std::runtime_error(
+						"OpenGL 4.6 resident geometry identity changed while cached");
+				}
+				drawVertexArray = found->second.vertexArray;
+			}
+			else
+			{
+				residentCacheMisses++;
+				const std::vector<CoreGPUVertex> vertices =
+					coreGPUVertices(command, verticesPerPrimitive);
+				CoreResidentGeometryEntry entry;
+				entry.topology = command.primitives->topology;
+				entry.vertexCount = vertexCount;
+				entry.hasColor = geometry.hasColor;
+				entry.hasNormal = geometry.hasNormal;
+				entry.hasTexCoord = geometry.hasTexCoord;
+				glGenVertexArrays(1, &entry.vertexArray);
+				glGenBuffers(1, &entry.vertexBuffer);
+				configureVertexArray(entry.vertexArray, entry.vertexBuffer, geometry);
+				glBufferData(GL_ARRAY_BUFFER,
+					static_cast<GLsizeiptr>(vertices.size() * sizeof(CoreGPUVertex)),
+					vertices.data(), GL_STATIC_DRAW);
+				drawVertexArray = residentGeometry.emplace(
+					command.geometryResidencyId, entry).first->second.vertexArray;
+				residentGeometryBytes += vertexCount * sizeof(CoreGPUVertex);
 			}
 		}
-		if (vertices.empty())
-			return;
 
 		CoreGPUState state = {};
 		fillGPUState(command, state);
@@ -670,11 +791,10 @@ public:
 		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(state), &state);
 		glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniformBuffer);
 
-		glBindVertexArray(vertexArray);
-		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-		glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(CoreGPUVertex)),
-			vertices.data(), GL_STREAM_DRAW);
-		glDrawArrays(coreTopology(command.primitives->topology), 0, static_cast<GLsizei>(vertices.size()));
+		glBindVertexArray(drawVertexArray);
+		applyCurrentAttributes(command);
+		glDrawArrays(coreTopology(command.primitives->topology), 0,
+			static_cast<GLsizei>(vertexCount));
 	}
 
 	void resolvedClear(const ResolvedClear &command) override
@@ -687,6 +807,9 @@ public:
 		glClearColor(command.color[0], command.color[1], command.color[2], command.color[3]);
 		glClearDepth(command.depth);
 		glClear(command.mask);
+		// The clear path writes the same masks and enables that applyPipeline
+		// caches, so the next draw has to reapply them.
+		pipelineStateValid = false;
 	}
 
 	void resolvedTextureUpload(const ResolvedTextureUpload &command) override
@@ -705,9 +828,19 @@ public:
 			level.rgba.assign(static_cast<std::size_t>(command.width) * static_cast<std::size_t>(command.height) * 4, 0);
 		}
 
+		const PixelTransferFormat *transfer =
+			unsignedBytePixelTransferFormat(command.sourceFormat);
+		PixelStorageFormat storage;
+		if (command.sourceType != GL_UNSIGNED_BYTE || transfer == nullptr ||
+			!pixelStorageFormat(command.internalFormat, storage) ||
+			storage.physical != PhysicalPixelFormat::RGBA8)
+		{
+			throw std::runtime_error("OpenGL 4.6 texture upload received an unsupported pixel format");
+		}
+
 		if (command.pixels != nullptr && command.width > 0 && command.height > 0)
 		{
-			const int components = corePixelComponents(command.sourceFormat);
+			const int components = transfer->components;
 			const std::size_t sourceRow = coreAlignedRowSize(
 				static_cast<std::size_t>(command.width) * static_cast<std::size_t>(components), command.unpackAlignment);
 			const unsigned char *source = static_cast<const unsigned char *>(command.pixels);
@@ -716,8 +849,13 @@ public:
 				for (int x = 0; x < command.width; x++)
 				{
 					unsigned char rgba[4];
-					coreDecodePixel(source + static_cast<std::size_t>(y) * sourceRow +
-						static_cast<std::size_t>(x) * static_cast<std::size_t>(components), command.sourceFormat, rgba);
+					if (!decodeUnsignedBytePixel(source + static_cast<std::size_t>(y) * sourceRow +
+						static_cast<std::size_t>(x) * static_cast<std::size_t>(components),
+						command.sourceFormat, rgba) ||
+						!applyIntendedPixelFormat(storage.intended, rgba))
+					{
+						throw std::runtime_error("OpenGL 4.6 texture upload conversion failed");
+					}
 					const std::size_t destination = (static_cast<std::size_t>(command.y + y) *
 						static_cast<std::size_t>(level.width) + static_cast<std::size_t>(command.x + x)) * 4;
 					std::memcpy(level.rgba.data() + destination, rgba, 4);
@@ -733,12 +871,17 @@ public:
 		if (command.width == 0 || command.height == 0)
 			return;
 
+		const PixelTransferFormat *transfer =
+			unsignedBytePixelTransferFormat(command.format);
+		if (command.type != GL_UNSIGNED_BYTE || transfer == nullptr)
+			throw std::runtime_error("OpenGL 4.6 readback received an unsupported pixel format");
+
 		std::vector<unsigned char> rgba(static_cast<std::size_t>(command.width) *
 			static_cast<std::size_t>(command.height) * 4);
 		glPixelStorei(GL_PACK_ALIGNMENT, 1);
 		glReadPixels(command.x, command.y, command.width, command.height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
 
-		const int components = corePixelComponents(command.format);
+		const int components = transfer->components;
 		const std::size_t destinationRow = coreAlignedRowSize(
 			static_cast<std::size_t>(command.width) * static_cast<std::size_t>(components), command.packAlignment);
 		unsigned char *destination = static_cast<unsigned char *>(command.pixels);
@@ -748,17 +891,106 @@ public:
 			{
 				const unsigned char *source = rgba.data() +
 					(static_cast<std::size_t>(y) * static_cast<std::size_t>(command.width) + static_cast<std::size_t>(x)) * 4;
-				coreEncodePixel(source, command.format, destination + static_cast<std::size_t>(y) * destinationRow +
-					static_cast<std::size_t>(x) * static_cast<std::size_t>(components));
+				if (!encodeUnsignedBytePixel(source, command.format,
+					destination + static_cast<std::size_t>(y) * destinationRow +
+						static_cast<std::size_t>(x) * static_cast<std::size_t>(components)))
+				{
+					throw std::runtime_error("OpenGL 4.6 readback conversion failed");
+				}
 			}
 		}
 	}
 
 private:
+	void configureVertexArray(GLuint array, GLuint buffer, const Geometry &geometry)
+	{
+		glBindVertexArray(array);
+		glBindBuffer(GL_ARRAY_BUFFER, buffer);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
+			reinterpret_cast<const void *>(offsetof(CoreGPUVertex, position)));
+
+		if (geometry.hasColor)
+		{
+			glEnableVertexAttribArray(1);
+			glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
+				reinterpret_cast<const void *>(offsetof(CoreGPUVertex, color)));
+			glEnableVertexAttribArray(5);
+			glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
+				reinterpret_cast<const void *>(offsetof(CoreGPUVertex, flatColor)));
+		}
+		else
+		{
+			glDisableVertexAttribArray(1);
+			glDisableVertexAttribArray(5);
+		}
+
+		if (geometry.hasNormal)
+		{
+			glEnableVertexAttribArray(2);
+			glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
+				reinterpret_cast<const void *>(offsetof(CoreGPUVertex, normal)));
+			glEnableVertexAttribArray(6);
+			glVertexAttribPointer(6, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
+				reinterpret_cast<const void *>(offsetof(CoreGPUVertex, flatNormal)));
+		}
+		else
+		{
+			glDisableVertexAttribArray(2);
+			glDisableVertexAttribArray(6);
+		}
+
+		if (geometry.hasTexCoord)
+		{
+			glEnableVertexAttribArray(3);
+			glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
+				reinterpret_cast<const void *>(offsetof(CoreGPUVertex, texCoord)));
+		}
+		else
+			glDisableVertexAttribArray(3);
+
+		glEnableVertexAttribArray(4);
+		glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
+			reinterpret_cast<const void *>(offsetof(CoreGPUVertex, flatPosition)));
+	}
+
+	static void applyCurrentAttributes(const ResolvedDraw &command)
+	{
+		const Geometry &geometry = *command.geometry;
+		if (!geometry.hasColor)
+		{
+			glVertexAttrib4f(1, command.currentAttributes.r, command.currentAttributes.g,
+				command.currentAttributes.b, command.currentAttributes.a);
+			glVertexAttrib4f(5, command.currentAttributes.r, command.currentAttributes.g,
+				command.currentAttributes.b, command.currentAttributes.a);
+		}
+		if (!geometry.hasNormal)
+		{
+			glVertexAttrib3f(2, command.currentAttributes.nx, command.currentAttributes.ny,
+				command.currentAttributes.nz);
+			glVertexAttrib3f(6, command.currentAttributes.nx, command.currentAttributes.ny,
+				command.currentAttributes.nz);
+		}
+		if (!geometry.hasTexCoord)
+			glVertexAttrib2f(3, command.currentAttributes.s, command.currentAttributes.t);
+	}
+
 	void initialize()
 	{
 		if (initialized)
 			return;
+		if (!GLAD_GL_VERSION_4_6 || glad_glCreateShader == nullptr ||
+			glad_glGenVertexArrays == nullptr || glad_glGenBuffers == nullptr ||
+			glad_glGetInternalformativ == nullptr || glad_glTexImage2D == nullptr ||
+			glad_glDrawArrays == nullptr || glad_glReadPixels == nullptr)
+		{
+			throw std::runtime_error("OpenGL 4.6 Core backend is missing required functions");
+		}
+		GLint rgba8Supported = GL_FALSE;
+		glGetInternalformativ(GL_TEXTURE_2D, GL_RGBA8, GL_INTERNALFORMAT_SUPPORTED,
+			1, &rgba8Supported);
+		if (rgba8Supported != GL_TRUE)
+			throw std::runtime_error("OpenGL 4.6 Core backend requires GL_RGBA8 texture support");
 
 		program = coreCreateProgram();
 		if (program == 0)
@@ -779,31 +1011,7 @@ private:
 		glUniformBlockBinding(program, block, 0);
 
 		glGenVertexArrays(1, &vertexArray);
-		glBindVertexArray(vertexArray);
 		glGenBuffers(1, &vertexBuffer);
-		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-
-		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-			reinterpret_cast<const void *>(offsetof(CoreGPUVertex, position)));
-		glEnableVertexAttribArray(1);
-		glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-			reinterpret_cast<const void *>(offsetof(CoreGPUVertex, color)));
-		glEnableVertexAttribArray(2);
-		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-			reinterpret_cast<const void *>(offsetof(CoreGPUVertex, normal)));
-		glEnableVertexAttribArray(3);
-		glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-			reinterpret_cast<const void *>(offsetof(CoreGPUVertex, texCoord)));
-		glEnableVertexAttribArray(4);
-		glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-			reinterpret_cast<const void *>(offsetof(CoreGPUVertex, flatPosition)));
-		glEnableVertexAttribArray(5);
-		glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-			reinterpret_cast<const void *>(offsetof(CoreGPUVertex, flatColor)));
-		glEnableVertexAttribArray(6);
-		glVertexAttribPointer(6, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-			reinterpret_cast<const void *>(offsetof(CoreGPUVertex, flatNormal)));
 
 		glGenBuffers(1, &uniformBuffer);
 		glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer);
@@ -812,6 +1020,8 @@ private:
 
 		glGenTextures(1, &fallbackTexture);
 		glBindTexture(GL_TEXTURE_2D, fallbackTexture);
+		glActiveTexture(GL_TEXTURE0);
+		textureBindingValid = false;
 		const unsigned char black[4] = { 0, 0, 0, 255 };
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, black);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -823,6 +1033,12 @@ private:
 		std::fprintf(stderr, "LegacyGL gl46: aliased line width range %.3g..%.3g; width 2 is %s\n",
 			lineWidthRange[0], lineWidthRange[1],
 			(lineWidthRange[0] <= 2.0f && lineWidthRange[1] >= 2.0f) ? "native" : "fallback-to-1");
+		std::fprintf(stdout,
+			"LegacyGL gl46: capability_report profile=core texture_storage=GL_RGBA8"
+			" sampled=native transfer_src=native transfer_dst=native"
+			" line_width=%s legacy_dither=driver resource_state=driver-managed\n",
+			(lineWidthRange[0] <= 2.0f && lineWidthRange[1] >= 2.0f) ?
+				"native" : "width1-fallback");
 		initialized = true;
 	}
 
@@ -856,6 +1072,7 @@ private:
 		if (!useGutter)
 		{
 			glBindTexture(GL_TEXTURE_2D, texture.handle);
+			textureBindingValid = false;
 			glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, source.width, source.height, 0,
 				GL_RGBA, GL_UNSIGNED_BYTE, source.rgba.data());
@@ -901,6 +1118,7 @@ private:
 		}
 
 		glBindTexture(GL_TEXTURE_2D, texture.handle);
+		textureBindingValid = false;
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, derivedWidth, derivedHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, derived.data());
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
@@ -915,13 +1133,30 @@ private:
 		texture.derivedDirty = false;
 	}
 
+	// Binds the one texture unit the fixed-function pipeline exposes, skipping
+	// calls the driver already has. 26.2 caches the same things in
+	// GlStateManager; terrain replays thousands of draws that all share one
+	// texture and sampler.
+	void bindTextureUnit(GLuint handle, GLuint sampler)
+	{
+		if (!textureBindingValid || boundTexture != handle)
+		{
+			glBindTexture(GL_TEXTURE_2D, handle);
+			boundTexture = handle;
+		}
+		if (!textureBindingValid || boundSampler != sampler)
+		{
+			glBindSampler(0, sampler);
+			boundSampler = sampler;
+		}
+		textureBindingValid = true;
+	}
+
 	void bindTexture(const ResolvedDraw &command, CoreGPUState &state)
 	{
-		glActiveTexture(GL_TEXTURE0);
 		if (!command.enables.texture2D || !command.texture.complete)
 		{
-			glBindTexture(GL_TEXTURE_2D, fallbackTexture);
-			glBindSampler(0, 0);
+			bindTextureUnit(fallbackTexture, 0);
 			return;
 		}
 
@@ -929,8 +1164,7 @@ private:
 		CoreTextureLevel &level = texture.levels[0];
 		if (!level.defined)
 		{
-			glBindTexture(GL_TEXTURE_2D, fallbackTexture);
-			glBindSampler(0, 0);
+			bindTextureUnit(fallbackTexture, 0);
 			state.flags3[2] = 0;
 			return;
 		}
@@ -941,14 +1175,29 @@ private:
 
 		if (texture.sampler == 0)
 			glGenSamplers(1, &texture.sampler);
-		glSamplerParameteri(texture.sampler, GL_TEXTURE_MIN_FILTER, minFilter);
-		glSamplerParameteri(texture.sampler, GL_TEXTURE_MAG_FILTER, magFilter);
-		glSamplerParameteri(texture.sampler, GL_TEXTURE_WRAP_S,
-			useGutter ? GL_CLAMP_TO_EDGE : coreSamplerWrap(command.texture.wrapS));
-		glSamplerParameteri(texture.sampler, GL_TEXTURE_WRAP_T,
-			useGutter ? GL_CLAMP_TO_EDGE : coreSamplerWrap(command.texture.wrapT));
-		glBindTexture(GL_TEXTURE_2D, texture.handle);
-		glBindSampler(0, texture.sampler);
+		const GLenum wrapS = useGutter ? GL_CLAMP_TO_EDGE : coreSamplerWrap(command.texture.wrapS);
+		const GLenum wrapT = useGutter ? GL_CLAMP_TO_EDGE : coreSamplerWrap(command.texture.wrapT);
+		if (texture.samplerMinFilter != minFilter)
+		{
+			glSamplerParameteri(texture.sampler, GL_TEXTURE_MIN_FILTER, minFilter);
+			texture.samplerMinFilter = minFilter;
+		}
+		if (texture.samplerMagFilter != magFilter)
+		{
+			glSamplerParameteri(texture.sampler, GL_TEXTURE_MAG_FILTER, magFilter);
+			texture.samplerMagFilter = magFilter;
+		}
+		if (texture.samplerWrapS != wrapS)
+		{
+			glSamplerParameteri(texture.sampler, GL_TEXTURE_WRAP_S, wrapS);
+			texture.samplerWrapS = wrapS;
+		}
+		if (texture.samplerWrapT != wrapT)
+		{
+			glSamplerParameteri(texture.sampler, GL_TEXTURE_WRAP_T, wrapT);
+			texture.samplerWrapT = wrapT;
+		}
+		bindTextureUnit(texture.handle, texture.sampler);
 		state.textureSize[0] = static_cast<float>(level.width);
 		state.textureSize[1] = static_cast<float>(level.height);
 		state.textureSize[2] = static_cast<float>(level.width + 2);
@@ -1015,6 +1264,15 @@ private:
 
 	void applyPipeline(const ResolvedDraw &command)
 	{
+		if (pipelineStateValid && coreSameEnables(appliedEnables, command.enables) &&
+			coreSamePipeline(appliedPipeline, command.pipeline))
+		{
+			return;
+		}
+		appliedEnables = command.enables;
+		appliedPipeline = command.pipeline;
+		pipelineStateValid = true;
+
 		glViewport(command.pipeline.viewport[0], command.pipeline.viewport[1],
 			command.pipeline.viewport[2], command.pipeline.viewport[3]);
 		glDepthMask(command.pipeline.depthWrite);
@@ -1085,12 +1343,25 @@ private:
 	GLuint vertexBuffer = 0;
 	GLuint uniformBuffer = 0;
 	GLuint fallbackTexture = 0;
+	GLuint boundTexture = 0;
+	GLuint boundSampler = 0;
+	bool textureBindingValid = false;
 	float lineWidthRange[2] = { 1.0f, 1.0f };
 	bool lineWidthFallbackReported = false;
+	ResolvedEnableState appliedEnables;
+	ResolvedPipelineState appliedPipeline;
+	bool pipelineStateValid = false;
 	CoreLogicalNameAllocator textureNames;
 	CoreLogicalNameAllocator bufferNames;
 	std::uint64_t nextListName = 1;
 	std::map<unsigned int, CoreTexture> textures;
+	std::map<std::uint64_t, CoreResidentGeometryEntry> residentGeometry;
+	std::uint64_t residentCacheHits = 0;
+	std::uint64_t residentCacheMisses = 0;
+	std::uint64_t residentGeometryBytes = 0;
+	std::uint64_t residentGeometryReleases = 0;
+	unsigned int streamAttributeMask = 0;
+	bool streamLayoutValid = false;
 };
 
 static CoreGLSink theCoreGLSink;
@@ -1124,6 +1395,7 @@ static void openGL46Present()
 
 static void openGL46Shutdown()
 {
+	legacygl::theCoreGLSink.shutdown();
 	openglbackend::shutdown();
 }
 

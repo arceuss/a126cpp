@@ -11,6 +11,7 @@ src/backends/Platform/Platform.h
 src/backends/Platform/SDL2/Platform.{h,cpp}
 src/backends/NativeGL/Backend.cpp
 src/backends/OpenGL/Context.{h,cpp}
+src/backends/OpenGL21/Backend.cpp
 src/backends/OpenGL46/Backend.cpp
 src/backends/OpenGL46/Shaders.{h,cpp}
 src/backends/Vulkan/Backend.cpp
@@ -22,10 +23,12 @@ src/backends/D3D12/Shaders.{h,cpp}
 
 The production executable links the providers enabled for its platform and
 selects exactly one before graphics initialization with
-`--backend nativegl|gl46|vulkan|d3d12`. `nativegl` is the default. Unknown,
-unavailable, duplicate or missing backend arguments fail before a window or
-graphics context is created. Selection cannot change after startup, and only
-one sink is installed per process.
+`--backend nativegl|gl21|gl46|vulkan|d3d12`.
+`A126_DEFAULT_RENDER_BACKEND` is a compile definition selected by CMake and
+defaults to `gl21`; executable filenames are cosmetic and never select a
+backend. Unknown, unavailable, duplicate or missing backend arguments fail
+before a window or graphics context is created. Selection cannot change after
+startup, and only one sink is installed per process.
 
 The Vulkan provider obtains `vkGetInstanceProcAddr` from SDL only after a
 Vulkan window is selected. The all-backend executable and the Vulkan parity
@@ -36,9 +39,9 @@ Choose the platform independently with `A126_PLATFORM_BACKEND=SDL2`. `SDL2` is
 currently the default and only accepted exact value; any other value is a
 configure error. Renderer selection does not imply platform selection.
 
-`A126_ENABLE_GL_GPU_TESTS=ON` creates separate native, GL46, Vulkan and D3D12
-parity executables. Unlike production, each fixture links exactly one provider;
-this keeps recording independent of the run-time selector.
+`A126_ENABLE_GL_GPU_TESTS=ON` creates separate native, GL2.1, GL46, Vulkan and
+D3D12 parity executables. Unlike production, each fixture links exactly one
+provider; this keeps recording independent of the run-time selector.
 
 ## Portable platform and renderer lifecycle - working
 
@@ -79,12 +82,37 @@ It also answers the validation hooks - `queryFloatv` and `queryError` - so the
 semantic core's answers can be diffed against the driver's. Those hooks never
 answer a query the game makes.
 
+## OpenGL 2.1 compatibility with VBO residency - working
+
+`src/backends/OpenGL21/Backend.cpp` consumes the same resolved state as the
+explicit/Core backends but lowers it through OpenGL 2.1 compatibility
+operations. Every transient canonical draw uses a reusable `GL_STREAM_DRAW`
+VBO. Nonzero display-list residency identities use per-current-attribute
+variant `GL_STATIC_DRAW` VBOs and are deleted on list redefinition, deletion or
+context teardown. NativeGL remains a separate raw-call sink and pays no
+canonical decoding or VBO-cache cost.
+
+Current direct evidence:
+
+- the 153-case GL2.1 record compares successfully with NativeGL, including
+  current-colour list variants, format conversion, release and line cases;
+- two repeated 1920x1080 captures are byte-identical at SHA-256
+  `b86792a82bcff507fa4828e9c242d342aee709b5ca6641cc075b56c70436cc84`;
+- that capture differs from the unchanged NativeGL oracle at 477 of 2,073,600
+  pixels (0.023003472%), with exact alpha and the existing sparse
+  edge/interpolation classification;
+- the final-frame NativeGL and GL2.1 traces are byte-identical at SHA-256
+  `d6e7ddc855bbab312e19d0ee30a4cfa2ff62621ea65f9165421a503e6ffd525f`;
+- the hidden capture observed 3,809 static resident uploads, 101,708 cache hits
+  and 3,809 explicit releases. The equivalent repeat varied only in
+  chunk-preparation counts while producing the same PNG.
+
 ## Null and recording backends - working
 
-The null backend renders nothing; the semantic core is unchanged. It lets 70
+The null backend renders nothing; the semantic core is unchanged. It lets 71
 LegacyGL tests run without a GPU and hands out deterministic object names so the
 tests can assert on them. Those tests are part of the currently passing
-269-case headless suite.
+274-case headless suite.
 
 The recording backend lives in the dispatch tests and asserts that every
 inventoried entry point reaches the backend exactly once, in order. It exists
@@ -113,14 +141,19 @@ Implemented:
 - colour/depth-mask- and scissor-enable-aware clears;
 - pack-aligned RGB/RGBA/BGR/BGRA/luminance/alpha readback in lower-left row
   order;
+- the shared `legacygl::PixelFormat` table distinguishes intended RGB/RGBA
+  semantics from physical RGBA8 storage and owns all seven unsigned-byte
+  upload/readback conversions;
+- startup rejects a missing 4.6 Core function set or unsupported `GL_RGBA8`
+  texture path and emits one machine-readable capability/fallback record;
 - polygon offset and classified line-width fallback;
 - no fixed-function entry point. The inventory recursively scans every GL46
   `.cpp` and `.h` and rejects compatibility calls and ARB aliases.
 
 Verification on the current machine:
 
-- all 269 headless cases pass;
-- the combined Release CTest run passes 12/12 and the 129-case NativeGL/GL46
+- all 274 headless cases pass;
+- the combined Release CTest run passes 17/17 and the 153-case NativeGL/GL46
   fixture comparison passes;
 - all four final-frame traces are byte-identical (2,165 lines, 73,251 bytes,
   SHA-256 `c0ce3c8ad48c62118323ac66dc2e79415317dde794f76cad804c6ee5eae9a278`);
@@ -177,6 +210,15 @@ Implemented:
   masks, and the exercised default-scissor behaviour;
 - pack-aligned RGB/RGBA/BGR/BGRA/luminance/alpha readback with format conversion
   and lower-left row order;
+- physical-device selection requires RGBA8 optimal-tiling sampled, linear-
+  filter, colour-attachment, blend, transfer-source and transfer-destination
+  support before the backend relies on that representation;
+- each owned image records its current layout, access mask and pipeline stages.
+  The transition helper derives barriers from that production state and updates
+  it only when the command is recorded; frame slots retain retired images until
+  their fence completes;
+- startup emits one machine-readable record naming the chosen RGBA8, logic-op,
+  line-rasterization, wide-line, dither and dynamic-state paths;
 - native Vulkan blend, depth, cull and front-face state. Physical-device
   selection requires `logicOp`, because Alpha exercises it, and device creation
   enables it; calibrated polygon depth bias and classified wide-line fallback;
@@ -200,8 +242,8 @@ versioned Windows install roots.
 
 Verification on the current machine:
 
-- all 269 GPU-free headless cases and the complete Release CTest run pass 12/12;
-- all three 129-case comparisons involving Vulkan pass, including first-use
+- all 274 GPU-free headless cases and the complete Release CTest run pass 17/17;
+- all four 153-case comparisons involving Vulkan pass, including first-use
   texture definition inside a display list, texture redefinition across
   asynchronous frame-slot reuse, current-colour resident variants, client- and
   buffer-backed 32-byte interleaved arrays, all ten polygon-offset cases and all
@@ -235,8 +277,8 @@ Known limits:
   extent. Other WSI colour spaces, mandatory alpha compositing, or fixed/clamped
   extents need backend-specific presentation handling;
 - the facade forwards default-enabled dither state, but the verified device does
-  not expose `VK_EXT_legacy_dithering`. No shader approximation is invented;
-  the framebuffer-golden policy remains unresolved;
+  not expose `VK_EXT_legacy_dithering`. The selected golden policy preserves
+  this native API behaviour and records `unavailable-no-emulation`;
 - Vulkan has no compatibility-query validation hooks. Game queries still come
   only from the shared semantic core;
 - framebuffer evidence is one deterministic scene on one NVIDIA GPU/driver,
@@ -302,12 +344,20 @@ Implemented:
 - colour/depth-mask-aware clears and the exercised default-scissor behaviour;
 - pack-aligned RGB/RGBA/BGR/BGRA/luminance/alpha readback, format conversion
   and lower-left row order;
+- adapter selection requires the typeless RGBA8 resource, sampled/renderable
+  UNORM view, renderable UINT logic-op view and D24S8 depth format through
+  `CheckFeatureSupport`, in addition to output-merger logic operations;
+- texture, resident-buffer and offscreen-target transitions update their
+  production state through one tracked helper. Replaced resources, descriptors
+  and resident ranges remain retained by the owning frame fence;
+- startup emits one machine-readable record naming the selected formats,
+  feature level, logic-op, line-width and dither paths;
 - no fixed-function or other OpenGL entry point. The backend-specific inventory
   deny scan rejects every `gl*` and `glad_gl*` call.
 
 Verification on the current machine:
 
-- the complete serialized Release CTest run passes 12/12; all three 129-case
+- the complete serialized Release CTest run passes 17/17; all four 153-case
   comparisons involving D3D12 pass, including cull/depth/blend/logic state,
   texture-zero deletion and resident current-colour variants;
 - an ephemeral fault-injection build reduced the SRV heap to four dynamic
@@ -344,41 +394,97 @@ Known limits:
   `glReadPixels` needs explicit clipping and untouched destination handling;
 - debug-layer warning ID 820 reports the non-optimized clear value as a
   performance warning; it is not suppressed and is not counted as an error;
-- D3D12 has no compatibility-query validation hooks, and no dither equivalent
-  has been selected. Queries remain core-owned and the golden dithering policy
-  remains unresolved;
+- D3D12 has no compatibility-query validation hooks or dither equivalent.
+  Queries remain core-owned; the selected golden policy records
+  `unavailable-no-emulation` without adding a shader approximation;
 - framebuffer evidence covers one scene and one NVIDIA device/driver rather
   than a multi-scene, multi-vendor golden corpus.
 
+## ANGLE/Zink phase disposition
+
+| design phase | Vulkan | D3D12 |
+|---|---|---|
+| backend state synchronization | current logical/native pipeline fast path plus exact viewport, scissor, line-width and depth-bias suppression | command-list-scoped PSO, root-signature, topology, viewport, scissor and sampler-table suppression |
+| pipeline cache/prewarm | versioned driver cache is loaded, identity-checked, atomically saved and measured cold/warm | the measured World4 corpus creates 16 PSOs in 1.47 ms total over 2,600 frames; persistent libraries/background prewarm are intentionally not added because creation is not the measured frame bottleneck |
+| intended/physical formats | shared intended RGB/RGBA table, physical RGBA8 choice and device feature checks | shared intended RGB/RGBA table, typeless/UNORM/UINT physical views and `CheckFeatureSupport` gates |
+| resource state/lifetime | tracked image layout/access/stage plus fence-owned images, streams and resident allocations | tracked resource states plus fence-owned descriptors, resources, uploads and resident allocations |
+| capability/fallback report | machine-readable format, logic-op, line, dither, dynamic-state, cache and present paths | machine-readable feature-level, format, logic-op, line, dither and presentation paths |
+
+The no-prewarm D3D12 decision is profile-gated, not an unfinished placeholder.
+The same diagnostics identify millions of resolved draws and per-draw state
+copies as the actual workload cost; resident-geometry borrowing and backend
+fast paths address that cost without changing the frontend stream.
+
+## Repeatable subsystem profiling
+
+`tools/Profile-Renderers.ps1` configures one isolated Release client and runs
+the same hidden `--sign-bench` workload through the selected providers.
+Defaults are five repetitions, 2,000 World4 warm-up frames, 600 measured
+frames, generated sign-control/board/text workloads, and both normal and
+forced-`glFinish` attribution. One deterministic tick every ten frames gives
+every backend the same game-state sequence and tick count. The frame argument
+means measured frames; warm-up is added rather than silently consuming the
+requested sample count.
+
+Each run preserves its raw backend log and writes a JSONL record containing the
+executable hash, backend/device/capability report, workload, resolution,
+validation/diagnostic flags, warm-up and measured counts, cache cold/warm class,
+frame/tick/light/render/finish distributions, chunk updates, sign mode and the
+backend's pipeline, descriptor/sampler, dynamic-state, barrier/transition,
+pass-break, upload, retirement, residency and fence counters where applicable.
+`profile-summary.csv` reports per-workload medians without discarding the raw
+count evidence.
+
 ## Comparable Release timing
 
-The same existing `World4` was copied fresh for each backend. With hidden
-windows, validation and tracing off, 2,000 warm-up frames and 600 measured
-frames produced:
+Five isolated diagnostics-off runs used the same `World4`, 854x480 hidden
+window, one tick per ten frames, 2,000 warm-up frames and 600 measured frames.
+The medians in
+`profile-results/final-world-deterministic/profile-summary.csv` are:
 
-| backend | FPS | p50 ms | p95 ms |
+| backend | median mean ms | median p95 ms | median FPS |
 |---|---:|---:|---:|
-| NativeGL | 372.526586 | 2.3511 | 4.8113 |
-| OpenGL 4.6 Core | 21.359262 | 46.4773 | 48.0483 |
-| Vulkan | 67.834315 | 14.4745 | 15.8546 |
-| D3D12 | 70.945611 | 13.7796 | 15.3080 |
+| NativeGL | 2.797180 | 5.1267 | 357.503 |
+| GL2.1 resident VBO | 4.790767 | 6.4093 | 208.735 |
+| Vulkan, warm driver cache | 5.793105 | 7.1477 | 172.619 |
+| D3D12 | 5.245803 | 6.7110 | 190.629 |
 
-These are same-machine Release measurements, not cross-machine guarantees.
-They show both explicit backends ahead of the translated GL46 path for this
-workload, while the native compatibility oracle remains substantially faster.
+The translated targets remain slower than the compatibility oracle, but their
+normal frame latency is within 2.0--3.0 ms and all exceed 170 FPS.
+This is the selected meaning of the user-requested close-or-better target; no
+backend, validation, resolution or workload difference is hidden.
+
+Forced-finish medians are recorded separately in
+`profile-results/final-world-finish-deterministic/profile-summary.csv`:
+
+| backend | median mean ms | median p95 ms | median FPS |
+|---|---:|---:|---:|
+| NativeGL | 3.116589 | 5.4052 | 320.864 |
+| GL2.1 | 5.259637 | 6.9315 | 190.127 |
+| Vulkan, warm cache | 16.169296 | 49.3351 | 61.846 |
+| D3D12 | 43.643555 | 100.7169 | 22.913 |
+
+Those explicit-API stalls are intentionally visible rather than averaged into
+normal frame overlap. The diagnostics-enabled sign corpus in
+`profile-results/final-sign-subsystems-deterministic` separates control,
+blank-board and text costs. Normal median means for
+control/boards/text respectively are NativeGL 4.175/4.543/5.410 ms, GL2.1
+10.496/16.400/18.067 ms, Vulkan 8.333/9.698/11.947 ms, and D3D12
+7.910/9.375/11.633 ms; each raw log retains pipeline, descriptor, transition,
+pass, upload, retirement, residency and wait counters.
 
 ## Milestone check
 
 | requirement | state |
 |---|---|
-| NativeGL remains the compatibility oracle | yes, selected by default and verified by running the game |
-| production backend selection is startup-only | yes, `--backend nativegl\|gl46\|vulkan\|d3d12` is parsed before graphics initialization; native is the default |
+| NativeGL remains the compatibility oracle | yes, kept separate and verified by running the game; GL2.1 is the default |
+| production backend selection is startup-only | yes, `--backend nativegl\|gl21\|gl46\|vulkan\|d3d12` is parsed before graphics initialization; CMake defaults to GL2.1 and filenames are ignored |
 | platform selection and lifecycle are separate from the renderer | yes, exact `A126_PLATFORM_BACKEND=SDL2` today, with renderer -> window -> platform teardown |
 | renderer/game GL call ordering is unchanged | yes, final-frame traces match byte for byte |
 | the GL API subset is inventoried | yes, generated and enforced by `a126cpp-gl-inventory` |
 | one shared LegacyGL semantic core serves all production backends | yes, `src/legacygl/Context` and resolved commands |
 | GL46 runs on a real Core profile without fixed-function calls | yes, verified at startup, by inventory and by hidden capture |
 | Vulkan and D3D12 run without OpenGL calls | yes, verified by both deny scans, validation and hidden captures |
-| focused GPU behaviour matches the oracle | yes, all six 129-case pairwise comparisons pass under the documented exact/tolerant/fallback classes |
+| focused GPU behaviour matches the oracle | yes, all ten 153-case pairwise comparisons pass under the documented exact/tolerant/fallback classes |
 | deterministic framebuffer comparison exists | yes, preliminary single-scene Gate D with classified differences |
 | explicit-API implementations exist | yes, Vulkan and Direct3D 12 |

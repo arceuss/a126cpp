@@ -17,10 +17,12 @@ static DispatcherState &dispatcherState()
 	return state;
 }
 
-static const Backend *firstBackend()
+static const Backend *firstAvailableBackend()
 {
 #if defined(A126_HAS_BACKEND_NATIVEGL)
 	return &nativeGLBackend();
+#elif defined(A126_HAS_BACKEND_OPENGL21)
+	return &openGL21Backend();
 #elif defined(A126_HAS_BACKEND_OPENGL46)
 	return &openGL46Backend();
 #elif defined(A126_HAS_BACKEND_VULKAN)
@@ -41,6 +43,10 @@ static const Backend *findBackend(const char *cliName)
 	if (std::strcmp(cliName, nativeGLBackend().cliName) == 0)
 		return &nativeGLBackend();
 #endif
+#if defined(A126_HAS_BACKEND_OPENGL21)
+	if (std::strcmp(cliName, openGL21Backend().cliName) == 0)
+		return &openGL21Backend();
+#endif
 #if defined(A126_HAS_BACKEND_OPENGL46)
 	if (std::strcmp(cliName, openGL46Backend().cliName) == 0)
 		return &openGL46Backend();
@@ -57,11 +63,21 @@ static const Backend *findBackend(const char *cliName)
 	return nullptr;
 }
 
+static const Backend *defaultBackend()
+{
+#ifdef A126_DEFAULT_RENDER_BACKEND
+	const Backend *configured = findBackend(A126_DEFAULT_RENDER_BACKEND);
+	if (configured != nullptr)
+		return configured;
+#endif
+	return firstAvailableBackend();
+}
+
 static const Backend &activeBackend()
 {
 	DispatcherState &state = dispatcherState();
 	if (state.selected == nullptr)
-		state.selected = firstBackend();
+		state.selected = defaultBackend();
 	return *state.selected;
 }
 
@@ -86,7 +102,7 @@ void initialize()
 {
 	DispatcherState &state = dispatcherState();
 	if (state.selected == nullptr)
-		state.selected = firstBackend();
+		state.selected = defaultBackend();
 	state.locked = true;
 	state.selected->initialize();
 }

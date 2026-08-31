@@ -157,6 +157,7 @@ public:
 	void finish() override {}
 
 	bool wantsCanonicalGeometry() const override { return true; }
+	bool wantsLastGeometrySnapshot() const override { return true; }
 
 private:
 	unsigned int nextTexture = 1;
@@ -294,6 +295,7 @@ void Context::reset()
 		releaseDisplayListGeometry(entry.second);
 	releaseDisplayListGeometry(compilingDefinition);
 	displayLists.clear();
+	canonicalPrimitiveCache.clear();
 	compilingDefinition.clear();
 	compilingListName = 0;
 	compilingListModeValue = GL_COMPILE;
@@ -379,12 +381,12 @@ void Context::record(const ListCommand &command)
 
 void Context::releaseDisplayListGeometry(const DisplayList &list)
 {
-	if (activeSink == nullptr)
-		return;
-
 	for (const Geometry &geometry : list.geometry)
 	{
-		if (geometry.residencyId != 0)
+		if (geometry.residencyId == 0)
+			continue;
+		canonicalPrimitiveCache.erase(geometry.residencyId);
+		if (activeSink != nullptr)
 			activeSink->releaseCanonicalGeometry(geometry.residencyId);
 	}
 }
@@ -2145,6 +2147,7 @@ void Context::executeTexImage2D(GLenum target, GLint level, GLint internalformat
 	{
 		ResolvedTextureUpload command;
 		command.sequence = callSequence;
+		command.displayListExecution = compilingListName != 0 || executionDepth != 0;
 		command.texture = textureBinding;
 		command.level = level;
 		command.width = width;
@@ -2192,6 +2195,7 @@ void Context::executeTexSubImage2D(GLenum target, GLint level, GLint xoffset, GL
 	{
 		ResolvedTextureUpload command;
 		command.sequence = callSequence;
+		command.displayListExecution = compilingListName != 0 || executionDepth != 0;
 		command.texture = textureBinding;
 		command.subImage = true;
 		command.level = level;
@@ -2888,49 +2892,87 @@ void Context::executeGeometry(const Geometry &geometry)
 
 	draws++;
 
-	// Only a backend that consumes resolved vertices pays for building them.
-	// The native backend already drew this geometry itself, and a chunk display
-	// list holds thousands of vertices that would otherwise be copied on every
-	// frame it is called.
-	if (activeSink == nullptr || !activeSink->wantsCanonicalGeometry())
+	// Display-list geometry may be retained even when transient draws stay on
+	// the raw compatibility path. This avoids decoding every dynamic draw for a
+	// backend that only needs static list residency.
+	const bool displayListExecution = geometry.residencyId != 0 ||
+		compilingListName != 0 || executionDepth != 0;
+	if (activeSink == nullptr ||
+		(displayListExecution ? !activeSink->wantsCanonicalGeometry() :
+			!activeSink->wantsTransientCanonicalGeometry()))
+	{
 		return;
+	}
+	const bool snapshotGeometry = activeSink->wantsLastGeometrySnapshot();
+	const Geometry *resolvedGeometry = &geometry;
+	if (snapshotGeometry)
+	{
+		lastDrawGeometry = geometry;
+		resolvedGeometry = &lastDrawGeometry;
+		if (!geometry.hasColor)
+		{
+			for (Vertex &vertex : lastDrawGeometry.vertices)
+			{
+				vertex.r = current.r;
+				vertex.g = current.g;
+				vertex.b = current.b;
+				vertex.a = current.a;
+			}
+		}
+		if (!geometry.hasNormal)
+		{
+			for (Vertex &vertex : lastDrawGeometry.vertices)
+			{
+				vertex.nx = current.nx;
+				vertex.ny = current.ny;
+				vertex.nz = current.nz;
+			}
+		}
+		if (!geometry.hasTexCoord)
+		{
+			for (Vertex &vertex : lastDrawGeometry.vertices)
+			{
+				vertex.s = current.s;
+				vertex.t = current.t;
+			}
+		}
+	}
 
-	lastDrawGeometry = geometry;
-	if (!geometry.hasColor)
+	// A display list's geometry is immutable, so its decomposition into
+	// canonical primitives is immutable too: it depends only on the mode and
+	// the vertex count. Rebuilding it on every replay cost one entry per
+	// triangle per draw, and a terrain frame replays thousands of lists.
+	// 26.2 and Sodium avoid the work entirely by sharing one prebuilt index
+	// buffer per topology; the provoking-vertex mapping fixed-function flat
+	// shading needs is what keeps us from sharing a single table, so the
+	// result is memoized per list instead. The cached batch is produced by the
+	// same canonicalizePrimitives call as before, so winding and provoking
+	// vertices are unchanged by construction.
+	const PrimitiveBatch *resolvedPrimitives = &lastDrawPrimitives;
+	if (geometry.residencyId != 0)
 	{
-		for (Vertex &vertex : lastDrawGeometry.vertices)
+		auto cached = canonicalPrimitiveCache.find(geometry.residencyId);
+		if (cached == canonicalPrimitiveCache.end())
 		{
-			vertex.r = current.r;
-			vertex.g = current.g;
-			vertex.b = current.b;
-			vertex.a = current.a;
+			PrimitiveBatch batch;
+			canonicalizePrimitives(geometry.mode, geometry.vertexCount, batch);
+			cached = canonicalPrimitiveCache.emplace(geometry.residencyId,
+				std::move(batch)).first;
 		}
+		resolvedPrimitives = &cached->second;
 	}
-	if (!geometry.hasNormal)
+	else
 	{
-		for (Vertex &vertex : lastDrawGeometry.vertices)
-		{
-			vertex.nx = current.nx;
-			vertex.ny = current.ny;
-			vertex.nz = current.nz;
-		}
+		canonicalizePrimitives(geometry.mode, geometry.vertexCount, lastDrawPrimitives);
 	}
-	if (!geometry.hasTexCoord)
-	{
-		for (Vertex &vertex : lastDrawGeometry.vertices)
-		{
-			vertex.s = current.s;
-			vertex.t = current.t;
-		}
-	}
-
-	canonicalizePrimitives(geometry.mode, geometry.vertexCount, lastDrawPrimitives);
 
 	ResolvedDraw command;
 	command.sequence = callSequence;
 	command.geometryResidencyId = geometry.residencyId;
-	command.geometry = &lastDrawGeometry;
-	command.primitives = &lastDrawPrimitives;
+	command.displayListExecution = displayListExecution;
+	command.geometry = resolvedGeometry;
+	command.primitives = resolvedPrimitives;
+	command.currentAttributes = current;
 	command.modelView = modelViewStack.top();
 	command.projection = projectionStack.top();
 	command.textureMatrix = textureStack.top();
@@ -3066,7 +3108,9 @@ void Context::drawArrays(GLenum mode, GLint first, GLsizei count)
 
 	// Validation mode needs the decoded vertices so the probe below can compare
 	// the driver's post-draw current colour against the last array element.
-	const bool wantGeometry = validate || (activeSink != nullptr && activeSink->wantsCanonicalGeometry());
+	const bool wantGeometry = validate || (activeSink != nullptr &&
+		(compilingListName != 0 ? activeSink->wantsCanonicalGeometry() :
+			activeSink->wantsTransientCanonicalGeometry()));
 	const Vertex colorBeforeDraw = current;
 	const Geometry *drawnGeometry = nullptr;
 
@@ -3617,9 +3661,6 @@ void Context::callList(GLuint list)
 	nextSequence();
 	traceCall(callSequence, "glCallList", list);
 
-	if (activeSink != nullptr)
-		activeSink->callList(list);
-
 	if (compilingListName != 0)
 	{
 		ListCommand command;
@@ -3627,13 +3668,20 @@ void Context::callList(GLuint list)
 		command.u0 = list;
 		record(command);
 		if (recordingOnly())
+		{
+			if (activeSink != nullptr)
+				activeSink->callList(list);
 			return;
+		}
 	}
 
-	// The backend executed its own copy of the list; the core replays its
-	// recorded commands so its state tracks the same result.
+	// Replay core state first. A compatibility sink can then execute a
+	// geometry-free native list to restore state changed after the final
+	// resolved action without moving any rendered work.
 	traceExecutionContext(list);
 	executeList(list);
+	if (activeSink != nullptr)
+		activeSink->callList(list);
 }
 
 void Context::callLists(GLsizei n, GLenum type, const GLvoid *lists)
@@ -3666,9 +3714,6 @@ void Context::callLists(GLsizei n, GLenum type, const GLvoid *lists)
 		setError(GL_INVALID_VALUE);
 		return;
 	}
-
-	if (activeSink != nullptr)
-		activeSink->callLists(n, type, lists);
 
 	// Decode the element array into names now. It is caller memory, so it is
 	// never retained.
@@ -3730,11 +3775,17 @@ void Context::callLists(GLsizei n, GLenum type, const GLvoid *lists)
 			list.names.push_back(names[static_cast<std::size_t>(i)]);
 		record(command);
 		if (recordingOnly())
+		{
+			if (activeSink != nullptr)
+				activeSink->callLists(n, type, lists);
 			return;
+		}
 	}
 
 	for (GLsizei i = 0; i < n; i++)
 		executeList(names[static_cast<std::size_t>(i)]);
+	if (activeSink != nullptr)
+		activeSink->callLists(n, type, lists);
 }
 
 void Context::deleteLists(GLuint list, GLsizei range)
@@ -3774,6 +3825,7 @@ void Context::emitResolvedClear(GLbitfield mask)
 
 	ResolvedClear command;
 	command.sequence = callSequence;
+	command.displayListExecution = compilingListName != 0 || executionDepth != 0;
 	command.mask = mask;
 	command.depth = clearDepthState;
 	command.depthWrite = depthMaskValue;

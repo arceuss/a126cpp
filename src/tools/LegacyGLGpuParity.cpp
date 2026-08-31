@@ -25,7 +25,7 @@ const int WindowWidth = 128;
 const int WindowHeight = 128;
 const int LineMaskWidth = 32;
 const int LineMaskHeight = 32;
-const char *RecordHeader = "a126cpp-legacygl-gpu-parity 4";
+const char *RecordHeader = "a126cpp-legacygl-gpu-parity 5";
 
 struct CaseResult
 {
@@ -68,6 +68,11 @@ static_assert(offsetof(InterleavedVertex, r) == 20, "Tesselator colours begin at
 
 typedef std::array<unsigned char, 3> Rgb;
 typedef std::array<unsigned char, 4> Rgba;
+
+const Rgba ReadbackColors[2][3] = {
+	{ Rgba{ 17, 31, 47, 19 }, Rgba{ 61, 71, 83, 43 }, Rgba{ 101, 109, 127, 79 } },
+	{ Rgba{ 3, 11, 23, 113 }, Rgba{ 41, 89, 59, 157 }, Rgba{ 200, 60, 35, 211 } }
+};
 
 std::string byteHex(const std::vector<unsigned char> &bytes)
 {
@@ -753,6 +758,68 @@ void recordTextureCases(ResultSet &results, bool enforceExpected)
 	glDeleteTextures(1, &texture);
 }
 
+void recordTextureFormatCases(ResultSet &results, bool enforceExpected)
+{
+	struct UploadCase
+	{
+		GLenum format;
+		const char *name;
+		std::array<unsigned char, 4> source;
+		Rgba expected;
+	};
+	const UploadCase cases[] = {
+		{ GL_ALPHA, "alpha", { 61, 0, 0, 0 }, { 0, 0, 0, 61 } },
+		{ GL_LUMINANCE, "luminance", { 47, 0, 0, 0 }, { 47, 47, 47, 255 } },
+		{ GL_LUMINANCE_ALPHA, "luminance-alpha", { 53, 71, 0, 0 }, { 53, 53, 53, 71 } },
+		{ GL_RGB, "rgb", { 17, 43, 89, 0 }, { 17, 43, 89, 255 } },
+		{ GL_BGR_EXT, "bgr", { 89, 43, 17, 0 }, { 17, 43, 89, 255 } },
+		{ GL_RGBA, "rgba", { 17, 43, 89, 113 }, { 17, 43, 89, 113 } },
+		{ GL_BGRA_EXT, "bgra", { 89, 43, 17, 113 }, { 17, 43, 89, 113 } }
+	};
+
+	configure2D(WindowWidth, WindowHeight);
+	GLuint texture = 0;
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+
+	for (const UploadCase &test : cases)
+	{
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, test.format, GL_UNSIGNED_BYTE,
+			test.source.data());
+		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		glEnable(GL_TEXTURE_2D);
+		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+		drawTexturedQuad(4.0f, 4.0f, 12.0f, 12.0f, 0.5f, 0.5f);
+		glFinish();
+		const Rgba actual = readRgba(8, 8);
+		const std::string name = "texture.upload." + std::string(test.name);
+		if (enforceExpected)
+			requireExact(name, actual, test.expected);
+		addRgbaCase(results, name, actual);
+	}
+
+	const Rgba rgbaSource = { 19, 71, 131, 37 };
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgbaSource.data());
+	glClear(GL_COLOR_BUFFER_BIT);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	drawTexturedQuad(4.0f, 4.0f, 12.0f, 12.0f, 0.5f, 0.5f);
+	glFinish();
+	const Rgba internalRgb = readRgba(8, 8);
+	const Rgba internalRgbExpected = { 19, 71, 131, 255 };
+	const std::string internalRgbName = "texture.internal-rgb.discards-source-alpha";
+	if (enforceExpected)
+		requireExact(internalRgbName, internalRgb, internalRgbExpected);
+	addRgbaCase(results, internalRgbName, internalRgb);
+
+	glDisable(GL_TEXTURE_2D);
+	glDeleteTextures(1, &texture);
+}
+
 void recordTextureZeroDeleteCase(ResultSet &results, bool enforceExpected)
 {
 	configure2D(WindowWidth, WindowHeight);
@@ -1220,13 +1287,29 @@ std::size_t alignedStride(std::size_t rowBytes, int alignment)
 	return (rowBytes + static_cast<std::size_t>(alignment) - 1) & ~(static_cast<std::size_t>(alignment) - 1);
 }
 
+std::size_t pixelFormatComponents(GLenum format)
+{
+	switch (format)
+	{
+		case GL_RGBA:
+		case GL_BGRA_EXT:
+			return 4;
+		case GL_RGB:
+		case GL_BGR_EXT:
+			return 3;
+		case GL_LUMINANCE_ALPHA:
+			return 2;
+		case GL_ALPHA:
+		case GL_LUMINANCE:
+			return 1;
+		default:
+			throw std::runtime_error("unsupported parity pixel format");
+	}
+}
+
 std::vector<unsigned char> expectedReadback(GLenum format, int alignment)
 {
-	const Rgb colors[2][3] = {
-		{ Rgb{ 255, 0, 0 }, Rgb{ 0, 255, 0 }, Rgb{ 0, 0, 255 } },
-		{ Rgb{ 255, 255, 0 }, Rgb{ 255, 0, 255 }, Rgb{ 0, 255, 255 } }
-	};
-	const std::size_t components = format == GL_RGBA ? 4 : 3;
+	const std::size_t components = pixelFormatComponents(format);
 	const std::size_t rowBytes = 3 * components;
 	const std::size_t stride = alignedStride(rowBytes, alignment);
 	std::vector<unsigned char> result(stride * 2, 0xCD);
@@ -1235,19 +1318,36 @@ std::vector<unsigned char> expectedReadback(GLenum format, int alignment)
 		for (std::size_t x = 0; x < 3; x++)
 		{
 			unsigned char *destination = result.data() + y * stride + x * components;
-			if (format == GL_BGR_EXT)
+			const Rgba &color = ReadbackColors[y][x];
+			const unsigned char luminance = static_cast<unsigned char>(std::min(255,
+				static_cast<int>(color[0]) + static_cast<int>(color[1]) + static_cast<int>(color[2])));
+			switch (format)
 			{
-				destination[0] = colors[y][x][2];
-				destination[1] = colors[y][x][1];
-				destination[2] = colors[y][x][0];
-			}
-			else
-			{
-				destination[0] = colors[y][x][0];
-				destination[1] = colors[y][x][1];
-				destination[2] = colors[y][x][2];
-				if (format == GL_RGBA)
-					destination[3] = 255;
+				case GL_RGBA:
+					destination[0] = color[0]; destination[1] = color[1];
+					destination[2] = color[2]; destination[3] = color[3];
+					break;
+				case GL_BGRA_EXT:
+					destination[0] = color[2]; destination[1] = color[1];
+					destination[2] = color[0]; destination[3] = color[3];
+					break;
+				case GL_RGB:
+					destination[0] = color[0]; destination[1] = color[1]; destination[2] = color[2];
+					break;
+				case GL_BGR_EXT:
+					destination[0] = color[2]; destination[1] = color[1]; destination[2] = color[0];
+					break;
+				case GL_LUMINANCE_ALPHA:
+					destination[0] = luminance; destination[1] = color[3];
+					break;
+				case GL_ALPHA:
+					destination[0] = color[3];
+					break;
+				case GL_LUMINANCE:
+					destination[0] = luminance;
+					break;
+				default:
+					throw std::runtime_error("unsupported parity readback format");
 			}
 		}
 	}
@@ -1259,30 +1359,30 @@ void recordReadbackCases(ResultSet &results, bool enforceExpected)
 	configure2D(3, 2);
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
-	const Rgb colors[2][3] = {
-		{ Rgb{ 255, 0, 0 }, Rgb{ 0, 255, 0 }, Rgb{ 0, 0, 255 } },
-		{ Rgb{ 255, 255, 0 }, Rgb{ 255, 0, 255 }, Rgb{ 0, 255, 255 } }
-	};
 	for (int y = 0; y < 2; y++)
 	{
 		for (int x = 0; x < 3; x++)
 		{
-			glColor4f(colors[y][x][0] / 255.0f, colors[y][x][1] / 255.0f,
-				colors[y][x][2] / 255.0f, 1.0f);
+			setColor(ReadbackColors[y][x]);
 			drawQuad(static_cast<float>(x), static_cast<float>(y),
 				static_cast<float>(x + 1), static_cast<float>(y + 1), 0.0f);
 		}
 	}
 	glFinish();
 
-	const GLenum formats[] = { GL_RGB, GL_BGR_EXT, GL_RGBA };
-	const char *formatNames[] = { "rgb", "bgr", "rgba" };
+	const GLenum formats[] = {
+		GL_ALPHA, GL_LUMINANCE, GL_LUMINANCE_ALPHA,
+		GL_RGB, GL_BGR_EXT, GL_RGBA, GL_BGRA_EXT
+	};
+	const char *formatNames[] = {
+		"alpha", "luminance", "luminance-alpha", "rgb", "bgr", "rgba", "bgra"
+	};
 	const int alignments[] = { 1, 2, 4, 8 };
-	for (std::size_t formatIndex = 0; formatIndex < 3; formatIndex++)
+	for (std::size_t formatIndex = 0; formatIndex < 7; formatIndex++)
 	{
 		for (int alignment : alignments)
 		{
-			const std::size_t components = formats[formatIndex] == GL_RGBA ? 4 : 3;
+			const std::size_t components = pixelFormatComponents(formats[formatIndex]);
 			const std::size_t stride = alignedStride(3 * components, alignment);
 			std::vector<unsigned char> actual(stride * 2, 0xCD);
 			glPixelStorei(GL_PACK_ALIGNMENT, alignment);
@@ -1418,6 +1518,7 @@ ResultSet recordCases()
 	recordLogicOpCases(results, enforceExpected);
 	recordAsymmetricTransformCase(results, enforceExpected);
 	recordTextureCases(results, enforceExpected);
+	recordTextureFormatCases(results, enforceExpected);
 	recordTextureZeroDeleteCase(results, enforceExpected);
 	recordDisplayListTextureCase(results, enforceExpected);
 	recordDisplayListCurrentColorCase(results, enforceExpected);

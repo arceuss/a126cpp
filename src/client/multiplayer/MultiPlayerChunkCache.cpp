@@ -21,41 +21,39 @@ bool MultiPlayerChunkCache::hasChunk(int_t x, int_t z)
 
 std::shared_ptr<LevelChunk> MultiPlayerChunkCache::getChunk(int_t x, int_t z)
 {
+	// Beta: an unloaded coordinate resolves to the one shared blank chunk
+	// (MultiPlayerChunkCache.java:52-57). Creating a chunk here instead made
+	// every world query outside the loaded set - lighting, entity movement,
+	// neighbour block updates - allocate and permanently retain a 32 KB block
+	// array plus its data layers, so exploring a server grew without bound.
+	// Only setChunkVisible and setChunkData create chunks, exactly as Beta does.
 	ChunkPos pos(x, z);
 	auto it = loadedChunks.find(pos);
-	if (it != loadedChunks.end())
-	{
-		return it->second;
-	}
-	// Alpha 1.2.6: getChunkFromChunkCoords creates chunk if it doesn't exist
-	// For multiplayer, create empty chunk that will be populated by packet data
-	return create(x, z);
+	return it == loadedChunks.end() ? emptyChunk : it->second;
 }
 
 void MultiPlayerChunkCache::drop(int_t x, int_t z)
 {
-	std::shared_ptr<LevelChunk> chunk = getChunk(x, z);
-	if (chunk != nullptr && !chunk->isEmpty())
-	{
-		chunk->unload();
-	}
-	
-	ChunkPos pos(x, z);
+	const ChunkPos pos(x, z);
 	auto it = loadedChunks.find(pos);
-	if (it != loadedChunks.end())
-	{
-		loadedChunkList.erase(
-			std::remove(loadedChunkList.begin(), loadedChunkList.end(), it->second),
-			loadedChunkList.end()
-		);
-		loadedChunks.erase(it);
-	}
+	if (it == loadedChunks.end())
+		return;
+
+	if (it->second != nullptr && !it->second->isEmpty())
+		it->second->unload();
+	loadedChunks.erase(it);
 }
 
 std::shared_ptr<LevelChunk> MultiPlayerChunkCache::create(int_t x, int_t z)
 {
 	ChunkPos pos(x, z);
-	
+	// Beta's create() replaces whatever is registered for the coordinate
+	// (MultiPlayerChunkCache.java:42-50). Reusing the live chunk keeps a
+	// repeated visibility packet from orphaning the previous one.
+	auto existing = loadedChunks.find(pos);
+	if (existing != loadedChunks.end())
+		return existing->second;
+
 	// Beta 1.2: Create chunk with 32768 bytes (16*16*128)
 	std::vector<ubyte_t> bytes(32768, 0);
 	std::shared_ptr<LevelChunk> chunk = Util::make_shared<LevelChunk>(level, bytes.data(), x, z);
@@ -64,7 +62,6 @@ std::shared_ptr<LevelChunk> MultiPlayerChunkCache::create(int_t x, int_t z)
 	std::fill(chunk->skyLight.data.begin(), chunk->skyLight.data.end(), static_cast<ubyte_t>(0xFF));
 	
 	loadedChunks[pos] = chunk;
-	loadedChunkList.push_back(chunk);
 	chunk->loaded = true;
 	
 	return chunk;
