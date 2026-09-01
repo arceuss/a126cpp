@@ -15,6 +15,8 @@ namespace detail
 {
 
 void pushEvent(const SDL_Event &e);
+void setSyntheticKeyState(int_t key, bool down);
+void pulseSyntheticKey(int_t key);
 
 }
 

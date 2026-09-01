@@ -4,6 +4,7 @@
 #include "pc/external/SDLException.h"
 #include "lwjgl/Keyboard.h"
 #include "lwjgl/Mouse.h"
+#include "lwjgl/Gamepad.h"
 
 #include "SDL.h"
 #include "SDL_vulkan.h"
@@ -105,8 +106,16 @@ void initialize()
 {
 	if (initialized)
 		return;
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO) < 0)
+	// The Switch has no SDL audio device in use: OpenAL talks to libnx audout
+	// directly, so initialising SDL's audio driver would be dead weight.
+	Uint32 subsystems = SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER |
+		SDL_INIT_GAMECONTROLLER;
+#ifndef __SWITCH__
+	subsystems |= SDL_INIT_AUDIO;
+#endif
+	if (SDL_Init(subsystems) < 0)
 		throw SDLException();
+	lwjgl::Gamepad::initialize();
 	initialized = true;
 	closeRequested = false;
 }
@@ -115,6 +124,7 @@ void shutdown()
 {
 	if (!initialized)
 		return;
+	lwjgl::Gamepad::shutdown();
 	SDL_Quit();
 	initialized = false;
 }
@@ -289,8 +299,14 @@ void pumpEvents()
 			case SDL_TEXTINPUT:
 				lwjgl::Keyboard::detail::pushEvent(event);
 				break;
+			case SDL_CONTROLLERDEVICEADDED:
+			case SDL_CONTROLLERDEVICEREMOVED:
+			case SDL_CONTROLLERDEVICEREMAPPED:
+				lwjgl::Gamepad::handleEvent(event);
+				break;
 		}
 	}
+	lwjgl::Gamepad::poll();
 }
 
 bool isCloseRequested()

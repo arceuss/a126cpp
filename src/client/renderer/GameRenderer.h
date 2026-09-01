@@ -71,6 +71,7 @@ public:
 	void setupGuiScreen();
 private:
 	void setupClearColor(float a);
+	void renderControllerPointer(int_t xm, int_t ym);
 	void setupFog(int_t mode);
 
 public:

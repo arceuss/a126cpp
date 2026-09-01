@@ -53,6 +53,8 @@
 
 #include "lwjgl/Display.h"
 #include "lwjgl/Keyboard.h"
+#include "lwjgl/Gamepad.h"
+#include "util/BackgroundTask.h"
 
 #include "CrashHandler.h"
 
@@ -263,6 +265,7 @@ void Minecraft::setScreen(std::shared_ptr<Screen> screen)
 		screen = Util::make_shared<DeathScreen>(*this);  // Beta: var1 = new DeathScreen() (Minecraft.java:373)
 
 	this->screen = std::move(screen);
+	lwjgl::Gamepad::setMenuMode(this->screen != nullptr);
 	if (this->screen != nullptr)  // Beta: if (var1 != null) (Minecraft.java:377)
 	{
 		releaseMouse();  // Beta: this.releaseMouse() (Minecraft.java:378)
@@ -568,6 +571,10 @@ void Minecraft::run()
 				fpsFrames = 0;
 			}
 		}
+
+		// Outstanding skin downloads and connection handshakes must finish
+		// before the objects they touch go away.
+		BackgroundTask::joinAll();
 #ifdef NDEBUG
 	}
 	catch (std::exception &e)
@@ -871,6 +878,9 @@ void Minecraft::handleGrabTexture()
 
 void Minecraft::tick()
 {
+	// Reclaim finished background threads (skin downloads, connection
+	// handshakes). They are joinable rather than detached; see BackgroundTask.
+	BackgroundTask::reap();
 
 	gameRenderer.pick(1.0f);
 

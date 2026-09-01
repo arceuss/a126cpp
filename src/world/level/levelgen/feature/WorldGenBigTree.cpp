@@ -404,7 +404,11 @@ bool WorldGenBigTree::place(Level &level, Random &random, int_t x, int_t y, int_
 {
 	// Beta: BasicTree.place()
 	this->thisLevel = &level;
-	long var6 = random.nextLong();
+	// long_t, not long: Random::nextLong returns 64 bits and Java's long is
+	// 64-bit, but long is 32-bit on Windows (LLP64). Using long truncated the
+	// seed there while leaving it intact on LP64 targets such as the Switch,
+	// so one world seed grew different trees per platform.
+	long_t var6 = random.nextLong();
 	this->rnd.setSeed(var6);
 	this->origin[0] = x;
 	this->origin[1] = y;

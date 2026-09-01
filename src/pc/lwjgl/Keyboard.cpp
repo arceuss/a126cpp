@@ -1,6 +1,7 @@
 #include "lwjgl/Keyboard.h"
 
 #include <queue>
+#include <array>
 #include <locale>
 #include <codecvt>
 
@@ -306,6 +307,7 @@ struct Event
 
 static Event event_current = {};
 static std::queue<Event> event_queue;
+static std::array<bool, KEY_MAX> synthetic_key_state = {};
 
 static bool has_retained_event = false;
 static Event event_retained = {};
@@ -354,6 +356,31 @@ void pushEvent(const SDL_Event &e)
 		for (char32_t c : utf32)
 			handleCharacter(c);
 	}
+}
+
+// The Switch controller layer drives these. SDL_GetKeyboardState reflects only
+// real hardware, so a synthesised key has to be recorded here for isKeyDown as
+// well as pushed as an event.
+void setSyntheticKeyState(int_t key, bool down)
+{
+	if (key <= KEY_NONE || key >= KEY_MAX)
+		return;
+	if (synthetic_key_state[static_cast<std::size_t>(key)] == down)
+		return;
+
+	synthetic_key_state[static_cast<std::size_t>(key)] = down;
+	handleKey(key, false, down);
+}
+
+// For actions the game reads as a single event (inventory, drop, pause) rather
+// than as a held state.
+void pulseSyntheticKey(int_t key)
+{
+	if (key <= KEY_NONE || key >= KEY_MAX)
+		return;
+
+	handleKey(key, false, true);
+	handleKey(key, false, false);
 }
 
 }
@@ -426,6 +453,12 @@ static int keyboard_state_size = 0;
 
 bool isKeyDown(int_t key)
 {
+	if (key > KEY_NONE && key < KEY_MAX &&
+		detail::synthetic_key_state[static_cast<std::size_t>(key)])
+	{
+		return true;
+	}
+
 	if (keyboard_state == nullptr)
 	{
 		keyboard_state = SDL_GetKeyboardState(&keyboard_state_size);

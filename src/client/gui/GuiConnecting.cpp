@@ -3,6 +3,7 @@
 #include "client/title/TitleScreen.h"
 #include "network/NetClientHandler.h"
 #include "network/ThreadConnectToServer.h"
+#include "util/BackgroundTask.h"
 #include "client/Minecraft.h"
 
 GuiConnecting::GuiConnecting(Minecraft &minecraft, const jstring &hostName, int_t port)
@@ -13,10 +14,10 @@ GuiConnecting::GuiConnecting(Minecraft &minecraft, const jstring &hostName, int_
 	
 	// Start connection thread
 	ThreadConnectToServer *thread = new ThreadConnectToServer(this, &minecraft, hostName, port);
-	std::thread([thread]() {
+	BackgroundTask::run([thread]() {
 		thread->run();
 		delete thread;
-	}).detach();
+	});
 }
 
 void GuiConnecting::tick()

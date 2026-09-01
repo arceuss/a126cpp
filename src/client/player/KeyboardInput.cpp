@@ -1,6 +1,10 @@
 #include "client/player/KeyboardInput.h"
 
 #include "client/Options.h"
+#include "lwjgl/Gamepad.h"
+#include "world/entity/player/Player.h"
+
+#include <algorithm>
 
 KeyboardInput::KeyboardInput(Options &options) : options(options)
 {
@@ -35,8 +39,19 @@ void KeyboardInput::tick(Player &player)
 	if (keys[KEY_LEFT]) xa++;
 	if (keys[KEY_RIGHT]) xa--;
 
+	// Analog stick is merged here rather than synthesised as four keys, so
+	// partial-speed movement survives.
+	xa += lwjgl::Gamepad::getMoveLeftRight();
+	ya += lwjgl::Gamepad::getMoveForward();
+	xa = std::max(-1.0f, std::min(1.0f, xa));
+	ya = std::max(-1.0f, std::min(1.0f, ya));
+
+	const int_t hotbarDirection = lwjgl::Gamepad::consumeHotbarDirection();
+	if (hotbarDirection != 0)
+		player.inventory.changeCurrentItem(hotbarDirection);
+
 	jumping = keys[KEY_JUMP];
-	sneaking = keys[KEY_SNEAK];
+	sneaking = keys[KEY_SNEAK] || lwjgl::Gamepad::isSneaking();
 
 	if (sneaking)
 	{

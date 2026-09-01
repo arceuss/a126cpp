@@ -50,6 +50,7 @@ OPTION(ALSOFT_BACKEND_PULSEAUDIO "Check for PulseAudio backend"       ON)
 OPTION(ALSOFT_BACKEND_COREAUDIO  "Check for CoreAudio backend"        ON)
 OPTION(ALSOFT_BACKEND_OPENSL     "Check for OpenSL backend"           ON)
 OPTION(ALSOFT_BACKEND_WAVE "Enable Wave Writer backend"               ON)
+OPTION(ALSOFT_BACKEND_SWITCH     "Check for Nintendo Switch backend"  ON)
 
 OPTION(ALSOFT_REQUIRE_ALSA       "Require ALSA backend"               OFF)
 OPTION(ALSOFT_REQUIRE_OSS        "Require OSS backend"                OFF)
@@ -63,6 +64,7 @@ OPTION(ALSOFT_REQUIRE_PORTAUDIO  "Require PortAudio backend"          OFF)
 OPTION(ALSOFT_REQUIRE_PULSEAUDIO "Require PulseAudio backend"         OFF)
 OPTION(ALSOFT_REQUIRE_COREAUDIO  "Require CoreAudio backend"          OFF)
 OPTION(ALSOFT_REQUIRE_OPENSL     "Require OpenSL backend"             OFF)
+OPTION(ALSOFT_REQUIRE_SWITCH     "Require Nintendo Switch backend"    OFF)
 
 OPTION(ALSOFT_DLOPEN  "Check for the dlopen API for loading optional libs"  ON)
 
@@ -510,6 +512,7 @@ SET(HAVE_PULSEAUDIO 0)
 SET(HAVE_COREAUDIO  0)
 SET(HAVE_OPENSL     0)
 SET(HAVE_WAVE       0)
+SET(HAVE_SWITCH_AUDIO 0)
 
 # Check ALSA backend
 IF(ALSOFT_BACKEND_ALSA)
@@ -715,6 +718,20 @@ IF(ALSOFT_BACKEND_OPENSL)
 ENDIF()
 IF(ALSOFT_REQUIRE_OPENSL AND NOT HAVE_OPENSL)
     MESSAGE(FATAL_ERROR "Failed to enabled required OpenSL backend")
+ENDIF()
+
+# Check for the Nintendo Switch (libnx audout) backend
+IF(ALSOFT_BACKEND_SWITCH)
+    CHECK_INCLUDE_FILE(switch.h HAVE_SWITCH_H)
+    IF(HAVE_SWITCH_H)
+        SET(HAVE_SWITCH_AUDIO 1)
+        SET(ALC_OBJS  ${ALC_OBJS} Alc/backends/switch.c)
+        SET(BACKENDS  "${BACKENDS} Switch,")
+        SET(EXTRA_LIBS nx ${EXTRA_LIBS})
+    ENDIF()
+ENDIF()
+IF(ALSOFT_REQUIRE_SWITCH AND NOT HAVE_SWITCH_AUDIO)
+    MESSAGE(FATAL_ERROR "Failed to enabled required Switch backend")
 ENDIF()
 
 # Optionally enable the Wave Writer backend

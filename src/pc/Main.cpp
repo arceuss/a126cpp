@@ -1,3 +1,7 @@
+#ifdef __SWITCH__
+#include "switch/SwitchRuntime.h"
+#endif
+
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
@@ -15,8 +19,25 @@
 #include "java/String.h"
 #include "java/System.h"
 
+
+#ifdef __SWITCH__
+// libnx calls userAppInit before the C++ static constructors and userAppExit
+// after the destructors, which is the only correct place for romfs: the game
+// has static objects that read resources.
+extern "C" void userAppInit(void)
+{
+	switchruntime::initialize();
+}
+
+extern "C" void userAppExit(void)
+{
+	switchruntime::shutdown();
+}
+#endif
+
 int main(int argc, char *argv[])
 {
+
 	int firstArgument = 1;
 	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--backend") == 0)
 	{

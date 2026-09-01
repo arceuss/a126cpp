@@ -116,24 +116,24 @@ void ImprovedNoise::add(double *out, double xin, double yin, double zin, int_t x
 		for (int_t xi = 0; xi < xd; xi++)
 		{
 			double x = (xin + xi) * xs + xo;
-			int_t __X = Mth::floor(x);
-			int_t _X = __X & 0xFF;
-			x -= __X;
+			int_t xFloor = Mth::floor(x);
+			int_t xMask = xFloor & 0xFF;
+			x -= xFloor;
 
 			double x_fade = fade(x);
 			for (int_t zi = 0; zi < zd; zi++)
 			{
 				double z = (zin + zi) * zs + zo;
-				int_t __Z = Mth::floor(z);
-				int_t _Z = __Z & 0xFF;
-				z -= __Z;
+				int_t zFloor = Mth::floor(z);
+				int_t zMask = zFloor & 0xFF;
+				z -= zFloor;
 
 				double z_fade = fade(z);
 
-				int_t p0 = p[_X]     + 0;
-				int_t p1 = p[p0]     + _Z;
-				int_t p2 = p[_X + 1] + 0;
-				int_t p3 = p[p2]     + _Z;
+				int_t p0 = p[xMask]     + 0;
+				int_t p1 = p[p0]        + zMask;
+				int_t p2 = p[xMask + 1] + 0;
+				int_t p3 = p[p2]        + zMask;
 
 				double l0 = lerp(x_fade, grad2(p[p1],     x,      z),       grad(p[p3],     x - 1.0, 0.0, z));
 				double l1 = lerp(x_fade, grad (p[p1 + 1], x, 0.0, z - 1.0), grad(p[p3 + 1], x - 1.0, 0.0, z - 1.0));
@@ -152,37 +152,37 @@ void ImprovedNoise::add(double *out, double xin, double yin, double zin, int_t x
 	for (int_t xi = 0; xi < xd; xi++)
 	{
 		double x = (xin + xi) * xs + xo;
-		int_t __X = Mth::floor(x);
-		int_t _X = __X & 0xFF;
-		x -= __X;
+		int_t xFloor = Mth::floor(x);
+		int_t xMask = xFloor & 0xFF;
+		x -= xFloor;
 
 		double x_fade = fade(x);
 		for (int_t zi = 0; zi < zd; zi++)
 		{
 			double z = (zin + zi) * zs + zo;
-			int_t __Z = Mth::floor(z);
-			int_t _Z = __Z & 0xFF;
-			z -= __Z;
+			int_t zFloor = Mth::floor(z);
+			int_t zMask = zFloor & 0xFF;
+			z -= zFloor;
 
 			double z_fade = fade(z);
 			for (int_t yi = 0; yi < yd; yi++)
 			{
 				double y = (yin + yi) * ys + yo;
-				int_t __Y = Mth::floor(y);
-				int_t _Y = __Y & 0xFF;
-				y -= __Y;
+				int_t yFloor = Mth::floor(y);
+				int_t yMask = yFloor & 0xFF;
+				y -= yFloor;
 
 				double y_fade = fade(y);
-				if (yi == 0 || _Y != lastY)
+				if (yi == 0 || yMask != lastY)
 				{
-					lastY = _Y;
+					lastY = yMask;
 
-					int_t p0 = p[_X]     + _Y;
-					int_t p1 = p[p0]     + _Z;
-					int_t p2 = p[p0 + 1] + _Z;
-					int_t p3 = p[_X + 1] + _Y;
-					int_t p4 = p[p3]     + _Z;
-					int_t p5 = p[p3 + 1] + _Z;
+					int_t p0 = p[xMask]     + yMask;
+					int_t p1 = p[p0]        + zMask;
+					int_t p2 = p[p0 + 1]    + zMask;
+					int_t p3 = p[xMask + 1] + yMask;
+					int_t p4 = p[p3]        + zMask;
+					int_t p5 = p[p3 + 1]    + zMask;
 
 					l0 = lerp(x_fade, grad(p[p1],     x, y,     z),     grad(p[p4],     x - 1, y,     z));
 					l1 = lerp(x_fade, grad(p[p2],     x, y - 1, z),     grad(p[p5],     x - 1, y - 1, z));

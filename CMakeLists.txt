@@ -343,8 +343,12 @@ set(Alpha126Cpp_SOURCES
 	"src/nbt/Tag.cpp"
 	"src/nbt/Tag.h"
 
+	"src/util/BackgroundTask.cpp"
+	"src/util/BackgroundTask.h"
 	"src/util/GLU.cpp"
 	"src/util/GLU.h"
+	"src/util/HttpGet.cpp"
+	"src/util/HttpGet.h"
 	"src/util/IntHashMap.h"
 	"src/util/Memory.h"
 	"src/util/Mth.cpp"
@@ -966,8 +970,15 @@ if(A126_PLATFORM_BACKEND STREQUAL "SDL2")
 		"src/backends/Platform/SDL2/Platform.cpp"
 		"src/backends/Platform/SDL2/Platform.h"
 	)
-	add_subdirectory("external/SDL2" EXCLUDE_FROM_ALL)
-	set(A126_PLATFORM_BACKEND_TARGET SDL2-static)
+	if(NINTENDO_SWITCH)
+		# Upstream SDL2 has no Switch support; use the devkitPro portlib,
+		# which is built against Mesa/EGL and the libnx HID/audio services.
+		find_package(SDL2 REQUIRED)
+		set(A126_PLATFORM_BACKEND_TARGET SDL2::SDL2-static)
+	else()
+		add_subdirectory("external/SDL2" EXCLUDE_FROM_ALL)
+		set(A126_PLATFORM_BACKEND_TARGET SDL2-static)
+	endif()
 else()
 	message(FATAL_ERROR "A126_PLATFORM_BACKEND must be SDL2")
 endif()
@@ -1000,11 +1011,12 @@ add_library(Alpha126CppCore OBJECT
 	"src/legacygl/Trace.cpp"
 	"src/legacygl/Trace.h"
 
-	"src/pc/external/miniaudio.cpp"
 	"src/pc/external/SDLException.h"
 	"src/pc/external/stb_vorbis.cpp"
 	"src/pc/external/stb_vorbis.h"
 
+	"src/pc/lwjgl/Gamepad.cpp"
+	"src/pc/lwjgl/Gamepad.h"
 	"src/pc/lwjgl/Display.cpp"
 	"src/pc/lwjgl/Display.h"
 	"src/pc/lwjgl/GLContext.cpp"
@@ -1014,6 +1026,12 @@ add_library(Alpha126CppCore OBJECT
 	"src/pc/lwjgl/Mouse.cpp"
 	"src/pc/lwjgl/Mouse.h"
 )
+
+if(NOT NINTENDO_SWITCH)
+	# miniaudio is compiled but never called (no ma_* use anywhere in src/), and
+	# its POSIX path includes <dlfcn.h>, which newlib does not have.
+	target_sources(Alpha126CppCore PRIVATE "src/pc/external/miniaudio.cpp")
+endif()
 
 target_include_directories(Alpha126CppCore PUBLIC "src")
 target_include_directories(Alpha126CppCore PUBLIC "src/pc")
@@ -1036,6 +1054,16 @@ elseif(APPLE)
 		"src/pc/linux/java/File.cpp"
 		"src/pc/linux/java/Resource.cpp"
 		"src/pc/linux/java/Runtime.cpp"
+	)
+elseif(NINTENDO_SWITCH)
+	# The POSIX implementation works against libnx's devoptab (romfs:/sdmc:);
+	# File.cpp carries __SWITCH__ arms for the resource and working roots.
+	target_sources(Alpha126CppCore PRIVATE
+		"src/pc/linux/java/File.cpp"
+		"src/pc/linux/java/Resource.cpp"
+		"src/pc/linux/java/Runtime.cpp"
+		"src/pc/switch/SwitchRuntime.cpp"
+		"src/pc/switch/SwitchRuntime.h"
 	)
 elseif(UNIX)
 	target_sources(Alpha126CppCore PRIVATE
@@ -1072,18 +1100,30 @@ else()
 	# -funroll-loops = unroll loops for better performance
 	# -finline-functions = aggressive function inlining
 	# -fomit-frame-pointer = omit frame pointer (frees a register, only for Release)
+	if(CMAKE_CROSSCOMPILING)
+		# Cross builds must not override the toolchain's -march (devkitPro
+		# pins -march=armv8-a+crc+crypto for the Switch), and LTO across
+		# switch.specs/libnx is not supported. Frame pointers are kept so
+		# crash reports stay unwindable.
+		set(A126_RELEASE_OPTS -O3 -funroll-loops -finline-functions)
+		set(A126_RELEASE_LINK_OPTS)
+	else()
+		set(A126_RELEASE_OPTS -O3 -march=native -funroll-loops -finline-functions)
+		set(A126_RELEASE_LINK_OPTS -flto)
+	endif()
 	target_compile_options(Alpha126CppCore PUBLIC
-		# -ffp-contract=off keeps Java bit-parity: with -march=native GCC's
-		# default -ffp-contract=fast fuses multiply-adds inside StrictMath's
-		# fdlibm log transcription and shifts nextGaussian by one ULP.
+		# -ffp-contract=off keeps Java bit-parity: GCC's default
+		# -ffp-contract=fast fuses multiply-adds inside StrictMath's fdlibm
+		# log transcription and shifts nextGaussian by one ULP. AArch64 has
+		# FMADD unconditionally, so this matters even without -march=native.
 		-ffp-contract=off
-		$<$<CONFIG:Release>:-O3 -march=native -funroll-loops -finline-functions -fomit-frame-pointer>
-		$<$<CONFIG:RelWithDebInfo>:-O3 -march=native -funroll-loops -finline-functions>
+		$<$<CONFIG:Release>:${A126_RELEASE_OPTS} $<$<NOT:$<BOOL:${CMAKE_CROSSCOMPILING}>>:-fomit-frame-pointer>>
+		$<$<CONFIG:RelWithDebInfo>:${A126_RELEASE_OPTS}>
 	)
 	# Link-time optimizations
 	target_link_options(Alpha126CppCore PUBLIC
-		$<$<CONFIG:Release>:-flto>
-		$<$<CONFIG:RelWithDebInfo>:-flto>
+		$<$<CONFIG:Release>:${A126_RELEASE_LINK_OPTS}>
+		$<$<CONFIG:RelWithDebInfo>:${A126_RELEASE_LINK_OPTS}>
 	)
 endif()
 
@@ -1091,6 +1131,12 @@ endif()
 target_link_libraries(Alpha126CppCore PUBLIC ${A126_PLATFORM_BACKEND_TARGET})
 
 add_subdirectory("external/glad" EXCLUDE_FROM_ALL)
+if(NINTENDO_SWITCH)
+	# newlib has no <dlfcn.h> and there is no libGL to dlopen; the game only
+	# ever loads GL through gladLoadGLLoader(SDL_GL_GetProcAddress), so the
+	# built-in dynamic loader is compiled out.
+	target_compile_definitions(glad PRIVATE GLAD_NO_LOADER)
+endif()
 
 if(DEFINED A126_RENDER_BACKEND)
 	message(STATUS "Ignoring deprecated A126_RENDER_BACKEND=${A126_RENDER_BACKEND}; select the renderer at runtime")
@@ -1098,7 +1144,13 @@ if(DEFINED A126_RENDER_BACKEND)
 	unset(A126_RENDER_BACKEND)
 endif()
 
-option(A126_ENABLE_VULKAN_BACKEND "Build the Vulkan renderer backend" ON)
+if(NINTENDO_SWITCH)
+	# No Vulkan driver exists in the homebrew toolchain (deko3d is the native
+	# low-level API), and the block below requires a host Vulkan SDK + glslc.
+	set(A126_ENABLE_VULKAN_BACKEND OFF)
+else()
+	option(A126_ENABLE_VULKAN_BACKEND "Build the Vulkan renderer backend" ON)
+endif()
 if(WIN32)
 	option(A126_ENABLE_D3D12_BACKEND "Build the Direct3D 12 renderer backend" ON)
 else()
@@ -1322,10 +1374,34 @@ target_include_directories(Alpha126CppCore PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/e
 
 target_include_directories(Alpha126CppCore PUBLIC "external/stb")
 target_include_directories(Alpha126CppCore PUBLIC "external/gzip-hpp/include")
-target_include_directories(Alpha126CppCore PUBLIC "external/cpp-httplib")
+if(NINTENDO_SWITCH)
+	# newlib gates POSIX/BSD declarations behind __POSIX_VISIBLE/__BSD_VISIBLE,
+	# which -std=c++17 (CXX_EXTENSIONS NO) switches off. glibc exposes them by
+	# default, which is why the Linux build needs no equivalent. Required for
+	# timeval, IP_TOS and gethostbyname in src/network.
+	target_compile_definitions(Alpha126CppCore PUBLIC _GNU_SOURCE)
+endif()
 
 target_include_directories(Alpha126CppCore PUBLIC "external/miniaudio")
 
+if(NINTENDO_SWITCH)
+	# Static-only platform: force a static archive (also required so consumers
+	# see undecorated AL_API), keep only the null + libnx audout backends, and
+	# pre-seed the probes that would otherwise test x86/hosted-OS assumptions.
+	set(LIBTYPE STATIC CACHE STRING "OpenAL-Soft library type" FORCE)
+	set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
+	set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
+	set(ALSOFT_CONFIG OFF CACHE BOOL "" FORCE)
+	set(ALSOFT_DLOPEN OFF CACHE BOOL "" FORCE)
+	set(ALSOFT_CPUEXT_SSE OFF CACHE BOOL "" FORCE)
+	set(ALSOFT_BACKEND_WAVE OFF CACHE BOOL "" FORCE)
+	set(HAVE_MSSE_SWITCH 0 CACHE INTERNAL "")
+	set(HAVE_PTHREAD 0 CACHE INTERNAL "")
+	set(HAVE_GCC_PROTECTED_VISIBILITY 0 CACHE INTERNAL "")
+	set(HAVE_GCC_DEFAULT_VISIBILITY 0 CACHE INTERNAL "")
+	set(HAVE_GETTIMEOFDAY 1 CACHE INTERNAL "")
+	set(HAVE_NANOSLEEP 1 CACHE INTERNAL "")
+endif()
 # OpenAL-Soft library - build from source
 # On Windows, the target is "OpenAL32", on other platforms it's "openal"
 add_subdirectory("external/openal-soft" EXCLUDE_FROM_ALL)
@@ -1349,6 +1425,11 @@ else()
 	else()
 		message(WARNING "openal target not found. Please check OpenAL-Soft CMakeLists.txt")
 	endif()
+endif()
+if(NINTENDO_SWITCH)
+	# The game's TUs include AL headers through this directory scope, so they
+	# must see the same static-linkage declarations as the library build.
+	target_compile_definitions(Alpha126CppCore PUBLIC AL_LIBTYPE_STATIC)
 endif()
 
 # Client executable
@@ -1398,6 +1479,7 @@ set_target_properties(Alpha126Cpp PROPERTIES
 	OUTPUT_NAME "${A126_EXECUTABLE_NAME}"
 )
 
+if(NOT CMAKE_CROSSCOMPILING)
 # Headless deterministic regression suite.
 # Links the same production code as the client but never initialises SDL,
 # OpenGL, OpenAL or any input device.
@@ -1442,6 +1524,7 @@ set_target_properties(a126cpp-gl-inventory PROPERTIES
 	CXX_STANDARD_REQUIRED YES
 	CXX_EXTENSIONS NO
 )
+endif()
 
 if(A126_ENABLE_GL_GPU_TESTS)
 	# Each fixture process links exactly one backend. Comparison does not create
@@ -1510,9 +1593,14 @@ if(A126_ENABLE_GL_GPU_TESTS)
 endif()
 
 # Output to bin/ directory
-set_target_properties(Alpha126Cpp a126cpp-headless-tests a126cpp-gl-inventory PROPERTIES
+set_target_properties(Alpha126Cpp PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
 )
+if(NOT CMAKE_CROSSCOMPILING)
+	set_target_properties(a126cpp-headless-tests a126cpp-gl-inventory PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
+	)
+endif()
 
 if(WIN32 AND TARGET OpenAL32)
 	# Copy DLL to output directory for runtime (Windows only)
@@ -1566,16 +1654,31 @@ if(WIN32 AND TARGET OpenAL32)
 	endif()
 endif()
 
-# Copy resource folder to output directory next to executable
-# Use copy_directory_if_different to avoid errors if directory doesn't exist
-add_custom_command(TARGET Alpha126Cpp POST_BUILD
-	COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:Alpha126Cpp>"
-	COMMAND ${CMAKE_COMMAND} -E copy_directory
-		"${CMAKE_SOURCE_DIR}/resource"
-		"$<TARGET_FILE_DIR:Alpha126Cpp>/resource"
-	COMMENT "Copying resource folder to output directory"
-)
+if(NINTENDO_SWITCH)
+	# Assets ship inside the NRO's romfs (File::openResourceDirectory returns
+	# romfs:/ on Switch), so no loose resource copy is needed.
+	nx_generate_nacp(Alpha126Cpp.nacp
+		NAME "Minecraft Alpha v1.2.6"
+		AUTHOR "a126cpp"
+		VERSION "${PROJECT_VERSION}"
+	)
+	nx_create_nro(Alpha126Cpp
+		NACP "${CMAKE_CURRENT_BINARY_DIR}/Alpha126Cpp.nacp"
+		ROMFS "${CMAKE_SOURCE_DIR}/resource"
+	)
+else()
+	# Copy resource folder to output directory next to executable
+	# Use copy_directory_if_different to avoid errors if directory doesn't exist
+	add_custom_command(TARGET Alpha126Cpp POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:Alpha126Cpp>"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory
+			"${CMAKE_SOURCE_DIR}/resource"
+			"$<TARGET_FILE_DIR:Alpha126Cpp>/resource"
+		COMMENT "Copying resource folder to output directory"
+	)
+endif()
 
+if(NOT CMAKE_CROSSCOMPILING)
 enable_testing()
 add_test(NAME headless COMMAND a126cpp-headless-tests --all)
 
@@ -1741,4 +1844,5 @@ if(A126_ENABLE_GL_GPU_TESTS)
 	set_tests_properties(${A126_GL_GPU_TESTS}
 		PROPERTIES LABELS "headless;renderer-parity"
 	)
+endif()
 endif()

@@ -2,6 +2,7 @@
 #include "network/Packet255KickDisconnect.h"
 #include "network/NetworkReaderThread.h"
 #include "network/NetworkWriterThread.h"
+#include "util/BackgroundTask.h"
 #include "network/NetworkMasterThread.h"
 #include "network/ThreadCloseConnection.h"
 #include "network/Packet.h"
@@ -439,10 +440,10 @@ void NetworkManager::networkShutdown(const jstring& reason, const std::vector<js
 		
 		// Java: (new NetworkMasterThread(this)).start();
 		NetworkMasterThread* masterThread = new NetworkMasterThread(this);
-		std::thread([masterThread]() {
+		BackgroundTask::run([masterThread]() {
 			masterThread->run();
 			delete masterThread;
-		}).detach();
+		});
 		
 		// Java: this.isRunning = false;
 		isRunningFlag = false;
@@ -580,10 +581,10 @@ void NetworkManager::wakeWriterThread()
 	
 	// Java: (new ThreadCloseConnection(this)).start();
 	ThreadCloseConnection* closeThread = new ThreadCloseConnection(this);
-	std::thread([closeThread]() {
+	BackgroundTask::run([closeThread]() {
 		closeThread->run();
 		delete closeThread;
-	}).detach();
+	});
 }
 
 // Static accessors matching Java implementation exactly

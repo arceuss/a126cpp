@@ -639,6 +639,10 @@
 #include <string.h>
 #include <glad/glad.h>
 
+/* Platforms without a dynamic loader (devkitPro Switch: newlib has no
+   <dlfcn.h> and there is no libGL to open) define GLAD_NO_LOADER and supply
+   the proc-address function themselves via gladLoadGLLoader. */
+#ifndef GLAD_NO_LOADER
 static void* get_proc(const char *namez);
 
 #if defined(_WIN32) || defined(__CYGWIN__)
@@ -770,6 +774,7 @@ int gladLoadGL(void) {
 
     return status;
 }
+#endif /* GLAD_NO_LOADER */
 
 struct gladGLversionStruct GLVersion = { 0, 0 };
 

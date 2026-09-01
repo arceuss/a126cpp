@@ -80,6 +80,12 @@ static struct BackendInfo BackendList[] = {
 #ifdef HAVE_OPENSL
     { "opensl", alc_opensl_init, alc_opensl_deinit, alc_opensl_probe, EmptyFuncs },
 #endif
+/* Must stay ahead of the unconditional "null" entry: the first backend whose
+ * Init succeeds with a non-NULL OpenPlayback becomes PlaybackBackend.
+ */
+#ifdef HAVE_SWITCH_AUDIO
+    { "switch", alc_switch_init, alc_switch_deinit, alc_switch_probe, EmptyFuncs },
+#endif
 
     { "null", alc_null_init, alc_null_deinit, alc_null_probe, EmptyFuncs },
 #ifdef HAVE_WAVE

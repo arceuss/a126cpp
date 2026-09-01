@@ -1,7 +1,8 @@
 #include "client/renderer/HttpTexture.h"
 
-#include "httplib.h"
 #include "java/BufferedImage.h"
+#include "util/HttpGet.h"
+#include "util/BackgroundTask.h"
 #include "java/String.h"
 #include "java/File.h"
 #include "stb_image.h"
@@ -15,8 +16,10 @@
 HttpTexture::HttpTexture(const jstring &url, HttpTextureProcessor *processor)
 {
 	// Start download in background thread
-	std::thread downloadThread(&HttpTexture::downloadThread, this, url, processor);
-	downloadThread.detach();
+	// Not detached: see BackgroundTask.
+	BackgroundTask::run([this, url, processor]() {
+		downloadThread(url, processor);
+	});
 }
 
 void HttpTexture::downloadThread(const jstring &url, HttpTextureProcessor *processor)
@@ -81,61 +84,23 @@ void HttpTexture::downloadThread(const jstring &url, HttpTextureProcessor *proce
 		// If not loaded from cache, download from URL
 		if (!fromCache)
 		{
-			// Parse URL to extract host, port, and path
-			size_t protocolEnd = urlStr.find("://");
-			if (protocolEnd == std::string::npos)
-				return;
-			
-			std::string hostPort = urlStr.substr(protocolEnd + 3);
-			size_t pathStart = hostPort.find('/');
-			if (pathStart == std::string::npos)
-				return;
-			
-			std::string host = hostPort.substr(0, pathStart);
-			std::string path = hostPort.substr(pathStart);
-			
-			size_t portSep = host.find(':');
-			std::string hostname = host;
-			int port = 80;
-			if (portSep != std::string::npos)
+			const HttpGet::Response res = HttpGet::fetch(urlStr);
+			if (res.ok())
 			{
-				hostname = host.substr(0, portSep);
-				port = std::stoi(host.substr(portSep + 1));
+				image = BufferedImage::ImageIO_readFromMemory(
+					reinterpret_cast<const unsigned char*>(res.body.data()),
+					static_cast<int_t>(res.body.size())
+				);
 			}
-			
-			// Download image using cpp-httplib
-			httplib::Client client(hostname.c_str(), port);
-			client.set_connection_timeout(30);  // Increased timeout to 30 seconds
-			client.set_read_timeout(30);        // Increased timeout to 30 seconds
-			
-			// Check if client is valid before making request
-			if (!client.is_valid())
+			else if (!res.error.empty())
 			{
-				std::cerr << "HTTP client invalid for skin: " << urlStr << " (host: " << hostname << ", port: " << port << ")" << std::endl;
+				std::cerr << "HTTP request failed for skin: " << urlStr
+					<< " (" << res.error << ")" << std::endl;
 			}
 			else
 			{
-			auto res = client.Get(path.c_str());
-				if (res)
-				{
-					if (res->status < 400 && res->status >= 200)
-			{
-				// Load image from memory
-				image = BufferedImage::ImageIO_readFromMemory(
-					reinterpret_cast<const unsigned char*>(res->body.data()),
-					static_cast<int_t>(res->body.size())
-				);
-					}
-					else
-					{
-						std::cerr << "HTTP request failed for skin: " << urlStr << " (status: " << res->status << ")" << std::endl;
-					}
-				}
-				else
-				{
-					// Request failed - res is null
-					std::cerr << "HTTP request failed for skin: " << urlStr << " (request returned null)" << std::endl;
-				}
+				std::cerr << "HTTP request failed for skin: " << urlStr
+					<< " (status: " << res.status << ")" << std::endl;
 			}
 		}
 		

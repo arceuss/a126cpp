@@ -12,6 +12,11 @@ namespace detail
 {
 
 void pushEvent(const SDL_Event &e);
+void addSyntheticRelativeMotion(int_t dx, int_t dy);
+void setSyntheticButtonState(int_t button, bool down);
+void setSyntheticPointerActive(bool active);
+void setSyntheticPointerPosition(int_t x, int_t y);
+void moveSyntheticPointer(int_t dx, int_t dy);
 
 }
 

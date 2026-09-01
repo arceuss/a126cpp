@@ -1,6 +1,7 @@
 #include "lwjgl/Mouse.h"
 
 #include <queue>
+#include <algorithm>
 
 #include "backends/Platform/Platform.h"
 #include "lwjgl/Display.h"
@@ -18,6 +19,13 @@ namespace Mouse
 static int_t staging_dx = 0;
 static int_t staging_dy = 0;
 static int_t staging_dz = 0;
+
+// Driven by the Switch controller layer. SDL_GetMouseState reflects only real
+// hardware, so synthesised buttons and pointer position are tracked here.
+static Uint32 synthetic_buttons = 0;
+static bool synthetic_pointer_active = false;
+static int_t synthetic_pointer_x = 0;
+static int_t synthetic_pointer_y = 0;
 
 namespace detail
 {
@@ -48,6 +56,15 @@ static int_t sdlToLwjglButton(int_t sdlButton)
 	return sdlButton - 1; // fallback for other buttons
 }
 
+// Inverse of the above, for buttons synthesised by the controller layer.
+static int_t lwjglToSdlButtonLocal(int_t lwjglButton)
+{
+	if (lwjglButton == 0) return 1; // Left
+	if (lwjglButton == 1) return 3; // Right
+	if (lwjglButton == 2) return 2; // Middle
+	return lwjglButton + 1; // fallback for other buttons
+}
+
 void pushEvent(const SDL_Event &e)
 {
 	switch (e.type)
@@ -67,6 +84,44 @@ void pushEvent(const SDL_Event &e)
 			event_queue.emplace(sdlToLwjglButton(e.button.button), 0, e.button.x, Display::getHeight() - e.button.y - 1, 0, 0, 0);
 			break;
 	}
+}
+
+void addSyntheticRelativeMotion(int_t dx, int_t dy)
+{
+	staging_dx += dx;
+	staging_dy += dy;
+}
+
+void setSyntheticButtonState(int_t button, bool down)
+{
+	const Uint32 mask = SDL_BUTTON(lwjglToSdlButtonLocal(button));
+	if (((synthetic_buttons & mask) != 0) == down)
+		return;
+
+	if (down)
+		synthetic_buttons |= mask;
+	else
+		synthetic_buttons &= ~mask;
+
+	event_queue.emplace(static_cast<Sint8>(button), down ? 1 : 0, getX(), getY(), 0, 0, 0);
+}
+
+void setSyntheticPointerActive(bool active)
+{
+	synthetic_pointer_active = active;
+}
+
+void setSyntheticPointerPosition(int_t x, int_t y)
+{
+	synthetic_pointer_x = std::max(0, std::min(x, Display::getWidth() - 1));
+	synthetic_pointer_y = std::max(0, std::min(y, Display::getHeight() - 1));
+}
+
+void moveSyntheticPointer(int_t dx, int_t dy)
+{
+	if (!synthetic_pointer_active)
+		return;
+	setSyntheticPointerPosition(synthetic_pointer_x + dx, synthetic_pointer_y + dy);
 }
 
 }
@@ -121,6 +176,9 @@ int_t getEventDWheel()
 // State
 int_t getX()
 {
+	if (synthetic_pointer_active)
+		return synthetic_pointer_x;
+
 	int x;
 	SDL_GetMouseState(&x, nullptr);
 	return x;
@@ -128,6 +186,9 @@ int_t getX()
 
 int_t getY()
 {
+	if (synthetic_pointer_active)
+		return Display::getHeight() - synthetic_pointer_y - 1;
+
 	int y;
 	SDL_GetMouseState(nullptr, &y);
 	return lwjgl::Display::getHeight() - y - 1;
@@ -167,7 +228,9 @@ static int_t lwjglToSdlButton(int_t lwjglButton)
 
 bool isButtonDown(int_t button)
 {
-	return SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON(lwjglToSdlButton(button));
+	const Uint32 mask = SDL_BUTTON(lwjglToSdlButton(button));
+	return (synthetic_buttons & mask) != 0 ||
+		(SDL_GetMouseState(nullptr, nullptr) & mask) != 0;
 }
 
 bool isGrabbed()

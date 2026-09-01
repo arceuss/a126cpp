@@ -38,11 +38,30 @@ static std::string ToPath(const jstring &path)
 {
 	std::string u8path = String::toUTF8(path);
 
+#ifdef __SWITCH__
+	// Do not canonicalise: devoptab device prefixes (romfs:/, sdmc:/) are not
+	// POSIX roots and realpath would mangle them.
+	//
+	// Resource names arrive with a leading slash ("/terrain.png"), so joining
+	// them onto a directory yields "romfs://terrain.png". Desktop libcs treat
+	// repeated separators as one; newlib's devoptab does not, so collapse them
+	// here.
+	std::string normalized;
+	normalized.reserve(u8path.size());
+	for (const char character : u8path)
+	{
+		if (character == '/' && !normalized.empty() && normalized.back() == '/')
+			continue;
+		normalized.push_back(character);
+	}
+	return normalized;
+#else
 	static char buffer[PATH_MAX];
 	if (!::realpath(u8path.c_str(), buffer))
 		return u8path; // File probably doesn't exist yet, just use the path as-is
 	
 	return std::string(buffer);
+#endif
 }
 
 static jstring FromPath(const std::string &path)
@@ -215,6 +234,11 @@ File *File::open(const File &parent, const jstring &child)
 
 File *File::openResourceDirectory()
 {
+#ifdef __SWITCH__
+	// The resource tree is packed into the NRO's romfs (mounted by romfsInit
+	// in main), with the contents of resource/ at the romfs root.
+	return new File_Impl(u"romfs:");
+#else
 	// Get the path to the executable
 	char *path = (char*)malloc(PATH_MAX);
 	ssize_t length;
@@ -249,10 +273,17 @@ File *File::openResourceDirectory()
 	File* file = new File_Impl(u16str.substr(0, pos) + u"/resource");
 	free(path);
 	return file;
+#endif
 }
 
 File *File::openWorkingDirectory(const jstring &name)
 {
+#ifdef __SWITCH__
+	// Saves and options live on the SD card in the conventional homebrew
+	// per-application directory (Minecraft::start mkdirs the leaf; main
+	// pre-creates sdmc:/switch).
+	return new File_Impl(u"sdmc:/switch/" + name);
+#else
 	// Get the home directory environment variable
 	const char *path = ::getenv("HOME");
 	if (path == nullptr)
@@ -262,4 +293,5 @@ File *File::openWorkingDirectory(const jstring &name)
 	jstring u16str = FromPath(path);
 
 	return new File_Impl(u16str + u"/" + name);
+#endif
 }

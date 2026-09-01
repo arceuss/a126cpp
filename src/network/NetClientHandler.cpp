@@ -1,3 +1,7 @@
+#ifdef __SWITCH__
+#include "switch/SwitchRuntime.h"
+#endif
+
 #include "network/NetClientHandler.h"
 #include "client/Minecraft.h"
 #include "client/player/EntityClientPlayerMP.h"
@@ -137,6 +141,13 @@ NetClientHandler::NetClientHandler(Minecraft* mc, const jstring& host, int port)
 	serverAddr.sin_family = AF_INET;
 	serverAddr.sin_port = htons(port);
 	
+#ifdef __SWITCH__
+	// libnx's BSD sockets abort instead of failing when the service did not
+	// initialise, so turn "no network" into the error the game already shows.
+	if (!switchruntime::isNetworkAvailable())
+		throw std::runtime_error("No network connection");
+#endif
+
 	// Try DNS resolution (matching Java InetAddress.getByName)
 	struct hostent* hostEntry = gethostbyname(hostStr.c_str());
 	if (hostEntry == nullptr)

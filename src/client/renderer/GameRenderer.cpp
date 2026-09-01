@@ -16,6 +16,7 @@
 #include "lwjgl/Display.h"
 #include "lwjgl/GLContext.h"
 #include "lwjgl/Keyboard.h"
+#include "lwjgl/Gamepad.h"
 
 #include "java/System.h"
 #include "world/phys/Vec3.h"
@@ -360,7 +361,40 @@ void GameRenderer::render(float a)
 	{
 		glClear(GL_DEPTH_BUFFER_BIT);
 		mc.screen->render(xm, ym, a);
+
+		// Alpha's screens are mouse driven and a console has no cursor of its
+		// own, so draw one at the synthetic pointer the controller moves. The
+		// sprite is Legacy Console Edition's, matching the control layout.
+		if (lwjgl::Gamepad::isConnected())
+			renderControllerPointer(xm, ym);
 	}
+}
+
+// Draws the Legacy Console Edition pointer centred on its hotspot, in the GUI
+// coordinate space the screen was just rendered in.
+void GameRenderer::renderControllerPointer(int_t xm, int_t ym)
+{
+	static const int_t SIZE = 16;
+	const int_t x0 = xm - SIZE / 2;
+	const int_t y0 = ym - SIZE / 2;
+
+	glBindTexture(GL_TEXTURE_2D, mc.textures.loadTexture(u"/gui/pointer.png"));
+
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_DEPTH_TEST);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+	Tesselator &t = Tesselator::instance;
+	t.begin();
+	t.vertexUV(x0, y0 + SIZE, 0.0, 0.0, 1.0);
+	t.vertexUV(x0 + SIZE, y0 + SIZE, 0.0, 1.0, 1.0);
+	t.vertexUV(x0 + SIZE, y0, 0.0, 1.0, 0.0);
+	t.vertexUV(x0, y0, 0.0, 0.0, 0.0);
+	t.end();
+
+	glEnable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
 }
 
 void GameRenderer::renderLevel(float a)
