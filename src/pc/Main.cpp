@@ -75,6 +75,20 @@ int main(int argc, char *argv[])
 		return runChunkTravelBench(cycles, radius, framesPerChunk, settleFrames,
 			viewDistance, worldName);
 	}
+
+	// Developer fixture: teleports the player over ever-new terrain in a
+	// straight line and samples process memory at a chunk interval. Usage:
+	// --chunk-march-bench [chunks] [framesPerChunk] [sampleEveryChunks]
+	//                     [viewDistance] [world]
+	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--chunk-march-bench") == 0)
+	{
+		int chunks = (firstArgument + 1 < argc) ? std::atoi(argv[firstArgument + 1]) : 0;
+		int framesPerChunk = (firstArgument + 2 < argc) ? std::atoi(argv[firstArgument + 2]) : 0;
+		int sampleEvery = (firstArgument + 3 < argc) ? std::atoi(argv[firstArgument + 3]) : 0;
+		int viewDistance = (firstArgument + 4 < argc) ? std::atoi(argv[firstArgument + 4]) : 0;
+		std::string worldName = (firstArgument + 5 < argc) ? argv[firstArgument + 5] : "";
+		return runChunkMarchBench(chunks, framesPerChunk, sampleEvery, viewDistance, worldName);
+	}
 	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--timer-probe") == 0)
 		return runTimerProbe((firstArgument + 1 < argc) ? std::atoi(argv[firstArgument + 1]) : 0);
 

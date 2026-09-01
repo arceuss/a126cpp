@@ -43,16 +43,40 @@ struct CoreGPUVertex
 	float flatNormal[3];
 };
 
+// Page-backed residency, for the reason measured on GL2.1: a vertex array per
+// display list makes every draw rebind, and that one call dominated the draw
+// cost. Pages are keyed by attribute layout because the enabled attribute set
+// is vertex-array state; the stride is always CoreGPUVertex, so a page can
+// hold any geometry sharing its layout and the draw supplies a first-vertex.
+struct CoreResidentFreeRange
+{
+	GLsizeiptr offset = 0;
+	GLsizeiptr size = 0;
+};
+
+struct CoreResidentPage
+{
+	GLuint buffer = 0;
+	GLuint vertexArray = 0;
+	unsigned int attributeMask = 0;
+	GLsizeiptr capacity = 0;
+	std::vector<CoreResidentFreeRange> freeRanges;
+};
+
 struct CoreResidentGeometryEntry
 {
-	GLuint vertexArray = 0;
-	GLuint vertexBuffer = 0;
+	std::size_t page = 0;
+	GLsizeiptr byteOffset = 0;
+	GLsizeiptr byteSize = 0;
+	GLint firstVertex = 0;
 	Topology topology = Topology::Triangles;
 	std::size_t vertexCount = 0;
 	bool hasColor = false;
 	bool hasNormal = false;
 	bool hasTexCoord = false;
 };
+
+static const GLsizeiptr CORE_RESIDENT_PAGE_BYTES = 8 * 1024 * 1024;
 
 struct alignas(16) CoreGPUMaterial
 {
@@ -118,6 +142,16 @@ struct CoreTexture
 	GLenum samplerWrapS = 0;
 	GLenum samplerWrapT = 0;
 };
+
+// How the per-draw uniform block reaches the GPU. Selectable so the choice
+// stays a measurement on real hardware rather than an assumption.
+enum class CoreUniformMode
+{
+	Persistent,
+	Legacy
+};
+
+static const std::size_t CORE_UNIFORM_REGIONS = 3;
 
 class CoreLogicalNameAllocator
 {
@@ -663,33 +697,128 @@ public:
 	{
 		if (residencyId == 0)
 			return;
-		for (auto entry = residentGeometry.begin(); entry != residentGeometry.end();)
+		auto entry = residentGeometry.find(residencyId);
+		if (entry == residentGeometry.end())
+			return;
+		residentGeometryBytes -= entry->second.vertexCount * sizeof(CoreGPUVertex);
+		residentGeometryReleases++;
+		freeResidentRange(entry->second);
+		residentGeometry.erase(entry);
+	}
+
+	// Returns a range to its page and merges it with any neighbour.
+	void freeResidentRange(const CoreResidentGeometryEntry &entry)
+	{
+		if (entry.page >= residentPages.size())
+			return;
+		CoreResidentPage &page = residentPages[entry.page];
+		const CoreResidentFreeRange released = { entry.byteOffset, entry.byteSize };
+		std::size_t insertAt = page.freeRanges.size();
+		for (std::size_t i = 0; i < page.freeRanges.size(); i++)
 		{
-			if (entry->first != residencyId)
+			if (page.freeRanges[i].offset > released.offset)
 			{
-				++entry;
+				insertAt = i;
+				break;
+			}
+		}
+		page.freeRanges.insert(page.freeRanges.begin() +
+			static_cast<std::ptrdiff_t>(insertAt), released);
+		for (std::size_t i = 0; i + 1 < page.freeRanges.size();)
+		{
+			CoreResidentFreeRange &current = page.freeRanges[i];
+			const CoreResidentFreeRange &next = page.freeRanges[i + 1];
+			if (current.offset + current.size == next.offset)
+			{
+				current.size += next.size;
+				page.freeRanges.erase(page.freeRanges.begin() +
+					static_cast<std::ptrdiff_t>(i) + 1);
 				continue;
 			}
-			residentGeometryBytes -=
-				entry->second.vertexCount * sizeof(CoreGPUVertex);
-			residentGeometryReleases++;
-			glDeleteVertexArrays(1, &entry->second.vertexArray);
-			glDeleteBuffers(1, &entry->second.vertexBuffer);
-			entry = residentGeometry.erase(entry);
+			i++;
 		}
+	}
+
+	// Sub-allocates from a page whose vertex array already describes this
+	// attribute layout, uploading into the shared buffer.
+	CoreResidentGeometryEntry allocateResidentGeometry(const ResolvedDraw &command,
+		const Geometry &geometry, const std::vector<CoreGPUVertex> &vertices)
+	{
+		const GLsizeiptr size =
+			static_cast<GLsizeiptr>(vertices.size() * sizeof(CoreGPUVertex));
+		const unsigned int attributeMask = coreAttributeMask(geometry);
+
+		std::size_t pageIndex = residentPages.size();
+		GLsizeiptr offset = 0;
+		for (std::size_t i = 0; i < residentPages.size(); i++)
+		{
+			CoreResidentPage &page = residentPages[i];
+			if (page.attributeMask != attributeMask)
+				continue;
+			for (std::size_t range = 0; range < page.freeRanges.size(); range++)
+			{
+				if (page.freeRanges[range].size < size)
+					continue;
+				offset = page.freeRanges[range].offset;
+				page.freeRanges[range].offset += size;
+				page.freeRanges[range].size -= size;
+				if (page.freeRanges[range].size == 0)
+				{
+					page.freeRanges.erase(page.freeRanges.begin() +
+						static_cast<std::ptrdiff_t>(range));
+				}
+				pageIndex = i;
+				break;
+			}
+			if (pageIndex != residentPages.size())
+				break;
+		}
+
+		if (pageIndex == residentPages.size())
+		{
+			CoreResidentPage page;
+			page.attributeMask = attributeMask;
+			page.capacity = std::max<GLsizeiptr>(CORE_RESIDENT_PAGE_BYTES, size);
+			glGenVertexArrays(1, &page.vertexArray);
+			glGenBuffers(1, &page.buffer);
+			configureVertexArray(page.vertexArray, page.buffer, geometry);
+			glBufferData(GL_ARRAY_BUFFER, page.capacity, nullptr, GL_STATIC_DRAW);
+			if (page.capacity > size)
+				page.freeRanges.push_back({ size, page.capacity - size });
+			offset = 0;
+			residentPages.push_back(std::move(page));
+		}
+
+		CoreResidentPage &page = residentPages[pageIndex];
+		glBindBuffer(GL_ARRAY_BUFFER, page.buffer);
+		glBufferSubData(GL_ARRAY_BUFFER, offset, size, vertices.data());
+
+		CoreResidentGeometryEntry entry;
+		entry.page = pageIndex;
+		entry.byteOffset = offset;
+		entry.byteSize = size;
+		entry.firstVertex =
+			static_cast<GLint>(offset / static_cast<GLsizeiptr>(sizeof(CoreGPUVertex)));
+		entry.topology = command.primitives->topology;
+		entry.vertexCount = vertices.size();
+		entry.hasColor = geometry.hasColor;
+		entry.hasNormal = geometry.hasNormal;
+		entry.hasTexCoord = geometry.hasTexCoord;
+		return entry;
 	}
 
 	void releaseAllCanonicalGeometry()
 	{
-		for (auto &entry : residentGeometry)
+		for (CoreResidentPage &page : residentPages)
 		{
-			glDeleteVertexArrays(1, &entry.second.vertexArray);
-			glDeleteBuffers(1, &entry.second.vertexBuffer);
+			glDeleteVertexArrays(1, &page.vertexArray);
+			glDeleteBuffers(1, &page.buffer);
 		}
+		residentPages.clear();
 		residentGeometry.clear();
 		residentGeometryBytes = 0;
+		boundVertexArray = 0;
 	}
-
 	void shutdown()
 	{
 		std::fprintf(stdout,
@@ -700,10 +829,114 @@ public:
 			static_cast<unsigned long long>(residentGeometryBytes),
 			residentGeometry.size(),
 			static_cast<unsigned long long>(residentGeometryReleases));
+		const char *modeName =
+			uniformMode == CoreUniformMode::Persistent ? "persistent" : "legacy";
+		std::fprintf(stdout,
+			"gl46: uniform mode=%s stride=%zu slots=%zu peak_slots=%zu"
+			" overflows=%llu fence_waits=%llu\n",
+			modeName, uniformStride, uniformSlots, uniformPeakSlots,
+			static_cast<unsigned long long>(uniformOverflows),
+			static_cast<unsigned long long>(uniformFenceWaits));
 		releaseAllCanonicalGeometry();
 		residentCacheHits = 0;
 		residentCacheMisses = 0;
 		residentGeometryReleases = 0;
+	}
+
+	// Two ways to get a per-draw uniform block to the GPU, selectable with
+	// A126_GL46_UNIFORM=persistent|legacy:
+	//
+	//   persistent  one immutable coherent mapping, a disjoint slot per draw,
+	//               one fence per frame region (default when available)
+	//   legacy      a single overwritten offset, used when immutable storage
+	//               or persistent mapping is unavailable
+	//
+	// A third variant, a mutable buffer orphaned once per frame with a disjoint
+	// glBufferSubData per draw, measured 23.2ms against 9.4ms for legacy on an
+	// RTX 5070 and was removed. On the same machine persistent is only about 4%
+	// ahead of legacy, so the per-draw uniform transport is not what makes this
+	// backend slow.
+
+	// A126_GL46_UNIFORM selects the transport; persistent is the default when
+	// immutable storage and mapping are available.
+	static CoreUniformMode selectUniformMode()
+	{
+		const char *requested = std::getenv("A126_GL46_UNIFORM");
+		const bool canPersist = GLAD_GL_VERSION_4_4 != 0 &&
+			glad_glBufferStorage != nullptr && glad_glMapBufferRange != nullptr &&
+			glad_glFenceSync != nullptr && glad_glClientWaitSync != nullptr;
+		if (requested != nullptr)
+		{
+			if (std::strcmp(requested, "legacy") == 0)
+				return CoreUniformMode::Legacy;
+			if (std::strcmp(requested, "persistent") == 0 && canPersist)
+				return CoreUniformMode::Persistent;
+		}
+		return canPersist ? CoreUniformMode::Persistent : CoreUniformMode::Legacy;
+	}
+
+	void beginFrame()
+	{
+		if (!initialized)
+			return;
+		uniformPeakSlots = std::max(uniformPeakSlots, uniformCursor);
+		if (uniformMode == CoreUniformMode::Legacy)
+			return;
+
+		// Persistent: retire the region just recorded, then wait for the region
+		// about to be reused. One fence per region, never per draw.
+		if (uniformFences[uniformRegion] != nullptr)
+			glDeleteSync(uniformFences[uniformRegion]);
+		uniformFences[uniformRegion] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+		uniformRegion = (uniformRegion + 1) % CORE_UNIFORM_REGIONS;
+		if (uniformFences[uniformRegion] != nullptr)
+		{
+			const GLenum waited = glClientWaitSync(uniformFences[uniformRegion],
+				GL_SYNC_FLUSH_COMMANDS_BIT, 0);
+			if (waited == GL_TIMEOUT_EXPIRED)
+			{
+				uniformFenceWaits++;
+				glClientWaitSync(uniformFences[uniformRegion],
+					GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
+			}
+			glDeleteSync(uniformFences[uniformRegion]);
+			uniformFences[uniformRegion] = nullptr;
+		}
+		uniformCursor = 0;
+	}
+
+	// Returns the byte offset of the slot this draw owns.
+	GLintptr reserveUniformSlot()
+	{
+		if (uniformMode == CoreUniformMode::Legacy)
+			return 0;
+		if (uniformCursor >= uniformSlots)
+		{
+			// A frame outgrew its region. Draining is heavy but correct, and
+			// the region is enlarged for subsequent frames so it stops
+			// happening rather than being hidden.
+			uniformPeakSlots = std::max(uniformPeakSlots, uniformCursor);
+			uniformOverflows++;
+			glFinish();
+			uniformCursor = 0;
+		}
+		const std::size_t regionBase = uniformMode == CoreUniformMode::Persistent ?
+			uniformRegion * uniformSlots * uniformStride : 0;
+		const GLintptr offset =
+			static_cast<GLintptr>(regionBase + uniformCursor * uniformStride);
+		uniformCursor++;
+		return offset;
+	}
+
+	void writeUniformSlot(GLintptr offset, const CoreGPUState &state)
+	{
+		if (uniformMode == CoreUniformMode::Persistent)
+		{
+			std::memcpy(uniformMapped + offset, &state, sizeof(state));
+			return;
+		}
+		glBufferSubData(GL_UNIFORM_BUFFER, offset,
+			static_cast<GLsizeiptr>(sizeof(state)), &state);
 	}
 	void resolvedDraw(const ResolvedDraw &command) override
 	{
@@ -721,6 +954,7 @@ public:
 			return;
 
 		GLuint drawVertexArray = vertexArray;
+		GLint drawFirstVertex = 0;
 		if (command.geometryResidencyId == 0)
 		{
 			const std::vector<CoreGPUVertex> vertices =
@@ -735,6 +969,7 @@ public:
 			else
 			{
 				glBindVertexArray(vertexArray);
+				boundVertexArray = vertexArray;
 				glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
 			}
 			glBufferData(GL_ARRAY_BUFFER,
@@ -756,29 +991,18 @@ public:
 					throw std::runtime_error(
 						"OpenGL 4.6 resident geometry identity changed while cached");
 				}
-				drawVertexArray = found->second.vertexArray;
 			}
 			else
 			{
 				residentCacheMisses++;
 				const std::vector<CoreGPUVertex> vertices =
 					coreGPUVertices(command, verticesPerPrimitive);
-				CoreResidentGeometryEntry entry;
-				entry.topology = command.primitives->topology;
-				entry.vertexCount = vertexCount;
-				entry.hasColor = geometry.hasColor;
-				entry.hasNormal = geometry.hasNormal;
-				entry.hasTexCoord = geometry.hasTexCoord;
-				glGenVertexArrays(1, &entry.vertexArray);
-				glGenBuffers(1, &entry.vertexBuffer);
-				configureVertexArray(entry.vertexArray, entry.vertexBuffer, geometry);
-				glBufferData(GL_ARRAY_BUFFER,
-					static_cast<GLsizeiptr>(vertices.size() * sizeof(CoreGPUVertex)),
-					vertices.data(), GL_STATIC_DRAW);
-				drawVertexArray = residentGeometry.emplace(
-					command.geometryResidencyId, entry).first->second.vertexArray;
+				found = residentGeometry.emplace(command.geometryResidencyId,
+					allocateResidentGeometry(command, geometry, vertices)).first;
 				residentGeometryBytes += vertexCount * sizeof(CoreGPUVertex);
 			}
+			drawVertexArray = residentPages[found->second.page].vertexArray;
+			drawFirstVertex = found->second.firstVertex;
 		}
 
 		CoreGPUState state = {};
@@ -787,13 +1011,23 @@ public:
 		bindTexture(command, state);
 
 		glUseProgram(program);
-		glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer);
-		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(state), &state);
-		glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniformBuffer);
+		const GLintptr uniformOffset = reserveUniformSlot();
+		writeUniformSlot(uniformOffset, state);
+		if (uniformMode != CoreUniformMode::Legacy)
+		{
+			// glBindBufferRange also refreshes the generic GL_UNIFORM_BUFFER
+			// binding, so no separate glBindBuffer is needed for the next write.
+			glBindBufferRange(GL_UNIFORM_BUFFER, 0, uniformBuffer, uniformOffset,
+				static_cast<GLsizeiptr>(sizeof(state)));
+		}
 
-		glBindVertexArray(drawVertexArray);
+		if (boundVertexArray != drawVertexArray)
+		{
+			glBindVertexArray(drawVertexArray);
+			boundVertexArray = drawVertexArray;
+		}
 		applyCurrentAttributes(command);
-		glDrawArrays(coreTopology(command.primitives->topology), 0,
+		glDrawArrays(coreTopology(command.primitives->topology), drawFirstVertex,
 			static_cast<GLsizei>(vertexCount));
 	}
 
@@ -905,6 +1139,7 @@ private:
 	void configureVertexArray(GLuint array, GLuint buffer, const Geometry &geometry)
 	{
 		glBindVertexArray(array);
+		boundVertexArray = array;
 		glBindBuffer(GL_ARRAY_BUFFER, buffer);
 		glEnableVertexAttribArray(0);
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
@@ -1013,10 +1248,43 @@ private:
 		glGenVertexArrays(1, &vertexArray);
 		glGenBuffers(1, &vertexBuffer);
 
+		// Only the bound offset has to satisfy the implementation alignment; the
+		// bound range stays the exact block size so no padding is ever copied.
+		glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &uniformAlignment);
+		if (uniformAlignment <= 0)
+			uniformAlignment = 256;
+		const std::size_t alignment = static_cast<std::size_t>(uniformAlignment);
+		uniformStride = (sizeof(CoreGPUState) + alignment - 1) / alignment * alignment;
+		uniformSlots = 4096;
+		uniformMode = selectUniformMode();
 		glGenBuffers(1, &uniformBuffer);
 		glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer);
-		glBufferData(GL_UNIFORM_BUFFER, sizeof(CoreGPUState), nullptr, GL_STREAM_DRAW);
-		glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniformBuffer);
+		if (uniformMode == CoreUniformMode::Persistent)
+		{
+			const GLsizeiptr total = static_cast<GLsizeiptr>(
+				uniformStride * uniformSlots * CORE_UNIFORM_REGIONS);
+			const GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT |
+				GL_MAP_COHERENT_BIT;
+			glBufferStorage(GL_UNIFORM_BUFFER, total, nullptr, flags);
+			uniformMapped = static_cast<unsigned char *>(
+				glMapBufferRange(GL_UNIFORM_BUFFER, 0, total, flags));
+			if (uniformMapped == nullptr)
+			{
+				// An immutable store cannot be reallocated, so start over.
+				std::fprintf(stderr,
+					"LegacyGL gl46: persistent uniform mapping failed; using legacy uploads\n");
+				glDeleteBuffers(1, &uniformBuffer);
+				glGenBuffers(1, &uniformBuffer);
+				glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer);
+				uniformMode = CoreUniformMode::Legacy;
+			}
+		}
+		if (uniformMode == CoreUniformMode::Legacy)
+		{
+			glBufferData(GL_UNIFORM_BUFFER, sizeof(CoreGPUState), nullptr, GL_STREAM_DRAW);
+			glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniformBuffer);
+		}
+
 
 		glGenTextures(1, &fallbackTexture);
 		glBindTexture(GL_TEXTURE_2D, fallbackTexture);
@@ -1350,12 +1618,30 @@ private:
 	bool lineWidthFallbackReported = false;
 	ResolvedEnableState appliedEnables;
 	ResolvedPipelineState appliedPipeline;
+	// Uniform arena. Every draw writes its own disjoint, alignment-correct slot
+	// instead of overwriting one live range, which is what forced the driver to
+	// resolve a write-after-read hazard roughly 3,000 times per frame. The
+	// arena is orphaned once per frame, never per draw.
+	GLint uniformAlignment = 256;
+	std::size_t uniformStride = 0;
+	std::size_t uniformSlots = 0;
+	std::size_t uniformCursor = 0;
+	std::size_t uniformPeakSlots = 0;
+	CoreUniformMode uniformMode = CoreUniformMode::Persistent;
+	unsigned char *uniformMapped = nullptr;
+	GLsync uniformFences[CORE_UNIFORM_REGIONS] = {};
+	std::size_t uniformRegion = 0;
+	std::uint64_t uniformOverflows = 0;
+	std::uint64_t uniformFenceWaits = 0;
 	bool pipelineStateValid = false;
 	CoreLogicalNameAllocator textureNames;
 	CoreLogicalNameAllocator bufferNames;
 	std::uint64_t nextListName = 1;
 	std::map<unsigned int, CoreTexture> textures;
 	std::map<std::uint64_t, CoreResidentGeometryEntry> residentGeometry;
+	std::vector<CoreResidentPage> residentPages;
+	// Skips the rebind when consecutive draws share a page's vertex array.
+	GLuint boundVertexArray = 0;
 	std::uint64_t residentCacheHits = 0;
 	std::uint64_t residentCacheMisses = 0;
 	std::uint64_t residentGeometryBytes = 0;
@@ -1391,6 +1677,8 @@ static void openGL46Initialize()
 static void openGL46Present()
 {
 	openglbackend::present();
+	// Frame boundary: recycle the uniform arena here, never in the draw path.
+	legacygl::theCoreGLSink.beginFrame();
 }
 
 static void openGL46Shutdown()

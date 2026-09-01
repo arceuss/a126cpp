@@ -61,8 +61,11 @@ protected:
 	void tickTiles();  // Not virtual in Level
 	
 public:
-	void addToTickNextTick(int_t x, int_t y, int_t z, int_t delay);  // Not virtual in Level
-	bool tickPendingTicks(bool unknown);  // Not virtual in Level
+	// Alpha: WorldClient overrides all three to no-ops (WorldClient.java:83-89);
+	// the client never schedules or drains block updates.
+	void scheduleBlockUpdate(int_t x, int_t y, int_t z, int_t blockID) override;
+	void addToTickNextTick(int_t x, int_t y, int_t z, int_t delay) override;
+	bool tickPendingTicks(bool unknown) override;
 	
 	void setChunkVisible(int_t x, int_t z, bool visible);
 	

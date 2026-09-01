@@ -7,11 +7,13 @@
 #include <iostream>
 
 bool LevelChunk::touchedSky = false;
+long long LevelChunk::liveInstances = 0;
 
 LevelChunk::LevelChunk(Level &level, int_t x, int_t z) : level(level)
 {
 	this->x = x;
 	this->z = z;
+	liveInstances++;
 }
 
 LevelChunk::LevelChunk(Level &level, const ubyte_t *blocks, int_t x, int_t z) : LevelChunk(level, x, z)

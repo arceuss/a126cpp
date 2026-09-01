@@ -9,6 +9,7 @@
 
 #include "backends/Backend.h"
 #include "backends/OpenGL/Context.h"
+#include "legacygl/PhaseProfile.h"
 #include "legacygl/Sink.h"
 
 #include <algorithm>
@@ -29,16 +30,47 @@
 namespace legacygl
 {
 
+// Resident geometry lives in shared pages rather than one buffer and one
+// vertex array per display list. Measurement is the reason: a per-list vertex
+// array made every draw switch bindings, and that single glBindVertexArray
+// cost about 1840 cycles per draw on the reference driver, which was the
+// entire gap to native passthrough. Consecutive chunks now share a page, so
+// the binding usually does not change at all and the draw only moves its
+// first-vertex offset. Vulkan and D3D12 already use page-backed residency;
+// this brings GL2.1 in line with them.
+struct GL21ResidentFreeRange
+{
+	GLsizeiptr offset = 0;
+	GLsizeiptr size = 0;
+};
+
+struct GL21ResidentPage
+{
+	GLuint buffer = 0;
+	GLuint vertexArray = 0;
+	// One page serves one attribute layout: which client arrays are enabled is
+	// vertex-array state, so geometry with a different layout needs its own.
+	unsigned int attributeMask = 0;
+	GLsizeiptr capacity = 0;
+	std::vector<GL21ResidentFreeRange> freeRanges;
+};
+
 struct GL21ResidentGeometryEntry
 {
-	GLuint vertexArray = 0;
-	GLuint vertexBuffer = 0;
+	std::size_t page = 0;
+	GLsizeiptr byteOffset = 0;
+	GLsizeiptr byteSize = 0;
+	GLint firstVertex = 0;
 	unsigned int mode = 0;
 	std::size_t vertexCount = 0;
 	bool hasColor = false;
 	bool hasNormal = false;
 	bool hasTexCoord = false;
 };
+
+// Large enough that terrain chunks share pages and the vertex-array binding
+// rarely changes, small enough that a partly used page is not a large waste.
+static const GLsizeiptr RESIDENT_PAGE_BYTES = 8 * 1024 * 1024;
 
 // Exact-bit comparison keeps redundant-state suppression from treating two
 // distinct float encodings, including the signed zeroes and NaNs the game can
@@ -327,6 +359,7 @@ public:
 	void endList() override {}
 	void callList(unsigned int) override {}
 	void callLists(int, unsigned int, const void *) override {}
+
 	void deleteLists(unsigned int, int) override {}
 
 	void clear(unsigned int) override {}
@@ -339,20 +372,13 @@ public:
 
 	void releaseCanonicalGeometry(std::uint64_t residencyId) override
 	{
-		for (auto entry = residentGeometry.begin(); entry != residentGeometry.end();)
-		{
-			if (entry->first != residencyId)
-			{
-				++entry;
-				continue;
-			}
-			residentGeometryBytes -= entry->second.vertexCount * sizeof(Vertex);
-			residentGeometryReleases++;
-			if (entry->second.vertexArray != 0)
-				glDeleteVertexArrays(1, &entry->second.vertexArray);
-			glDeleteBuffers(1, &entry->second.vertexBuffer);
-			entry = residentGeometry.erase(entry);
-		}
+		auto entry = residentGeometry.find(residencyId);
+		if (entry == residentGeometry.end())
+			return;
+		residentGeometryBytes -= entry->second.vertexCount * sizeof(Vertex);
+		residentGeometryReleases++;
+		freeResidentRange(entry->second);
+		residentGeometry.erase(entry);
 	}
 
 	void resolvedDraw(const ResolvedDraw &command) override
@@ -360,13 +386,19 @@ public:
 		if (command.geometry == nullptr || command.geometry->vertices.empty())
 			return;
 		initialize();
-		applyResolvedState(command);
+		{
+			legacygl::PhaseScope phase(legacygl::DrawPhase::StatePack);
+			applyResolvedState(command);
+		}
 
 		const Geometry &geometry = *command.geometry;
 		GLuint vertexBuffer = streamVertexBuffer;
 		GLuint vertexArray = streamVertexArray;
 		const std::size_t vertexCount = geometry.vertices.size();
 		bool configureArrays = true;
+		GLint firstVertex = 0;
+		{
+		legacygl::PhaseScope phase(legacygl::DrawPhase::Geometry);
 		if (command.geometryResidencyId == 0)
 		{
 			glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
@@ -380,25 +412,8 @@ public:
 			if (found == residentGeometry.end())
 			{
 				residentCacheMisses++;
-				GL21ResidentGeometryEntry entry;
-				entry.mode = geometry.mode;
-				entry.vertexCount = vertexCount;
-				entry.hasColor = geometry.hasColor;
-				entry.hasNormal = geometry.hasNormal;
-				entry.hasTexCoord = geometry.hasTexCoord;
-				glGenBuffers(1, &entry.vertexBuffer);
-				glBindBuffer(GL_ARRAY_BUFFER, entry.vertexBuffer);
-				glBufferData(GL_ARRAY_BUFFER,
-					static_cast<GLsizeiptr>(vertexCount * sizeof(Vertex)),
-					geometry.vertices.data(), GL_STATIC_DRAW);
-				if (vaoSupported)
-				{
-					glGenVertexArrays(1, &entry.vertexArray);
-					glBindVertexArray(entry.vertexArray);
-					bindCanonicalArrays(entry.vertexBuffer, geometry);
-					glBindVertexArray(0);
-				}
-				found = residentGeometry.emplace(command.geometryResidencyId, entry).first;
+				found = residentGeometry.emplace(command.geometryResidencyId,
+					allocateResidentGeometry(geometry, vertexCount)).first;
 				residentGeometryBytes += vertexCount * sizeof(Vertex);
 			}
 			else
@@ -414,35 +429,158 @@ public:
 						"OpenGL 2.1 resident geometry identity changed while cached");
 				}
 			}
-			vertexBuffer = found->second.vertexBuffer;
-			vertexArray = found->second.vertexArray;
+			const GL21ResidentPage &page = residentPages[found->second.page];
+			vertexBuffer = page.buffer;
+			vertexArray = page.vertexArray;
+			firstVertex = found->second.firstVertex;
 			configureArrays = false;
 		}
+		}
 
-		applyCurrentAttributes(command);
 		if (vaoSupported)
 		{
-			glBindVertexArray(vertexArray);
-			if (configureArrays)
 			{
-				const unsigned int attributeMask = gl21AttributeMask(geometry);
-				if (!streamLayoutValid || streamAttributeMask != attributeMask)
+				legacygl::PhaseScope phase(legacygl::DrawPhase::Bind);
+				applyCurrentAttributes(command);
+				if (boundVertexArray != vertexArray)
 				{
-					bindCanonicalArrays(vertexBuffer, geometry);
-					streamAttributeMask = attributeMask;
-					streamLayoutValid = true;
+					glBindVertexArray(vertexArray);
+					boundVertexArray = vertexArray;
+				}
+				if (configureArrays)
+				{
+					const unsigned int attributeMask = gl21AttributeMask(geometry);
+					if (!streamLayoutValid || streamAttributeMask != attributeMask)
+					{
+						bindCanonicalArrays(vertexBuffer, geometry);
+						streamAttributeMask = attributeMask;
+						streamLayoutValid = true;
+					}
 				}
 			}
-			glDrawArrays(geometry.mode, 0, static_cast<GLsizei>(vertexCount));
-			glBindVertexArray(0);
+			{
+				legacygl::PhaseScope phase(legacygl::DrawPhase::Draw);
+				glDrawArrays(geometry.mode, firstVertex, static_cast<GLsizei>(vertexCount));
+			}
 		}
 		else
 		{
-			bindCanonicalArrays(vertexBuffer, geometry);
-			glDrawArrays(geometry.mode, 0, static_cast<GLsizei>(vertexCount));
+			{
+				legacygl::PhaseScope phase(legacygl::DrawPhase::Bind);
+				applyCurrentAttributes(command);
+				bindCanonicalArrays(vertexBuffer, geometry);
+			}
+			{
+				legacygl::PhaseScope phase(legacygl::DrawPhase::Draw);
+				glDrawArrays(geometry.mode, firstVertex, static_cast<GLsizei>(vertexCount));
+			}
 			disableCanonicalArrays();
 		}
 		materialStateDirty = command.enables.colorMaterial;
+	}
+
+	// Sub-allocates resident geometry from a page whose vertex array already
+	// describes this attribute layout, uploading into the shared buffer. Sizes
+	// are whole vertices, so every offset stays vertex-aligned and the draw can
+	// address it with a first-vertex index.
+	GL21ResidentGeometryEntry allocateResidentGeometry(const Geometry &geometry,
+		std::size_t vertexCount)
+	{
+		const GLsizeiptr size = static_cast<GLsizeiptr>(vertexCount * sizeof(Vertex));
+		const unsigned int attributeMask = gl21AttributeMask(geometry);
+
+		std::size_t pageIndex = residentPages.size();
+		GLsizeiptr offset = 0;
+		for (std::size_t i = 0; i < residentPages.size(); i++)
+		{
+			GL21ResidentPage &page = residentPages[i];
+			if (page.attributeMask != attributeMask)
+				continue;
+			for (std::size_t range = 0; range < page.freeRanges.size(); range++)
+			{
+				if (page.freeRanges[range].size < size)
+					continue;
+				offset = page.freeRanges[range].offset;
+				page.freeRanges[range].offset += size;
+				page.freeRanges[range].size -= size;
+				if (page.freeRanges[range].size == 0)
+					page.freeRanges.erase(page.freeRanges.begin() + range);
+				pageIndex = i;
+				break;
+			}
+			if (pageIndex != residentPages.size())
+				break;
+		}
+
+		if (pageIndex == residentPages.size())
+		{
+			GL21ResidentPage page;
+			page.attributeMask = attributeMask;
+			page.capacity = std::max<GLsizeiptr>(RESIDENT_PAGE_BYTES, size);
+			glGenBuffers(1, &page.buffer);
+			glBindBuffer(GL_ARRAY_BUFFER, page.buffer);
+			glBufferData(GL_ARRAY_BUFFER, page.capacity, nullptr, GL_STATIC_DRAW);
+			if (vaoSupported)
+			{
+				glGenVertexArrays(1, &page.vertexArray);
+				glBindVertexArray(page.vertexArray);
+				boundVertexArray = page.vertexArray;
+				bindCanonicalArrays(page.buffer, geometry);
+			}
+			if (page.capacity > size)
+				page.freeRanges.push_back({ size, page.capacity - size });
+			offset = 0;
+			residentPages.push_back(std::move(page));
+		}
+
+		GL21ResidentPage &page = residentPages[pageIndex];
+		glBindBuffer(GL_ARRAY_BUFFER, page.buffer);
+		glBufferSubData(GL_ARRAY_BUFFER, offset, size, geometry.vertices.data());
+
+		GL21ResidentGeometryEntry entry;
+		entry.page = pageIndex;
+		entry.byteOffset = offset;
+		entry.byteSize = size;
+		entry.firstVertex = static_cast<GLint>(offset / static_cast<GLsizeiptr>(sizeof(Vertex)));
+		entry.mode = geometry.mode;
+		entry.vertexCount = vertexCount;
+		entry.hasColor = geometry.hasColor;
+		entry.hasNormal = geometry.hasNormal;
+		entry.hasTexCoord = geometry.hasTexCoord;
+		return entry;
+	}
+
+	// Returns a range to its page and merges it with any neighbour, so repeated
+	// chunk rebuilds reuse space instead of growing the arena.
+	void freeResidentRange(const GL21ResidentGeometryEntry &entry)
+	{
+		if (entry.page >= residentPages.size())
+			return;
+		GL21ResidentPage &page = residentPages[entry.page];
+		GL21ResidentFreeRange released = { entry.byteOffset, entry.byteSize };
+		std::size_t insertAt = page.freeRanges.size();
+		for (std::size_t i = 0; i < page.freeRanges.size(); i++)
+		{
+			if (page.freeRanges[i].offset > released.offset)
+			{
+				insertAt = i;
+				break;
+			}
+		}
+		page.freeRanges.insert(page.freeRanges.begin() + insertAt, released);
+		for (std::size_t i = 0; i + 1 < page.freeRanges.size();)
+		{
+			GL21ResidentFreeRange &current = page.freeRanges[i];
+			const GL21ResidentFreeRange &next = page.freeRanges[i + 1];
+			if (current.offset + current.size == next.offset)
+			{
+				current.size += next.size;
+				page.freeRanges.erase(page.freeRanges.begin() +
+					static_cast<std::ptrdiff_t>(i) + 1);
+				continue;
+			}
+			i++;
+		}
 	}
 
 	void resolvedClear(const ResolvedClear &command) override
@@ -865,25 +1003,69 @@ private:
 		}
 	}
 
-	static void applyCurrentAttributes(const ResolvedDraw &command)
+	// An array draw leaves the matching current attribute undefined in OpenGL
+	// 1.1, so a cached value is only trusted while no array supplied that
+	// attribute. Where an array does supply it the cache is invalidated rather
+	// than assuming this driver's observed preservation behaviour.
+	void applyCurrentAttributes(const ResolvedDraw &command)
 	{
 		const Geometry &geometry = *command.geometry;
 		if (!geometry.hasColor)
 		{
-			if (command.enables.colorMaterial)
-				glDisable(GL_COLOR_MATERIAL);
-			glColor4f(command.currentAttributes.r, command.currentAttributes.g,
-				command.currentAttributes.b, command.currentAttributes.a);
-			if (command.enables.colorMaterial)
-				glEnable(GL_COLOR_MATERIAL);
+			const float r = command.currentAttributes.r;
+			const float g = command.currentAttributes.g;
+			const float b = command.currentAttributes.b;
+			const float a = command.currentAttributes.a;
+			if (!appliedColorValid || appliedColor[0] != r || appliedColor[1] != g ||
+				appliedColor[2] != b || appliedColor[3] != a)
+			{
+				if (command.enables.colorMaterial)
+					glDisable(GL_COLOR_MATERIAL);
+				glColor4f(r, g, b, a);
+				if (command.enables.colorMaterial)
+					glEnable(GL_COLOR_MATERIAL);
+				appliedColor[0] = r;
+				appliedColor[1] = g;
+				appliedColor[2] = b;
+				appliedColor[3] = a;
+				appliedColorValid = true;
+			}
 		}
+		else
+			appliedColorValid = false;
+
 		if (!geometry.hasNormal)
 		{
-			glNormal3f(command.currentAttributes.nx, command.currentAttributes.ny,
-				command.currentAttributes.nz);
+			const float nx = command.currentAttributes.nx;
+			const float ny = command.currentAttributes.ny;
+			const float nz = command.currentAttributes.nz;
+			if (!appliedNormalValid || appliedNormal[0] != nx ||
+				appliedNormal[1] != ny || appliedNormal[2] != nz)
+			{
+				glNormal3f(nx, ny, nz);
+				appliedNormal[0] = nx;
+				appliedNormal[1] = ny;
+				appliedNormal[2] = nz;
+				appliedNormalValid = true;
+			}
 		}
+		else
+			appliedNormalValid = false;
+
 		if (!geometry.hasTexCoord)
-			glTexCoord2f(command.currentAttributes.s, command.currentAttributes.t);
+		{
+			const float s = command.currentAttributes.s;
+			const float t = command.currentAttributes.t;
+			if (!appliedTexCoordValid || appliedTexCoord[0] != s || appliedTexCoord[1] != t)
+			{
+				glTexCoord2f(s, t);
+				appliedTexCoord[0] = s;
+				appliedTexCoord[1] = t;
+				appliedTexCoordValid = true;
+			}
+		}
+		else
+			appliedTexCoordValid = false;
 	}
 
 	static void bindCanonicalArrays(GLuint buffer, const Geometry &geometry)
@@ -944,16 +1126,19 @@ private:
 	}
 	void releaseAllCanonicalGeometry()
 	{
-		for (auto &entry : residentGeometry)
+		for (GL21ResidentPage &page : residentPages)
 		{
-			if (entry.second.vertexArray != 0)
-				glDeleteVertexArrays(1, &entry.second.vertexArray);
-			glDeleteBuffers(1, &entry.second.vertexBuffer);
+			if (page.vertexArray != 0)
+				glDeleteVertexArrays(1, &page.vertexArray);
+			glDeleteBuffers(1, &page.buffer);
 		}
+		residentPages.clear();
 		residentGeometry.clear();
+		// Deleting the bound vertex array reverts the binding to zero.
+		boundVertexArray = 0;
 	}
-
 	std::unordered_map<std::uint64_t, GL21ResidentGeometryEntry> residentGeometry;
+	std::vector<GL21ResidentPage> residentPages;
 	std::map<unsigned int, GLuint> textures;
 	GL21LogicalNameAllocator textureNames;
 	GL21LogicalNameAllocator bufferNames;
@@ -961,6 +1146,18 @@ private:
 	GLuint streamVertexArray = 0;
 	unsigned int streamAttributeMask = 0;
 	bool streamLayoutValid = false;
+	// The bound vertex array and the current colour/normal/texture coordinate
+	// are sticky GL state, so re-sending an unchanged value is a driver call
+	// for nothing. Terrain replays thousands of lists that share one current
+	// normal, and measurement put this phase at 2109 cycles per draw against
+	// 227 for Vulkan, so the redundant calls are the cost, not the packing.
+	GLuint boundVertexArray = 0;
+	float appliedColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	float appliedNormal[3] = { 0.0f, 0.0f, 0.0f };
+	float appliedTexCoord[2] = { 0.0f, 0.0f };
+	bool appliedColorValid = false;
+	bool appliedNormalValid = false;
+	bool appliedTexCoordValid = false;
 	std::uint64_t nextListName = 1;
 	std::uint64_t residentCacheHits = 0;
 	std::uint64_t residentCacheMisses = 0;

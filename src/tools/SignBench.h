@@ -17,6 +17,12 @@ int runSignBench(int frames, int signCount, bool blankText, bool finishEachFrame
 int runChunkTravelBench(int cycles, int radiusChunks, int framesPerChunk,
 	int settleFrames, int viewDistance, const std::string &worldName);
 
+// Developer fixture: teleports the production player in a straight line over
+// ever-new terrain (the long-walk case that a repeating route cannot expose)
+// and samples process memory at a fixed chunk interval.
+int runChunkMarchBench(int chunks, int framesPerChunk, int sampleEveryChunks,
+	int viewDistance, const std::string &worldName);
+
 // Developer fixture: measures how many game ticks the real timer produces per
 // wall-clock second, using the same call sequence as `Minecraft::run`.
 int runTimerProbe(int seconds);

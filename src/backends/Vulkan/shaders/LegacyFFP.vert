@@ -35,10 +35,12 @@ struct LightState
 
 layout(std140, set = 0, binding = 0) uniform LegacyFFPBlock
 {
-	mat4 uModelView;
+	// Reserved slots: the live model-view and normal matrices arrive as push
+	// constants; these keep every later std140 offset unchanged.
+	mat4 uReservedModelView;
 	mat4 uProjection;
 	mat4 uTexture;
-	mat4 uNormalMatrix;
+	mat4 uReservedNormalMatrix;
 	vec4 uGlobalAmbient;
 	MaterialState uFrontMaterial;
 	MaterialState uBackMaterial;
@@ -55,6 +57,12 @@ layout(std140, set = 0, binding = 0) uniform LegacyFFPBlock
 	vec4 uCurrentNormal;
 	vec4 uCurrentTexCoord;
 	uvec4 uFlags4;
+};
+
+layout(push_constant) uniform DrawPush
+{
+	mat4 uModelView;
+	mat4 uNormalMatrix;
 };
 
 layout(location = 0) in vec3 inPosition;

@@ -171,6 +171,11 @@ void MultiPlayerLevel::tickTiles()
 	// Beta 1.2: No tile ticking in multiplayer
 }
 
+// Alpha: WorldClient.scheduleBlockUpdate is empty (WorldClient.java:83-84)
+void MultiPlayerLevel::scheduleBlockUpdate(int_t x, int_t y, int_t z, int_t blockID)
+{
+}
+
 void MultiPlayerLevel::addToTickNextTick(int_t x, int_t y, int_t z, int_t delay)
 {
 	// Beta 1.2: No scheduled ticks in multiplayer

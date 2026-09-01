@@ -8,6 +8,7 @@
 #include <sstream>
 #include <utility>
 
+#include "legacygl/PhaseProfile.h"
 #include "legacygl/Trace.h"
 
 namespace legacygl
@@ -2879,6 +2880,9 @@ void Context::noteIndeterminateUse(const char *what)
 
 void Context::executeGeometry(const Geometry &geometry)
 {
+	// Times the whole resolve including the sink call. The core's own share is
+	// this total minus the backend phases, which are timed inside the sink.
+	PhaseScope resolvePhase(DrawPhase::CoreResolve);
 	// An attribute the draw did not supply is read from the current state at
 	// execution time, which is what lets a captured glyph list be recoloured by
 	// a surrounding glColor4f. If that current value is indeterminate after an
@@ -2949,21 +2953,24 @@ void Context::executeGeometry(const Geometry &geometry)
 	// same canonicalizePrimitives call as before, so winding and provoking
 	// vertices are unchanged by construction.
 	const PrimitiveBatch *resolvedPrimitives = &lastDrawPrimitives;
-	if (geometry.residencyId != 0)
 	{
-		auto cached = canonicalPrimitiveCache.find(geometry.residencyId);
-		if (cached == canonicalPrimitiveCache.end())
+		PhaseScope primitivePhase(DrawPhase::CorePrimitives);
+		if (geometry.residencyId != 0)
 		{
-			PrimitiveBatch batch;
-			canonicalizePrimitives(geometry.mode, geometry.vertexCount, batch);
-			cached = canonicalPrimitiveCache.emplace(geometry.residencyId,
-				std::move(batch)).first;
+			auto cached = canonicalPrimitiveCache.find(geometry.residencyId);
+			if (cached == canonicalPrimitiveCache.end())
+			{
+				PrimitiveBatch batch;
+				canonicalizePrimitives(geometry.mode, geometry.vertexCount, batch);
+				cached = canonicalPrimitiveCache.emplace(geometry.residencyId,
+					std::move(batch)).first;
+			}
+			resolvedPrimitives = &cached->second;
 		}
-		resolvedPrimitives = &cached->second;
-	}
-	else
-	{
-		canonicalizePrimitives(geometry.mode, geometry.vertexCount, lastDrawPrimitives);
+		else
+		{
+			canonicalizePrimitives(geometry.mode, geometry.vertexCount, lastDrawPrimitives);
+		}
 	}
 
 	ResolvedDraw command;
@@ -2976,8 +2983,11 @@ void Context::executeGeometry(const Geometry &geometry)
 	command.modelView = modelViewStack.top();
 	command.projection = projectionStack.top();
 	command.textureMatrix = textureStack.top();
-	command.normal = normalMatrix(command.modelView);
-	command.normalRescaleFactor = rescaleNormalFactorFromNormalMatrix(command.normal);
+	{
+		PhaseScope matrixPhase(DrawPhase::CoreMatrices);
+		command.normal = normalMatrix(command.modelView);
+		command.normalRescaleFactor = rescaleNormalFactorFromNormalMatrix(command.normal);
+	}
 
 	command.enables.texture2D = capTexture2D;
 	command.enables.depthTest = capDepthTest;
@@ -3812,6 +3822,18 @@ void Context::deleteLists(GLuint list, GLsizei range)
 		releaseDisplayListGeometry(it->second);
 		displayLists.erase(it);
 	}
+}
+
+void Context::retireDisplayListPayload(GLuint list)
+{
+	// Deliberately no trace, no sequence, and no sink deleteLists: this is a
+	// semantic-core lifecycle release, not a GL call. Backend residency is
+	// released through the same path a redefinition would use.
+	auto it = displayLists.find(list);
+	if (it == displayLists.end())
+		return;
+	releaseDisplayListGeometry(it->second);
+	displayLists.erase(it);
 }
 
 // ---------------------------------------------------------------------------

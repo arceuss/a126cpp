@@ -193,6 +193,11 @@ bool ChunkCache::shouldSave()
 
 jstring ChunkCache::gatherStats()
 {
-	// TODO
-	return u"ChunkCache: " + String::toString((int)chunks.size());
+	int_t live = 0;
+	for (const std::shared_ptr<LevelChunk> &chunk : chunks)
+	{
+		if (chunk != nullptr)
+			live++;
+	}
+	return u"ChunkCache: " + String::toString(live);
 }

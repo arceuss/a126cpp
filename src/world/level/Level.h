@@ -272,10 +272,12 @@ public:
 
 	// Alpha: World.scheduleBlockUpdate() (World.java:1117-1138)
 	// Schedules a block update after delay ticks (uses block's tickRate() if delay not specified)
-	void scheduleBlockUpdate(int_t x, int_t y, int_t z, int_t blockID);
-	
+	// Virtual: WorldClient.scheduleBlockUpdate is a no-op (WorldClient.java:83-84);
+	// without dispatch the multiplayer tick sets fill and are never drained.
+	virtual void scheduleBlockUpdate(int_t x, int_t y, int_t z, int_t blockID);
+
 	// Legacy method - delegates to scheduleBlockUpdate
-	void addToTickNextTick(int_t x, int_t y, int_t z, int_t delay);
+	virtual void addToTickNextTick(int_t x, int_t y, int_t z, int_t delay);
 
 	void tickEntities();
 	void tick(std::shared_ptr<Entity> entity);
@@ -320,7 +322,11 @@ protected:
 	void tickTiles();
 
 public:
-	bool tickPendingTicks(bool unknown);
+	// Virtual: WorldClient.TickUpdates returns false without work (WorldClient.java:87-89).
+	virtual bool tickPendingTicks(bool unknown);
+	// Pending scheduled block updates; fixtures use this to tell a vanilla
+	// backlog apart from retention.
+	std::size_t scheduledTickCount() const { return scheduledTickTreeSet.size(); }
 	void animateTick(int_t x, int_t y, int_t z);
 
 	const std::vector<std::shared_ptr<Entity>> &getEntities(Entity *ignore, AABB &aabb);

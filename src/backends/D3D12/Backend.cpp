@@ -38,6 +38,7 @@
 #include "backends/Platform/Platform.h"
 #include "legacygl/LegacyGL.h"
 #include "legacygl/PixelFormat.h"
+#include "legacygl/PhaseProfile.h"
 #include "legacygl/Sink.h"
 
 #include <d3d12.h>
@@ -3070,32 +3071,47 @@ public:
 		const UINT vertexBytes = static_cast<UINT>(vertexCount * sizeof(D3D12GPUVertex));
 
 		D3D12GPUState gpuState = {};
-		fillGPUState(command, gpuState);
-		const TextureBinding texture = bindTextureState(command, gpuState);
-		retainResource(texture.resource);
+		const TextureBinding texture = [&]()
+		{
+			legacygl::PhaseScope phase(legacygl::DrawPhase::StatePack);
+			fillGPUState(command, gpuState);
+			const TextureBinding binding = bindTextureState(command, gpuState);
+			retainResource(binding.resource);
+			return binding;
+		}();
 
 		D3D12_VERTEX_BUFFER_VIEW vertexView = {};
-		if (command.geometryResidencyId == 0)
 		{
-			const UploadAllocation upload = allocateUpload(vertexBytes, alignof(D3D12GPUVertex));
-			writeGPUVertices(command, verticesPerPrimitive, upload.mapped);
-			vertexView.BufferLocation = upload.gpuAddress;
+			legacygl::PhaseScope phase(legacygl::DrawPhase::Geometry);
+			if (command.geometryResidencyId == 0)
+			{
+				const UploadAllocation upload = allocateUpload(vertexBytes, alignof(D3D12GPUVertex));
+				writeGPUVertices(command, verticesPerPrimitive, upload.mapped);
+				vertexView.BufferLocation = upload.gpuAddress;
+			}
+			else
+			{
+				const ResidentGeometryEntry &entry = residentGeometryEntry(command,
+					verticesPerPrimitive, drawVertexCount, vertexBytes);
+				retainResidentAllocation(entry.allocation);
+				vertexView.BufferLocation = entry.allocation->page->resource->GetGPUVirtualAddress() +
+					entry.allocation->offset;
+			}
+			vertexView.SizeInBytes = vertexBytes;
+			vertexView.StrideInBytes = sizeof(D3D12GPUVertex);
 		}
-		else
+
+		const UploadAllocation constants = [&]()
 		{
-			const ResidentGeometryEntry &entry = residentGeometryEntry(command,
-				verticesPerPrimitive, drawVertexCount, vertexBytes);
-			retainResidentAllocation(entry.allocation);
-			vertexView.BufferLocation = entry.allocation->page->resource->GetGPUVirtualAddress() +
-				entry.allocation->offset;
-		}
-		vertexView.SizeInBytes = vertexBytes;
-		vertexView.StrideInBytes = sizeof(D3D12GPUVertex);
+			legacygl::PhaseScope phase(legacygl::DrawPhase::StateUpload);
+			const UploadAllocation allocation = allocateUpload(sizeof(gpuState),
+				D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+			std::memcpy(allocation.mapped, &gpuState, sizeof(gpuState));
+			return allocation;
+		}();
 
-		const UploadAllocation constants = allocateUpload(sizeof(gpuState),
-			D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
-		std::memcpy(constants.mapped, &gpuState, sizeof(gpuState));
-
+		{
+		legacygl::PhaseScope bindPhase(legacygl::DrawPhase::Bind);
 		D3D12_VIEWPORT viewport = {};
 		viewport.TopLeftX = static_cast<float>(command.pipeline.viewport[0]);
 		viewport.TopLeftY = static_cast<float>(state.targetHeight -
@@ -3131,7 +3147,11 @@ public:
 		state.commandList->SetGraphicsRootConstantBufferView(0, constants.gpuAddress);
 		state.commandList->SetGraphicsRootDescriptorTable(1, texture.srv);
 		bindLegacySamplerTable(texture.sampler);
-		state.commandList->DrawInstanced(drawVertexCount, 1, 0, 0);
+		}
+		{
+			legacygl::PhaseScope drawPhase(legacygl::DrawPhase::Draw);
+			state.commandList->DrawInstanced(drawVertexCount, 1, 0, 0);
+		}
 #if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
 		observeRenderTargetPassEmulationEnd();
 #endif

@@ -23,6 +23,8 @@ class LevelChunk
 {
 public:
 	static bool touchedSky;
+	// Live instance count; used by memory fixtures to prove eviction frees.
+	static long long liveInstances;
 
 	std::array<ubyte_t, 16 * 128 * 16> blocks = {};
 
@@ -52,7 +54,7 @@ public:
 	LevelChunk(Level &level, int_t x, int_t z);
 	LevelChunk(Level &level, const ubyte_t *blocks, int_t x, int_t z);
 
-	virtual ~LevelChunk() {}
+	virtual ~LevelChunk() { liveInstances--; }
 
 	virtual bool isAt(int_t x, int_t z);
 

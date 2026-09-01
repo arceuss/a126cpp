@@ -14,6 +14,7 @@
 #include "world/level/tile/entity/SignTileEntity.h"
 
 #include "util/Mth.h"
+#include "legacygl/Context.h"
 
 int_t Chunk::updates = 0;
 
@@ -34,6 +35,13 @@ Chunk::Chunk(Level &level, std::vector<std::shared_ptr<TileEntity>> &globalRende
 void Chunk::setPos(int_t x, int_t y, int_t z)
 {
 	if (this->x == x && this->y == y && this->z == z) return;
+
+	// The slot is moving: the old position's terrain lists will never be
+	// called again, but nothing recompiles them until the new position's
+	// rebuild. Retire their retained payload now, or every wrap of the
+	// renderer grid strands the previous geometry behind `empty[layer]`.
+	legacygl::context().retireDisplayListPayload(static_cast<unsigned int>(lists));
+	legacygl::context().retireDisplayListPayload(static_cast<unsigned int>(lists + 1));
 
 	reset();
 	this->x = x;
@@ -160,6 +168,16 @@ void Chunk::rebuild()
 	}
 
 	skyLit = LevelChunk::touchedSky;
+	// A rebuild that proves a layer empty leaves the old compiled list
+	// untouched (the draw path checks `empty[layer]`), so drop its payload.
+	// This covers a section that became air and a section that no longer
+	// needs the translucent layer.
+	for (int_t i = 0; i < 2; i++)
+	{
+		if (empty[i])
+			legacygl::context().retireDisplayListPayload(
+				static_cast<unsigned int>(lists + i));
+	}
 	compiled = true;
 	reconcileRenderableTileEntities(renderableTileEntities,
 		globalRenderableTileEntities, discoveredTileEntities);
@@ -235,6 +253,11 @@ void Chunk::remove()
 	reconcileRenderableTileEntities(renderableTileEntities,
 		globalRenderableTileEntities, none);
 	reset();
+	// The renderer chunk is going away (world unload or grid resize); its
+	// terrain and bounding-box payloads have no further caller.
+	for (int_t i = 0; i < 3; i++)
+		legacygl::context().retireDisplayListPayload(
+			static_cast<unsigned int>(lists + i));
 }
 int_t Chunk::getList(int_t layer)
 {

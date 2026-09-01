@@ -13,8 +13,11 @@
 #include <vector>
 
 #include "client/multiplayer/MultiPlayerChunkCache.h"
+#include "client/multiplayer/MultiPlayerLevel.h"
 #include "nbt/CompoundTag.h"
 #include "nbt/ListTag.h"
+#include "world/level/tile/FluidFlowingTile.h"
+#include "world/level/tile/SandTile.h"
 
 #include "tools/headless/TestFramework.h"
 #include "tools/headless/TestWorld.h"
@@ -241,6 +244,49 @@ HEADLESS_TEST(chunks, multiplayer_cache_reuses_and_releases_chunk_ownership)
 	cache.drop(999, 999);
 	ctx.checkEqual(static_cast<long long>(cache.loadedChunkCount()), 0,
 		"unloading an absent coordinate must not allocate a chunk");
+}
+
+// Alpha's WorldClient overrides scheduleBlockUpdate and TickUpdates to do
+// nothing (WorldClient.java:83-89): the server owns block ticking, so a client
+// never schedules and never drains. Our port declared both non-virtual, so a
+// call through `Level&` - which is how every Tile reaches the level - ran the
+// singleplayer body and inserted into tick sets that MultiPlayerLevel::tick
+// never drains. Flowing fluids alone made that grow for a whole session.
+HEADLESS_TEST(chunks, multiplayer_never_accumulates_scheduled_ticks)
+{
+	headless::initGameRegistries();
+
+	Level singlePlayer(u"scheduled-tick-control", Dimension::Id_Normal, 4242LL);
+	Level &singlePlayerBase = singlePlayer;
+	// scheduleBlockUpdate requires every chunk within 8 blocks (World.java:1022),
+	// which around (8,64,8) spans the 2x2 chunk neighbourhood.
+	for (int_t cx = -1; cx <= 1; cx++)
+	{
+		for (int_t cz = -1; cz <= 1; cz++)
+			singlePlayerBase.getChunk(cx, cz);
+	}
+	singlePlayerBase.scheduleBlockUpdate(8, 64, 8, Tile::sand.id);
+	ctx.check(singlePlayer.scheduledTickCount() > 0,
+		"singleplayer must still schedule block updates through the base reference");
+
+	MultiPlayerLevel multiPlayer(nullptr, 4242LL, Dimension::Id_Normal);
+	Level &multiPlayerBase = multiPlayer;
+	// The chunks must be present, or the base body would early-return on the
+	// same chunk check and hide whether dispatch reached the client override.
+	for (int_t cx = -1; cx <= 2; cx++)
+	{
+		for (int_t cz = -1; cz <= 1; cz++)
+			multiPlayer.setChunkVisible(cx, cz, true);
+	}
+	for (int_t i = 0; i < 16; i++)
+	{
+		multiPlayerBase.scheduleBlockUpdate(i, 64, 8, Tile::water.id);
+		multiPlayerBase.addToTickNextTick(i, 64, 9, Tile::lava.id);
+	}
+	ctx.checkEqual(static_cast<long long>(multiPlayer.scheduledTickCount()), 0,
+		"a multiplayer client must never queue a scheduled block update");
+	ctx.check(!multiPlayerBase.tickPendingTicks(false),
+		"a multiplayer client must report no pending ticks");
 }
 
 static void checkStoredEntityCount(headless::TestContext &ctx, int count)

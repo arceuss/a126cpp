@@ -287,6 +287,15 @@ public:
 	void callList(GLuint list);
 	void callLists(GLsizei n, GLenum type, const GLvoid *lists);
 	void deleteLists(GLuint list, GLsizei range);
+	// Internal lifecycle operation, not a GL entry point: drops the retained
+	// semantic payload (commands, canonical geometry, backend residency) of a
+	// list whose owner knows it will not be called again before its next
+	// compile. The list name stays allocated and no raw GL call is emitted, so
+	// the NativeGL trace is unchanged. The renderer uses this when a chunk
+	// slot moves, a rebuild proves a layer empty, or a renderer chunk is
+	// removed; without it the old position's geometry survives behind
+	// `empty[layer]` and exploration grows an enormous stale high-water.
+	void retireDisplayListPayload(GLuint list);
 
 	void clear(GLbitfield mask);
 	void clearColor(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha);

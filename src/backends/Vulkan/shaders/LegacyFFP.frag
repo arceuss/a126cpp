@@ -39,10 +39,12 @@ struct LightState
 
 layout(std140, set = 0, binding = 0) uniform LegacyFFPBlock
 {
-	mat4 uModelView;
+	// Reserved slots: matched to the vertex stage's block layout; the live
+	// matrices travel as vertex-stage push constants.
+	mat4 uReservedModelView;
 	mat4 uProjection;
 	mat4 uTexture;
-	mat4 uNormalMatrix;
+	mat4 uReservedNormalMatrix;
 	vec4 uGlobalAmbient;
 	MaterialState uFrontMaterial;
 	MaterialState uBackMaterial;

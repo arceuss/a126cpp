@@ -7,6 +7,8 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -28,8 +30,10 @@
 #include "java/File.h"
 #include "java/String.h"
 #include "java/System.h"
+#include "legacygl/PhaseProfile.h"
 #include "lwjgl/Display.h"
 #include "world/level/Level.h"
+#include "world/level/chunk/LevelChunk.h"
 #include "world/level/dimension/Dimension.h"
 #include "world/level/tile/Tile.h"
 #include "world/level/tile/SignTile.h"
@@ -168,6 +172,50 @@ ProcessMemory processMemory()
 	return result;
 }
 
+// Buckets every busy heap block by exact size. Diffing two samples names the
+// exact allocation size that a leak is made of, which locates its owner.
+std::string heapHistogram(std::size_t topCount)
+{
+#if defined(_WIN32)
+	std::unordered_map<std::size_t, std::pair<std::uint64_t, std::uint64_t>> buckets;
+	HANDLE heaps[64] = {};
+	const DWORD heapCount = GetProcessHeaps(64, heaps);
+	for (DWORD i = 0; i < heapCount && i < 64; i++)
+	{
+		PROCESS_HEAP_ENTRY entry = {};
+		HeapLock(heaps[i]);
+		while (HeapWalk(heaps[i], &entry))
+		{
+			if ((entry.wFlags & PROCESS_HEAP_ENTRY_BUSY) == 0)
+				continue;
+			auto &bucket = buckets[entry.cbData];
+			bucket.first++;
+			bucket.second += entry.cbData;
+		}
+		HeapUnlock(heaps[i]);
+	}
+	std::vector<std::pair<std::size_t, std::pair<std::uint64_t, std::uint64_t>>> rows(
+		buckets.begin(), buckets.end());
+	std::sort(rows.begin(), rows.end(), [](const auto &a, const auto &b)
+	{
+		return a.second.second > b.second.second;
+	});
+	if (rows.size() > topCount)
+		rows.resize(topCount);
+	std::string result;
+	for (const auto &row : rows)
+	{
+		result += " size=" + std::to_string(row.first) +
+			" count=" + std::to_string(row.second.first) +
+			" bytes=" + std::to_string(row.second.second);
+	}
+	return result;
+#else
+	(void)topCount;
+	return std::string();
+#endif
+}
+
 struct TravelPosition
 {
 	int_t x = 0;
@@ -301,6 +349,10 @@ try
 	{
 		AABB::resetPool();
 		Vec3::resetPool();
+		// Discard warm-up phase cycles so the attribution covers exactly the
+		// frames the frame-time metrics cover.
+		if (frame == warmupFrames)
+			legacygl::resetPhaseProfile();
 
 		if (lwjgl::Display::isCloseRequested())
 			break;
@@ -412,6 +464,37 @@ try
 	emit("mean_tick_ms " + std::to_string(meanOf(tickTimes)));
 	emit("mean_finish_ms " + std::to_string(meanOf(finishTimes)));
 	emit("mean_render_ms " + std::to_string(meanOf(renderTimes)));
+
+	// Phase attribution, present only when A126_PHASE_PROFILE is set. The
+	// harness picks these up from the metric block automatically, so a run
+	// that shows a backend is slow also shows which phase owns the cost.
+	if (legacygl::phaseProfileEnabled)
+	{
+		std::uint64_t backendCycles = 0;
+		for (std::size_t i = 0; i < static_cast<std::size_t>(legacygl::DrawPhase::Count); i++)
+		{
+			const legacygl::DrawPhase phase = static_cast<legacygl::DrawPhase>(i);
+			const legacygl::PhaseAccumulator &accumulator = legacygl::phaseAccumulators[i];
+			// CoreMatrices and CorePrimitives are nested inside CoreResolve, so
+			// they are core detail rather than backend cost.
+			if (phase != legacygl::DrawPhase::CoreResolve &&
+				phase != legacygl::DrawPhase::CoreMatrices &&
+				phase != legacygl::DrawPhase::CorePrimitives)
+				backendCycles += accumulator.cycles;
+			emit(std::string("phase_") + legacygl::phaseName(phase) + "_cycles " +
+				std::to_string(accumulator.cycles));
+			emit(std::string("phase_") + legacygl::phaseName(phase) + "_calls " +
+				std::to_string(accumulator.calls));
+		}
+		// CoreResolve brackets the sink call, so the core's own share is the
+		// difference. Reported explicitly to keep the split unambiguous.
+		const std::uint64_t totalCycles =
+			legacygl::phaseAccumulators[static_cast<std::size_t>(
+				legacygl::DrawPhase::CoreResolve)].cycles;
+		emit("phase_core_only_cycles " + std::to_string(
+			totalCycles > backendCycles ? totalCycles - backendCycles : 0));
+		emit("phase_backend_cycles " + std::to_string(backendCycles));
+	}
 
 	minecraft.stop();
 	return 0;
@@ -574,6 +657,172 @@ try
 catch (const std::exception &e)
 {
 	std::cerr << "chunk-travel-bench failed: " << e.what() << std::endl;
+	return 1;
+}
+
+// The travel bench revisits one route, so per-unique-chunk retention looks
+// like saturation there. This fixture never revisits: every step is new
+// terrain, which is what long walks in the real game do to memory.
+int runChunkMarchBench(int chunks, int framesPerChunk, int sampleEveryChunks,
+	int viewDistance, const std::string &worldName)
+try
+{
+	// framesPerChunk < 0 runs the world without the renderer: chunks are
+	// touched directly, which separates world-side retention from
+	const int framesPerChunkRequested = framesPerChunk;
+	const bool worldOnly = framesPerChunk < 0;
+	if (chunks <= 0)
+		chunks = 625; // 10,000 blocks
+	if (framesPerChunk == 0)
+		framesPerChunk = 2;
+	if (worldOnly)
+		framesPerChunk = 1;
+	if (sampleEveryChunks <= 0)
+		sampleEveryChunks = 25; // 400 blocks
+	if (viewDistance < 0 || viewDistance > 3)
+		viewDistance = 0;
+
+	const int frameWidth = 854;
+	const int frameHeight = 480;
+	Minecraft minecraft(frameWidth, frameHeight, false);
+	minecraft.unattended = true;
+	minecraft.init();
+	if (lwjgl::Display::isVisible())
+	{
+		std::cerr << "chunk-march-bench: unattended window became visible" << std::endl;
+		return 1;
+	}
+
+	minecraft.options.viewDistance = static_cast<int_t>(viewDistance);
+	std::shared_ptr<Level> level;
+	if (worldName.empty())
+	{
+		level = std::make_shared<Level>(u"chunk-march-bench",
+			Dimension::Id_Normal, 1234567LL);
+		minecraft.setLevel(level, u"Chunk march bench");
+	}
+	else
+	{
+		minecraft.selectLevel(String::fromUTF8(worldName));
+		level = minecraft.level;
+	}
+	if (minecraft.player == nullptr || level == nullptr)
+	{
+		std::cerr << "chunk-march-bench: the world produced no player" << std::endl;
+		return 1;
+	}
+
+	minecraft.setScreen(nullptr);
+	minecraft.options.showDebugInfo = true;
+	// High in the air so terrain never blocks the teleport; chunks below
+	// still load and render.
+	const double playerY = 96.0;
+	int frameNumber = 0;
+
+	auto renderFrames = [&](const signbench::TravelPosition &position, int count,
+		int_t &chunkUpdates)
+	{
+		for (int frame = 0; frame < count; frame++, frameNumber++)
+		{
+			AABB::resetPool();
+			Vec3::resetPool();
+			if (lwjgl::Display::isCloseRequested())
+				throw std::runtime_error("chunk march window was closed");
+			// World-only bisect: -1 full, -2 no lights, -3 no tick, -4 neither.
+			const bool runTick = !worldOnly || framesPerChunkRequested >= -2;
+			const bool runLights = !worldOnly || framesPerChunkRequested != -2 &&
+				framesPerChunkRequested != -4;
+			// Tick every frame: the real client runs 20 ticks per wall
+			// second, and this fixture renders far faster than real time. A
+			// starved tick loop backs up vanilla's scheduled-tick sets
+			// (bounded in real play) and buries genuine leaks in that noise.
+			if (runTick)
+				minecraft.tick();
+			signbench::placeTravelPlayer(*minecraft.player, position, playerY);
+			if (runLights)
+				level->updateLights();
+			if (worldOnly)
+			{
+				// Touch the chunks the renderer would have pulled in.
+				for (int_t dx = -10; dx <= 10; dx++)
+				{
+					for (int_t dz = -10; dz <= 10; dz++)
+						level->getChunk(position.x + dx, position.z + dz);
+				}
+				continue;
+			}
+			lwjgl::Display::update();
+			minecraft.gameRenderer.render(0.0f);
+			chunkUpdates += Chunk::updates;
+			Chunk::updates = 0;
+		}
+	};
+
+	int_t settleChunkUpdates = 0;
+	renderFrames(signbench::TravelPosition{}, 120, settleChunkUpdates);
+	glFinish();
+	const signbench::ProcessMemory baseline = signbench::processMemory();
+
+	std::unique_ptr<File> logFile(File::open(u"chunk-march-bench.log"));
+	std::unique_ptr<std::ostream> out(logFile->toStreamOut());
+	auto emit = [&](const std::string &line)
+	{
+		std::cout << line << '\n';
+		if (out != nullptr)
+			*out << line << '\n';
+	};
+
+	emit("chunk-march-bench");
+	emit("backend " + std::string(renderbackend::configuration().recordName));
+	emit("world " + (worldName.empty() ? std::string("generated") : worldName));
+	emit("view_distance " + std::to_string(viewDistance));
+	emit("chunks " + std::to_string(chunks));
+	emit("frames_per_chunk " + std::to_string(framesPerChunk));
+	emit("sample_every_chunks " + std::to_string(sampleEveryChunks));
+	emit("baseline_private_bytes " + std::to_string(baseline.privateBytes));
+	emit("baseline_working_set_bytes " + std::to_string(baseline.workingSetBytes));
+
+	int_t chunkUpdates = 0;
+	for (int step = 1; step <= chunks; step++)
+	{
+		signbench::TravelPosition position;
+		position.x = static_cast<int_t>(step);
+		position.z = 0;
+		renderFrames(position, framesPerChunk, chunkUpdates);
+		if (step % sampleEveryChunks == 0 || step == chunks)
+		{
+			glFinish();
+			const signbench::ProcessMemory memory = signbench::processMemory();
+			const std::int64_t privateGrowth =
+				static_cast<std::int64_t>(memory.privateBytes) -
+				static_cast<std::int64_t>(baseline.privateBytes);
+			const std::string prefix = "chunk_" + std::to_string(step) + "_";
+			emit(prefix + "blocks " + std::to_string(step * 16));
+			emit(prefix + "chunk_updates " + std::to_string(chunkUpdates));
+			emit(prefix + "private_bytes " + std::to_string(memory.privateBytes));
+			emit(prefix + "private_growth_bytes " + std::to_string(privateGrowth));
+			emit(prefix + "working_set_bytes " + std::to_string(memory.workingSetBytes));
+			emit(prefix + "entities " + std::to_string(level->entities.size()));
+			emit(prefix + "light_updates " + std::to_string(level->lightUpdates.size()));
+			emit(prefix + "light_updates_capacity " +
+				std::to_string(level->lightUpdates.capacity()));
+			emit(prefix + "heap_top" +
+				signbench::heapHistogram(12));
+			emit(prefix + "live_level_chunks " +
+				std::to_string(LevelChunk::liveInstances));
+			emit(prefix + "scheduled_ticks " +
+				std::to_string(level->scheduledTickCount()));
+			emit(prefix + "chunk_source " +
+				String::toUTF8(level->gatherChunkSourceStats()));
+		}
+	}
+
+	minecraft.stop();
+	return 0;
+}
+catch (const std::exception &e)
+{
+	std::cerr << "chunk-march-bench failed: " << e.what() << std::endl;
 	return 1;
 }
 

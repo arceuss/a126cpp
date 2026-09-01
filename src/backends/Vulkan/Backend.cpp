@@ -28,6 +28,7 @@
 #include "backends/Platform/Platform.h"
 #include "legacygl/LegacyGL.h"
 #include "legacygl/PixelFormat.h"
+#include "legacygl/PhaseProfile.h"
 #include "legacygl/Sink.h"
 
 #define VK_NO_PROTOTYPES
@@ -231,6 +232,18 @@ static_assert(offsetof(VulkanGPUState, currentTexCoord) == 1360, "Vulkan shader 
 static_assert(offsetof(VulkanGPUState, flags4) == 1376, "Vulkan shader flags4 ABI changed");
 static_assert(sizeof(VulkanGPUState) == 1392, "Vulkan shader block ABI changed");
 
+// The only constants that change on every draw. Kept bit-identical to the
+// matrices the semantic core resolved; nothing here is derived or compressed.
+struct VulkanDrawPush
+{
+	float modelView[16];
+	float normal[16];
+};
+
+static_assert(sizeof(VulkanDrawPush) == 128, "Vulkan push block must fit the guaranteed 128 bytes");
+static_assert(offsetof(VulkanDrawPush, modelView) == 0, "Vulkan push model-view offset changed");
+static_assert(offsetof(VulkanDrawPush, normal) == 64, "Vulkan push normal offset changed");
+
 struct BufferResource
 {
 	VkBuffer buffer = VK_NULL_HANDLE;
@@ -407,6 +420,16 @@ struct CommandState
 	bool lineWidthValid = false;
 	float depthBias[3] = {};
 	bool depthBiasValid = false;
+	// Environment constants and the descriptor binding that selects them. Both
+	// are command-buffer scoped: a reset command buffer must rebind even when
+	// the semantic state is unchanged from the previous frame.
+	VulkanGPUState environment = {};
+	VkBuffer environmentBuffer = VK_NULL_HANDLE;
+	uint32_t environmentOffset = 0;
+	bool environmentValid = false;
+	VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+	uint32_t descriptorOffset = 0;
+	bool descriptorValid = false;
 };
 
 #if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
@@ -2503,12 +2526,25 @@ static void createRendererResources()
 	requireSuccess(vkCreateDescriptorSetLayout(state.device, &descriptorLayoutInfo, nullptr,
 		&state.legacyDescriptorSetLayout), "vkCreateDescriptorSetLayout(legacy)");
 
+	// The model-view and normal matrices are the only per-draw constants, so
+	// they travel as 128 bytes of push data instead of forcing a fresh dynamic
+	// uniform offset and a descriptor rebind on every draw. Vulkan 1.0
+	// guarantees at least 128 bytes, so no extension or limit check is needed.
+	VkPushConstantRange legacyPushRange = {};
+	legacyPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	legacyPushRange.offset = 0;
+	legacyPushRange.size = sizeof(VulkanDrawPush);
+
 	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
 	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	pipelineLayoutInfo.setLayoutCount = 1;
 	pipelineLayoutInfo.pSetLayouts = &state.legacyDescriptorSetLayout;
+	pipelineLayoutInfo.pushConstantRangeCount = 1;
+	pipelineLayoutInfo.pPushConstantRanges = &legacyPushRange;
 	requireSuccess(vkCreatePipelineLayout(state.device, &pipelineLayoutInfo, nullptr,
 		&state.legacyPipelineLayout), "vkCreatePipelineLayout(legacy)");
+	pipelineLayoutInfo.pushConstantRangeCount = 0;
+	pipelineLayoutInfo.pPushConstantRanges = nullptr;
 
 	VkPushConstantRange clearPushRange = {};
 	clearPushRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -3444,10 +3480,11 @@ static const ResidentGeometryEntry &residentGeometryEntry(
 
 static void fillGPUState(const legacygl::ResolvedDraw &command, VulkanGPUState &gpuState)
 {
-	std::memcpy(gpuState.modelView, command.modelView.m, sizeof(gpuState.modelView));
+	// modelView and normal now arrive as push constants. Their slots stay in the
+	// block so every following std140 offset is unchanged, but they are left
+	// zeroed so two draws that differ only by transform compare equal here.
 	std::memcpy(gpuState.projection, command.projection.m, sizeof(gpuState.projection));
 	std::memcpy(gpuState.texture, command.textureMatrix.m, sizeof(gpuState.texture));
-	std::memcpy(gpuState.normal, command.normal.m, sizeof(gpuState.normal));
 	copy4(gpuState.globalAmbient, command.lighting.modelAmbient);
 	copyMaterial(gpuState.frontMaterial, command.lighting.frontMaterial);
 	copyMaterial(gpuState.backMaterial, command.lighting.backMaterial);
@@ -4463,42 +4500,70 @@ public:
 		}
 
 		VulkanGPUState gpuState = {};
-		fillGPUState(command, gpuState);
-		const TextureBinding texture = bindTextureState(command, gpuState);
+		const TextureBinding texture = [&]()
+		{
+			legacygl::PhaseScope phase(legacygl::DrawPhase::StatePack);
+			fillGPUState(command, gpuState);
+			return bindTextureState(command, gpuState);
+		}();
 		beginLegacyPass();
 		const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(
 			vertexCount * sizeof(VulkanGPUVertex));
 		VkBuffer vertexBuffer = VK_NULL_HANDLE;
 		VkDeviceSize vertexOffset = 0;
 		uint32_t drawVertexCount = static_cast<uint32_t>(vertexCount);
-		if (command.geometryResidencyId == 0)
 		{
-			const StreamAllocation vertexUpload = allocateStreamBuffer(vertexBytes,
-				static_cast<VkDeviceSize>(alignof(VulkanGPUVertex)));
-			writeGPUVertices(command, verticesPerPrimitive, vertexUpload.mapped);
-			vertexBuffer = vertexUpload.buffer;
-			vertexOffset = vertexUpload.offset;
+			legacygl::PhaseScope phase(legacygl::DrawPhase::Geometry);
+			if (command.geometryResidencyId == 0)
+			{
+				const StreamAllocation vertexUpload = allocateStreamBuffer(vertexBytes,
+					static_cast<VkDeviceSize>(alignof(VulkanGPUVertex)));
+				writeGPUVertices(command, verticesPerPrimitive, vertexUpload.mapped);
+				vertexBuffer = vertexUpload.buffer;
+				vertexOffset = vertexUpload.offset;
+			}
+			else
+			{
+				const ResidentGeometryEntry &entry = residentGeometryEntry(command,
+					verticesPerPrimitive, vertexCount, vertexBytes);
+				currentFrame().residentAllocations.push_back(entry.allocation);
+				vertexBuffer = entry.allocation->page->buffer.buffer;
+				vertexOffset = entry.allocation->offset;
+				drawVertexCount = entry.vertexCount;
+			}
 		}
-		else
+		// The environment block excludes the model-view and normal matrices, so
+		// consecutive draws under the same lights/fog/texture state compare
+		// equal and reuse the previous upload instead of a fresh stream slot.
+		CommandState &commandState = currentFrame().commandState;
+		VkBuffer uniformBuffer = commandState.environmentBuffer;
+		uint32_t uniformOffset = commandState.environmentOffset;
+		VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 		{
-			const ResidentGeometryEntry &entry = residentGeometryEntry(command,
-				verticesPerPrimitive, vertexCount, vertexBytes);
-			currentFrame().residentAllocations.push_back(entry.allocation);
-			vertexBuffer = entry.allocation->page->buffer.buffer;
-			vertexOffset = entry.allocation->offset;
-			drawVertexCount = entry.vertexCount;
+			legacygl::PhaseScope phase(legacygl::DrawPhase::StateUpload);
+			if (!commandState.environmentValid ||
+				std::memcmp(&commandState.environment, &gpuState, sizeof(gpuState)) != 0)
+			{
+				const VkDeviceSize uniformAlignment = std::max<VkDeviceSize>(
+					static_cast<VkDeviceSize>(alignof(VulkanGPUState)),
+					state.physicalProperties.limits.minUniformBufferOffsetAlignment);
+				const StreamAllocation uniformUpload = allocateStreamBuffer(sizeof(VulkanGPUState),
+					uniformAlignment);
+				std::memcpy(uniformUpload.mapped, &gpuState, sizeof(gpuState));
+				if (uniformUpload.offset > std::numeric_limits<uint32_t>::max())
+					throw std::runtime_error("Vulkan uniform stream offset exceeds the dynamic-offset range");
+				uniformBuffer = uniformUpload.buffer;
+				uniformOffset = static_cast<uint32_t>(uniformUpload.offset);
+				std::memcpy(&commandState.environment, &gpuState, sizeof(gpuState));
+				commandState.environmentBuffer = uniformBuffer;
+				commandState.environmentOffset = uniformOffset;
+				commandState.environmentValid = true;
+			}
+			descriptorSet = legacyDescriptorSet(uniformBuffer, texture);
 		}
-		const VkDeviceSize uniformAlignment = std::max<VkDeviceSize>(
-			static_cast<VkDeviceSize>(alignof(VulkanGPUState)),
-			state.physicalProperties.limits.minUniformBufferOffsetAlignment);
-		const StreamAllocation uniformUpload = allocateStreamBuffer(sizeof(VulkanGPUState),
-			uniformAlignment);
-		std::memcpy(uniformUpload.mapped, &gpuState, sizeof(gpuState));
-		if (uniformUpload.offset > std::numeric_limits<uint32_t>::max())
-			throw std::runtime_error("Vulkan uniform stream offset exceeds the dynamic-offset range");
-		const uint32_t uniformOffset = static_cast<uint32_t>(uniformUpload.offset);
-		const VkDescriptorSet descriptorSet = legacyDescriptorSet(uniformUpload.buffer, texture);
 
+		{
+		legacygl::PhaseScope bindPhase(legacygl::DrawPhase::Bind);
 		const PipelineKey key = legacyPipelineKey(command);
 		const VkPipeline pipeline = legacyPipeline(key);
 #if defined(A126_RENDER_DIAGNOSTICS_COMPILED)
@@ -4548,9 +4613,25 @@ public:
 		setDepthBiasState(command.pipeline.polygonOffsetUnits, 0.0f,
 			command.pipeline.polygonOffsetFactor);
 		vkCmdBindVertexBuffers(currentFrame().commandBuffer, 0, 1, &vertexBuffer, &vertexOffset);
-		vkCmdBindDescriptorSets(currentFrame().commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			state.legacyPipelineLayout, 0, 1, &descriptorSet, 1, &uniformOffset);
-		vkCmdDraw(currentFrame().commandBuffer, drawVertexCount, 1, 0, 0);
+		if (!commandState.descriptorValid || commandState.descriptorSet != descriptorSet ||
+			commandState.descriptorOffset != uniformOffset)
+		{
+			vkCmdBindDescriptorSets(currentFrame().commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+				state.legacyPipelineLayout, 0, 1, &descriptorSet, 1, &uniformOffset);
+			commandState.descriptorSet = descriptorSet;
+			commandState.descriptorOffset = uniformOffset;
+			commandState.descriptorValid = true;
+		}
+		VulkanDrawPush push;
+		std::memcpy(push.modelView, command.modelView.m, sizeof(push.modelView));
+		std::memcpy(push.normal, command.normal.m, sizeof(push.normal));
+		vkCmdPushConstants(currentFrame().commandBuffer, state.legacyPipelineLayout,
+			VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
+		}
+		{
+			legacygl::PhaseScope drawPhase(legacygl::DrawPhase::Draw);
+			vkCmdDraw(currentFrame().commandBuffer, drawVertexCount, 1, 0, 0);
+		}
 	}
 
 	void resolvedTextureUpload(const legacygl::ResolvedTextureUpload &command) override
