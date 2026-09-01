@@ -43,7 +43,7 @@ struct Backend
 
 const Backend &nativeGLBackend();
 const Backend &openGL21Backend();
-const Backend &openGL46Backend();
+const Backend &openGL33Backend();
 const Backend &vulkanBackend();
 const Backend &d3d12Backend();
 

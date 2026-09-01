@@ -36,6 +36,10 @@ enum class DrawPhase : std::size_t
 	CoreMatrices,
 	// Semantic core: canonical primitive decomposition or its cache lookup.
 	CorePrimitives,
+	// Semantic core: copying light, material and model-ambient state.
+	CoreLighting,
+	// Semantic core: resolving the bound texture object's sampled state.
+	CoreTexture,
 	// Backend: building or locating the vertex data for this draw.
 	Geometry,
 	// Backend: packing resolved state into the backend's constant layout.
@@ -76,6 +80,8 @@ inline const char *phaseName(DrawPhase phase)
 	case DrawPhase::CorePrimitives: return "core_primitives";
 	case DrawPhase::CoreResolve: return "core_resolve";
 	case DrawPhase::Geometry: return "geometry";
+	case DrawPhase::CoreLighting: return "core_lighting";
+	case DrawPhase::CoreTexture: return "core_texture";
 	case DrawPhase::StatePack: return "state_pack";
 	case DrawPhase::StateUpload: return "state_upload";
 	case DrawPhase::Bind: return "bind";

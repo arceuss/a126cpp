@@ -1106,15 +1106,15 @@ else()
 endif()
 option(A126_ENABLE_GL_GPU_TESTS "Enable serialized LegacyGL GPU parity tests" OFF)
 option(A126_ENABLE_RENDER_DIAGNOSTICS "Compile renderer diagnostics instrumentation" OFF)
-set(A126_DEFAULT_RENDER_BACKEND "gl21" CACHE STRING "Default renderer: nativegl, gl21, gl46, vulkan or d3d12")
-set_property(CACHE A126_DEFAULT_RENDER_BACKEND PROPERTY STRINGS nativegl gl21 gl46 vulkan d3d12)
+set(A126_DEFAULT_RENDER_BACKEND "gl21" CACHE STRING "Default renderer: nativegl, gl21, gl33, vulkan or d3d12")
+set_property(CACHE A126_DEFAULT_RENDER_BACKEND PROPERTY STRINGS nativegl gl21 gl33 vulkan d3d12)
 set(A126_EXECUTABLE_NAME "Alpha126Cpp" CACHE STRING "Client executable output name")
 
 if(A126_DEFAULT_RENDER_BACKEND STREQUAL "native")
 	message(STATUS "Migrating A126_DEFAULT_RENDER_BACKEND=native to nativegl")
 	set(A126_DEFAULT_RENDER_BACKEND "nativegl" CACHE STRING "Default renderer" FORCE)
 endif()
-if(NOT A126_DEFAULT_RENDER_BACKEND MATCHES "^(nativegl|gl21|gl46|vulkan|d3d12)$")
+if(NOT A126_DEFAULT_RENDER_BACKEND MATCHES "^(nativegl|gl21|gl33|vulkan|d3d12)$")
 	message(FATAL_ERROR "Unknown A126_DEFAULT_RENDER_BACKEND=${A126_DEFAULT_RENDER_BACKEND}")
 endif()
 if(A126_DEFAULT_RENDER_BACKEND STREQUAL "vulkan" AND NOT A126_ENABLE_VULKAN_BACKEND)
@@ -1148,14 +1148,14 @@ set_target_properties(a126cpp-render-backend-nativegl PROPERTIES
 	CXX_EXTENSIONS NO
 )
 
-add_library(a126cpp-render-backend-opengl46 STATIC EXCLUDE_FROM_ALL
-	"src/backends/OpenGL46/Backend.cpp"
-	"src/backends/OpenGL46/Shaders.cpp"
-	"src/backends/OpenGL46/Shaders.h"
+add_library(a126cpp-render-backend-opengl33 STATIC EXCLUDE_FROM_ALL
+	"src/backends/OpenGL33/Backend.cpp"
+	"src/backends/OpenGL33/Shaders.cpp"
+	"src/backends/OpenGL33/Shaders.h"
 )
-target_include_directories(a126cpp-render-backend-opengl46 PRIVATE "src")
-target_link_libraries(a126cpp-render-backend-opengl46 PRIVATE a126cpp-render-backend-opengl-context)
-set_target_properties(a126cpp-render-backend-opengl46 PROPERTIES
+target_include_directories(a126cpp-render-backend-opengl33 PRIVATE "src")
+target_link_libraries(a126cpp-render-backend-opengl33 PRIVATE a126cpp-render-backend-opengl-context)
+set_target_properties(a126cpp-render-backend-opengl33 PROPERTIES
 	CXX_STANDARD 17
 	CXX_STANDARD_REQUIRED YES
 	CXX_EXTENSIONS NO
@@ -1363,13 +1363,13 @@ add_executable(Alpha126Cpp
 target_compile_definitions(Alpha126Cpp PRIVATE
 	A126_HAS_BACKEND_NATIVEGL=1
 	A126_HAS_BACKEND_OPENGL21=1
-	A126_HAS_BACKEND_OPENGL46=1
+	A126_HAS_BACKEND_OPENGL33=1
 	A126_DEFAULT_RENDER_BACKEND="${A126_DEFAULT_RENDER_BACKEND}"
 )
 target_link_libraries(Alpha126Cpp PRIVATE
 	Alpha126CppCore
 	a126cpp-render-backend-nativegl
-	a126cpp-render-backend-opengl46
+	a126cpp-render-backend-opengl33
 )
 if(A126_ENABLE_VULKAN_BACKEND)
 	target_compile_definitions(Alpha126Cpp PRIVATE A126_HAS_BACKEND_VULKAN=1)
@@ -1464,19 +1464,19 @@ if(A126_ENABLE_GL_GPU_TESTS)
 		Alpha126CppCore a126cpp-render-backend-nativegl
 	)
 
-	add_executable(a126cpp-legacygl-gpu-parity-gl46
+	add_executable(a126cpp-legacygl-gpu-parity-gl33
 		"src/backends/Backend.cpp"
 		"src/tools/LegacyGLGpuParity.cpp"
 	)
-	target_compile_definitions(a126cpp-legacygl-gpu-parity-gl46 PRIVATE A126_HAS_BACKEND_OPENGL46=1)
-	target_link_libraries(a126cpp-legacygl-gpu-parity-gl46 PRIVATE
-		Alpha126CppCore a126cpp-render-backend-opengl46
+	target_compile_definitions(a126cpp-legacygl-gpu-parity-gl33 PRIVATE A126_HAS_BACKEND_OPENGL33=1)
+	target_link_libraries(a126cpp-legacygl-gpu-parity-gl33 PRIVATE
+		Alpha126CppCore a126cpp-render-backend-opengl33
 	)
 
 	set(A126_GL_GPU_PARITY_TARGETS
 		a126cpp-legacygl-gpu-parity-native
 		a126cpp-legacygl-gpu-parity-gl21
-		a126cpp-legacygl-gpu-parity-gl46
+		a126cpp-legacygl-gpu-parity-gl33
 	)
 	if(A126_ENABLE_VULKAN_BACKEND)
 		add_executable(a126cpp-legacygl-gpu-parity-vulkan
@@ -1541,10 +1541,10 @@ if(WIN32 AND TARGET OpenAL32)
 				"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-gl21>/OpenAL32.dll"
 			COMMENT "Copying OpenAL32.dll to output directory"
 		)
-		add_custom_command(TARGET a126cpp-legacygl-gpu-parity-gl46 POST_BUILD
+		add_custom_command(TARGET a126cpp-legacygl-gpu-parity-gl33 POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
 				"$<TARGET_FILE:OpenAL32>"
-				"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-gl46>/OpenAL32.dll"
+				"$<TARGET_FILE_DIR:a126cpp-legacygl-gpu-parity-gl33>/OpenAL32.dll"
 			COMMENT "Copying OpenAL32.dll to output directory"
 		)
 		if(A126_ENABLE_VULKAN_BACKEND)
@@ -1586,14 +1586,14 @@ add_test(NAME gl-inventory COMMAND a126cpp-gl-inventory)
 if(A126_ENABLE_GL_GPU_TESTS)
 	set(A126_GL_GPU_NATIVE_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-native.txt")
 	set(A126_GL_GPU_GL21_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-gl21.txt")
-	set(A126_GL_GPU_GL46_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-gl46.txt")
+	set(A126_GL_GPU_GL33_RECORD "${CMAKE_CURRENT_BINARY_DIR}/legacygl-gpu-gl33.txt")
 	set(A126_GL_GPU_TESTS
 		legacygl-gpu-record-native
 		legacygl-gpu-record-gl21
-		legacygl-gpu-record-gl46
+		legacygl-gpu-record-gl33
 		legacygl-gpu-compare-gl21
 		legacygl-gpu-compare
-		legacygl-gpu-compare-gl21-gl46
+		legacygl-gpu-compare-gl21-gl33
 	)
 
 	add_test(NAME legacygl-gpu-record-native
@@ -1612,10 +1612,10 @@ if(A126_ENABLE_GL_GPU_TESTS)
 		RESOURCE_LOCK legacygl-gpu
 	)
 
-	add_test(NAME legacygl-gpu-record-gl46
-		COMMAND a126cpp-legacygl-gpu-parity-gl46 --record "${A126_GL_GPU_GL46_RECORD}"
+	add_test(NAME legacygl-gpu-record-gl33
+		COMMAND a126cpp-legacygl-gpu-parity-gl33 --record "${A126_GL_GPU_GL33_RECORD}"
 	)
-	set_tests_properties(legacygl-gpu-record-gl46 PROPERTIES
+	set_tests_properties(legacygl-gpu-record-gl33 PROPERTIES
 		FIXTURES_SETUP legacygl-gpu-records
 		RESOURCE_LOCK legacygl-gpu
 	)
@@ -1629,17 +1629,17 @@ if(A126_ENABLE_GL_GPU_TESTS)
 	)
 
 	add_test(NAME legacygl-gpu-compare
-		COMMAND a126cpp-legacygl-gpu-parity-native --compare "${A126_GL_GPU_NATIVE_RECORD}" "${A126_GL_GPU_GL46_RECORD}"
+		COMMAND a126cpp-legacygl-gpu-parity-native --compare "${A126_GL_GPU_NATIVE_RECORD}" "${A126_GL_GPU_GL33_RECORD}"
 	)
 	set_tests_properties(legacygl-gpu-compare PROPERTIES
 		FIXTURES_REQUIRED legacygl-gpu-records
 		RESOURCE_LOCK legacygl-gpu
 	)
 
-	add_test(NAME legacygl-gpu-compare-gl21-gl46
-		COMMAND a126cpp-legacygl-gpu-parity-gl21 --compare "${A126_GL_GPU_GL21_RECORD}" "${A126_GL_GPU_GL46_RECORD}"
+	add_test(NAME legacygl-gpu-compare-gl21-gl33
+		COMMAND a126cpp-legacygl-gpu-parity-gl21 --compare "${A126_GL_GPU_GL21_RECORD}" "${A126_GL_GPU_GL33_RECORD}"
 	)
-	set_tests_properties(legacygl-gpu-compare-gl21-gl46 PROPERTIES
+	set_tests_properties(legacygl-gpu-compare-gl21-gl33 PROPERTIES
 		FIXTURES_REQUIRED legacygl-gpu-records
 		RESOURCE_LOCK legacygl-gpu
 	)
@@ -1662,10 +1662,10 @@ if(A126_ENABLE_GL_GPU_TESTS)
 			RESOURCE_LOCK legacygl-gpu
 		)
 
-		add_test(NAME legacygl-gpu-compare-gl46-vulkan
-			COMMAND a126cpp-legacygl-gpu-parity-gl46 --compare "${A126_GL_GPU_GL46_RECORD}" "${A126_GL_GPU_VULKAN_RECORD}"
+		add_test(NAME legacygl-gpu-compare-gl33-vulkan
+			COMMAND a126cpp-legacygl-gpu-parity-gl33 --compare "${A126_GL_GPU_GL33_RECORD}" "${A126_GL_GPU_VULKAN_RECORD}"
 		)
-		set_tests_properties(legacygl-gpu-compare-gl46-vulkan PROPERTIES
+		set_tests_properties(legacygl-gpu-compare-gl33-vulkan PROPERTIES
 			FIXTURES_REQUIRED legacygl-gpu-records
 			RESOURCE_LOCK legacygl-gpu
 		)
@@ -1680,7 +1680,7 @@ if(A126_ENABLE_GL_GPU_TESTS)
 		list(APPEND A126_GL_GPU_TESTS
 			legacygl-gpu-record-vulkan
 			legacygl-gpu-compare-vulkan
-			legacygl-gpu-compare-gl46-vulkan
+			legacygl-gpu-compare-gl33-vulkan
 			legacygl-gpu-compare-gl21-vulkan
 		)
 	endif()
@@ -1703,10 +1703,10 @@ if(A126_ENABLE_GL_GPU_TESTS)
 			RESOURCE_LOCK legacygl-gpu
 		)
 
-		add_test(NAME legacygl-gpu-compare-gl46-d3d12
-			COMMAND a126cpp-legacygl-gpu-parity-gl46 --compare "${A126_GL_GPU_GL46_RECORD}" "${A126_GL_GPU_D3D12_RECORD}"
+		add_test(NAME legacygl-gpu-compare-gl33-d3d12
+			COMMAND a126cpp-legacygl-gpu-parity-gl33 --compare "${A126_GL_GPU_GL33_RECORD}" "${A126_GL_GPU_D3D12_RECORD}"
 		)
-		set_tests_properties(legacygl-gpu-compare-gl46-d3d12 PROPERTIES
+		set_tests_properties(legacygl-gpu-compare-gl33-d3d12 PROPERTIES
 			FIXTURES_REQUIRED legacygl-gpu-records
 			RESOURCE_LOCK legacygl-gpu
 		)
@@ -1722,7 +1722,7 @@ if(A126_ENABLE_GL_GPU_TESTS)
 		list(APPEND A126_GL_GPU_TESTS
 			legacygl-gpu-record-d3d12
 			legacygl-gpu-compare-d3d12
-			legacygl-gpu-compare-gl46-d3d12
+			legacygl-gpu-compare-gl33-d3d12
 			legacygl-gpu-compare-gl21-d3d12
 		)
 

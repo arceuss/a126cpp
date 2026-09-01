@@ -12,8 +12,8 @@ src/backends/Platform/SDL2/Platform.{h,cpp}
 src/backends/NativeGL/Backend.cpp
 src/backends/OpenGL/Context.{h,cpp}
 src/backends/OpenGL21/Backend.cpp
-src/backends/OpenGL46/Backend.cpp
-src/backends/OpenGL46/Shaders.{h,cpp}
+src/backends/OpenGL33/Backend.cpp
+src/backends/OpenGL33/Shaders.{h,cpp}
 src/backends/Vulkan/Backend.cpp
 src/backends/Vulkan/Shaders.{h,cpp}
 src/backends/Vulkan/shaders/*.{vert,frag}
@@ -23,7 +23,7 @@ src/backends/D3D12/Shaders.{h,cpp}
 
 The production executable links the providers enabled for its platform and
 selects exactly one before graphics initialization with
-`--backend nativegl|gl21|gl46|vulkan|d3d12`.
+`--backend nativegl|gl21|gl33|vulkan|d3d12`.
 `A126_DEFAULT_RENDER_BACKEND` is a compile definition selected by CMake and
 defaults to `gl21`; executable filenames are cosmetic and never select a
 backend. Unknown, unavailable, duplicate or missing backend arguments fail
@@ -39,7 +39,7 @@ Choose the platform independently with `A126_PLATFORM_BACKEND=SDL2`. `SDL2` is
 currently the default and only accepted exact value; any other value is a
 configure error. Renderer selection does not imply platform selection.
 
-`A126_ENABLE_GL_GPU_TESTS=ON` creates separate native, GL2.1, GL46, Vulkan and
+`A126_ENABLE_GL_GPU_TESTS=ON` creates separate native, GL2.1, GL33, Vulkan and
 D3D12 parity executables. Unlike production, each fixture links exactly one
 provider; this keeps recording independent of the run-time selector.
 
@@ -119,11 +119,11 @@ inventoried entry point reaches the backend exactly once, in order. It exists
 because a semantic core can be perfectly correct while the backend receives
 nothing and the screen stays empty.
 
-## OpenGL 4.6 Core - working
+## OpenGL 3.3 Core - working
 
-`src/backends/OpenGL46` is the first translated backend. It requests and
+`src/backends/OpenGL33` is the first translated backend. It requests and
 requires a real 4.6 Core context; a compatibility fallback is rejected. The
-verified startup log was NVIDIA 610.88, OpenGL 4.6, `profile=core`.
+verified startup log was NVIDIA 610.88, OpenGL 3.3, `profile=core`.
 
 Implemented:
 
@@ -147,20 +147,20 @@ Implemented:
 - startup rejects a missing 4.6 Core function set or unsupported `GL_RGBA8`
   texture path and emits one machine-readable capability/fallback record;
 - polygon offset and classified line-width fallback;
-- no fixed-function entry point. The inventory recursively scans every GL46
+- no fixed-function entry point. The inventory recursively scans every GL33
   `.cpp` and `.h` and rejects compatibility calls and ARB aliases.
 
 Verification on the current machine:
 
 - all 274 headless cases pass;
-- the combined Release CTest run passes 17/17 and the 153-case NativeGL/GL46
+- the combined Release CTest run passes 17/17 and the 153-case NativeGL/GL33
   fixture comparison passes;
 - all four final-frame traces are byte-identical (2,165 lines, 73,251 bytes,
   SHA-256 `c0ce3c8ad48c62118323ac66dc2e79415317dde794f76cad804c6ee5eae9a278`);
 - repeated PNGs are byte-identical within each backend;
 - the cross-backend 1920x1080 comparison differs at 512 of 2,073,600 pixels
   (0.024691358%), with identical alpha and a sparse edge/raster classification;
-- the final hidden GL46 capture exits cleanly.
+- the final hidden GL33 capture exits cleanly.
 
 Known limits:
 
@@ -173,7 +173,7 @@ Known limits:
   smoothing;
 - scissor enable is tracked, but `glScissor` is not in the inventoried stream,
   so the box remains the context default;
-- native query validation is unavailable in GL46. Game queries still come only
+- native query validation is unavailable in GL33. Game queries still come only
   from the semantic core;
 - framebuffer evidence covers one deterministic scene and one NVIDIA
   GPU/driver. There is not yet a versioned multi-scene golden manifest/corpus.
@@ -205,7 +205,7 @@ Implemented:
   matrices;
 - logical texture, buffer and list namespaces, ordered texture uploads, sampler
   state, incomplete-texture behaviour and the same one-texel `GL_CLAMP` gutter
-  representation verified in GL46;
+  representation verified in GL33;
 - colour/depth-mask-aware clears, including a shader path for partial colour
   masks, and the exercised default-scissor behaviour;
 - pack-aligned RGB/RGBA/BGR/BGRA/luminance/alpha readback with format conversion
@@ -253,7 +253,7 @@ Verification on the current machine:
   `c0ce3c8ad48c62118323ac66dc2e79415317dde794f76cad804c6ee5eae9a278`);
 - repeated 1920x1080 Vulkan captures are byte-identical, SHA-256
   `7A8794F8A5FFB3D2DA87A8EDA65F9340727E43ED30828BD9D0035EBBF5FFDBA9`;
-- GL46 and Vulkan differ at 55 of 2,073,600 pixels (0.002652392%), with
+- GL33 and Vulkan differ at 55 of 2,073,600 pixels (0.002652392%), with
   identical alpha and a sparse edge/raster classification under the existing
   Gate D policy;
 - the Debug validation layer reports zero errors at shutdown, and the final
@@ -337,7 +337,7 @@ Implemented:
   absent from captured geometry, as required by
   `list.execution-current-color-variants`;
 - per-object texture state, incomplete-texture handling and the one-texel
-  `GL_CLAMP` gutter representation used by GL46 and Vulkan;
+  `GL_CLAMP` gutter representation used by GL33 and Vulkan;
 - native depth, cull, blend and polygon-offset state. All 16 logic operations
   use a UINT view of the typeless RGBA8 target plus an integer-output shader,
   because UNORM render targets do not support D3D12 output-merger logic ops;
@@ -364,7 +364,7 @@ Verification on the current machine:
   slots. The 129-case recorder crossed five sequential GPU-backed texture
   lifetimes without exhaustion or validation errors; the production capacity
   was then restored to 16,382 dynamic slots and rebuilt;
-- final-frame traces match NativeGL, GL46 and Vulkan byte for byte (2,165 lines,
+- final-frame traces match NativeGL, GL33 and Vulkan byte for byte (2,165 lines,
   73,251 bytes, SHA-256
   `c0ce3c8ad48c62118323ac66dc2e79415317dde794f76cad804c6ee5eae9a278`);
 - repeated 1920x1080 captures are byte-identical, SHA-256
@@ -373,7 +373,7 @@ Verification on the current machine:
   image while packing 625,374,288 peak resident payload bytes into 38 buffers.
   Byte-identical runs observed 3,812 through 3,814 cache misses depending on
   chunk-update timing;
-- scene mismatches are 2,211 pixels versus NativeGL, 1,812 versus GL46 and
+- scene mismatches are 2,211 pixels versus NativeGL, 1,812 versus GL33 and
   1,773 versus Vulkan, with exact alpha. They are sparse edge/line components,
   including the classified width-2 fallback, not a widened tolerance;
 - a full Debug 1920x1080 capture reports zero validation errors. Its 463
@@ -478,12 +478,12 @@ pass, upload, retirement, residency and wait counters.
 | requirement | state |
 |---|---|
 | NativeGL remains the compatibility oracle | yes, kept separate and verified by running the game; GL2.1 is the default |
-| production backend selection is startup-only | yes, `--backend nativegl\|gl21\|gl46\|vulkan\|d3d12` is parsed before graphics initialization; CMake defaults to GL2.1 and filenames are ignored |
+| production backend selection is startup-only | yes, `--backend nativegl\|gl21\|gl33\|vulkan\|d3d12` is parsed before graphics initialization; CMake defaults to GL2.1 and filenames are ignored |
 | platform selection and lifecycle are separate from the renderer | yes, exact `A126_PLATFORM_BACKEND=SDL2` today, with renderer -> window -> platform teardown |
 | renderer/game GL call ordering is unchanged | yes, final-frame traces match byte for byte |
 | the GL API subset is inventoried | yes, generated and enforced by `a126cpp-gl-inventory` |
 | one shared LegacyGL semantic core serves all production backends | yes, `src/legacygl/Context` and resolved commands |
-| GL46 runs on a real Core profile without fixed-function calls | yes, verified at startup, by inventory and by hidden capture |
+| GL33 runs on a real Core profile without fixed-function calls | yes, verified at startup, by inventory and by hidden capture |
 | Vulkan and D3D12 run without OpenGL calls | yes, verified by both deny scans, validation and hidden captures |
 | focused GPU behaviour matches the oracle | yes, all ten 153-case pairwise comparisons pass under the documented exact/tolerant/fallback classes |
 | deterministic framebuffer comparison exists | yes, preliminary single-scene Gate D with classified differences |

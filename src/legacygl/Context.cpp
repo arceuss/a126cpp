@@ -3033,30 +3033,36 @@ void Context::executeGeometry(const Geometry &geometry)
 	for (int i = 0; i < 4; i++)
 		command.fog.color[i] = fogColorValue[i];
 
-	for (int i = 0; i < MAX_LIGHTS; i++)
-		command.lighting.lights[i] = lights[i];
-	for (int i = 0; i < 4; i++)
-		command.lighting.modelAmbient[i] = lightModelAmbientValue[i];
-	command.lighting.colorMaterialFace = colorMaterialFaceValue;
-	command.lighting.colorMaterialMode = colorMaterialModeValue;
-	command.lighting.frontMaterial = materialFront;
-	command.lighting.backMaterial = materialBack;
-
-	command.texture.name = textureBinding;
-	const TextureObject *object = texture(textureBinding);
-	if (object != nullptr)
 	{
-		command.texture.minFilter = object->minFilter;
-		command.texture.magFilter = object->magFilter;
-		command.texture.wrapS = object->wrapS;
-		command.texture.wrapT = object->wrapT;
+		PhaseScope lightingPhase(DrawPhase::CoreLighting);
+		for (int i = 0; i < MAX_LIGHTS; i++)
+			command.lighting.lights[i] = lights[i];
 		for (int i = 0; i < 4; i++)
-			command.texture.borderColor[i] = object->borderColor[i];
-		command.texture.level0Width = object->levels[0].width;
-		command.texture.level0Height = object->levels[0].height;
-		command.texture.level0InternalFormat = object->levels[0].internalFormat;
-		command.texture.level0Defined = object->levels[0].defined;
-		command.texture.complete = object->complete();
+			command.lighting.modelAmbient[i] = lightModelAmbientValue[i];
+		command.lighting.colorMaterialFace = colorMaterialFaceValue;
+		command.lighting.colorMaterialMode = colorMaterialModeValue;
+		command.lighting.frontMaterial = materialFront;
+		command.lighting.backMaterial = materialBack;
+	}
+
+	{
+		PhaseScope texturePhase(DrawPhase::CoreTexture);
+		command.texture.name = textureBinding;
+		const TextureObject *object = texture(textureBinding);
+		if (object != nullptr)
+		{
+			command.texture.minFilter = object->minFilter;
+			command.texture.magFilter = object->magFilter;
+			command.texture.wrapS = object->wrapS;
+			command.texture.wrapT = object->wrapT;
+			for (int i = 0; i < 4; i++)
+				command.texture.borderColor[i] = object->borderColor[i];
+			command.texture.level0Width = object->levels[0].width;
+			command.texture.level0Height = object->levels[0].height;
+			command.texture.level0InternalFormat = object->levels[0].internalFormat;
+			command.texture.level0Defined = object->levels[0].defined;
+			command.texture.complete = object->complete();
+		}
 	}
 
 	activeSink->resolvedDraw(command);

@@ -83,8 +83,8 @@ rather than something to hide behind a global epsilon.
 
 ### Translated-backend measurements
 
-OpenGL 4.6, Vulkan and D3D12 were exercised on the same RTX 5070. The GL46
-startup log reported NVIDIA driver 610.88, OpenGL 4.6 and `profile=core`;
+OpenGL 3.3, Vulkan and D3D12 were exercised on the same RTX 5070. The GL33
+startup log reported NVIDIA driver 610.88, OpenGL 3.3 and `profile=core`;
 compatibility fallback is explicitly rejected. Vulkan reported loader 1.4.357
 and device API 1.4.341, plus `line rasterization=bresenham, subpixelBits=8`.
 Vulkan Debug runs enabled `VK_LAYER_KHRONOS_validation` and shut down with zero
@@ -104,10 +104,10 @@ case-specific classifications rather than a global tolerance.
 
 The deterministic 1920x1080 captures produced byte-identical PNGs on repeated
 runs of each backend. The six pairwise mismatch counts range from 55 pixels for
-GL46-to-Vulkan to 2,211 for NativeGL-to-D3D12, and alpha is exact in every pair.
+GL33-to-Vulkan to 2,211 for NativeGL-to-D3D12, and alpha is exact in every pair.
 D3D12's differences are sparse edge/line components, including its classified
 width-2-to-width-1 fallback; they are not a state divergence or a reason to
-widen a tolerance. The established NativeGL/GL46/Vulkan/D3D12 final-render
+widen a tolerance. The established NativeGL/GL33/Vulkan/D3D12 final-render
 traces and the separate NativeGL/GL2.1 trace are byte-identical within their
 matched capture workloads; measurements and hashes are in `parity-testing.md`.
 
@@ -270,7 +270,7 @@ frozen clock. This is capture-fixture control, not a renderer behaviour change.
 
 Legacy GL enables dithering by default, the facade tracks that state, and the
 renderer never changes it. The parity policy preserves each API's native
-behaviour. NativeGL, GL2.1 and GL46 retain driver dithering. The verified Vulkan
+behaviour. NativeGL, GL2.1 and GL33 retain driver dithering. The verified Vulkan
 device does not expose `VK_EXT_legacy_dithering`; D3D12 has no corresponding
 fixed-function switch. Those paths report `unavailable-no-emulation` and do not
 invent shader dithering. Golden manifests record the selected path, and only
@@ -278,7 +278,7 @@ pixels proven dither-dependent receive that classification.
 
 ### Polygon offset and line width
 
-The OpenGL 4.6 backend applies the canonical polygon-offset factor and units at
+The OpenGL 3.3 backend applies the canonical polygon-offset factor and units at
 draw lowering. Vulkan maps the canonical units to `depthBiasConstantFactor`, the
 factor to `depthBiasSlopeFactor`, and uses a zero clamp. D3D12 lowers the same
 canonical values into its rasterizer state. All ten coplanar cases pass all ten
@@ -298,7 +298,7 @@ device.
 The line-rasterization extension is optional. If neither spelling supplies the
 Bresenham feature, Vulkan logs `default-fallback`; Gate B still requires the
 width-1 masks to match exactly and only permits the existing width-2
-width-one-fallback or one-pixel-boundary classifications. OpenGL 4.6 and Vulkan
+width-one-fallback or one-pixel-boundary classifications. OpenGL 3.3 and Vulkan
 use a requested wide line when the device range supports it. D3D12 has no line-
 width rasterizer state, reports a requested width greater than 1 once and uses
 the explicitly classified width-1 fallback. Line smoothing is not emulated and
@@ -335,5 +335,5 @@ renderer path that starts using one fails loudly at the `gl-inventory` test or a
   scene, one NVIDIA GPU/driver and no authoritative golden corpus. Sparse
   rasterization differences are classified, not promoted into a broad tolerance.
 - **Translated query validation.** `A126_LEGACYGL_VALIDATE=1` is an oracle tool
-  for the native backend. GL46, Vulkan and D3D12 do not expose compatibility-
+  for the native backend. GL33, Vulkan and D3D12 do not expose compatibility-
   driver query hooks; game queries are still answered only from the shared core.

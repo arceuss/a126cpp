@@ -27,7 +27,7 @@ legacygl/Context                              one semantic core
              |
              +-- src/backends/NativeGL         compatibility GL oracle
              +-- src/backends/OpenGL21         resolved compatibility GL + VBO residency
-             +-- src/backends/OpenGL46         translated GL 4.6 Core
+             +-- src/backends/OpenGL33         translated GL 3.3 Core
              +-- src/backends/Vulkan           translated Vulkan 1.1+
              +-- src/backends/D3D12            translated Direct3D 12
              +-- test-only null/recording sinks
@@ -61,7 +61,7 @@ The production executable selects one compiled provider for the process:
 ```text
 Alpha126Cpp.exe --backend nativegl
 Alpha126Cpp.exe --backend gl21
-Alpha126Cpp.exe --backend gl46
+Alpha126Cpp.exe --backend gl33
 Alpha126Cpp.exe --backend vulkan
 Alpha126Cpp.exe --backend d3d12
 ```
@@ -73,7 +73,7 @@ development override. An unknown or unavailable name is rejected before
 graphics initialization. Selection remains immutable after startup because
 display-list vertex capture depends on the active provider's canonical-geometry
 requirement. The opt-in GPU parity build deliberately produces separate native,
-GL2.1, GL46, Vulkan and D3D12 executables, each linked to one provider, so every
+GL2.1, GL33, Vulkan and D3D12 executables, each linked to one provider, so every
 fixture process still has one backend.
 
 The window-system implementation is selected independently with the exact
@@ -97,7 +97,7 @@ packet-consuming interface. That is deliberate for this milestone:
 A translated backend implements the same interface and consumes the resolved
 commands emitted after the core has applied legacy semantics.
 `Sink::wantsCanonicalGeometry()` is how it opts in to decoded vertices. GL2.1,
-OpenGL 4.6, Vulkan and D3D12 opt in; the native backend leaves it off because
+OpenGL 3.3, Vulkan and D3D12 opt in; the native backend leaves it off because
 compatibility OpenGL walks the client arrays itself, and decoding them twice
 would cost real time on the oracle path. GL2.1 streams transient resolved
 geometry and retains nonzero display-list residency identities in

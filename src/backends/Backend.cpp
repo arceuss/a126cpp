@@ -23,8 +23,8 @@ static const Backend *firstAvailableBackend()
 	return &nativeGLBackend();
 #elif defined(A126_HAS_BACKEND_OPENGL21)
 	return &openGL21Backend();
-#elif defined(A126_HAS_BACKEND_OPENGL46)
-	return &openGL46Backend();
+#elif defined(A126_HAS_BACKEND_OPENGL33)
+	return &openGL33Backend();
 #elif defined(A126_HAS_BACKEND_VULKAN)
 	return &vulkanBackend();
 #elif defined(A126_HAS_BACKEND_D3D12)
@@ -47,9 +47,9 @@ static const Backend *findBackend(const char *cliName)
 	if (std::strcmp(cliName, openGL21Backend().cliName) == 0)
 		return &openGL21Backend();
 #endif
-#if defined(A126_HAS_BACKEND_OPENGL46)
-	if (std::strcmp(cliName, openGL46Backend().cliName) == 0)
-		return &openGL46Backend();
+#if defined(A126_HAS_BACKEND_OPENGL33)
+	if (std::strcmp(cliName, openGL33Backend().cliName) == 0)
+		return &openGL33Backend();
 #endif
 #if defined(A126_HAS_BACKEND_VULKAN)
 	if (std::strcmp(cliName, vulkanBackend().cliName) == 0)

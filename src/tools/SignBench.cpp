@@ -479,6 +479,8 @@ try
 			// they are core detail rather than backend cost.
 			if (phase != legacygl::DrawPhase::CoreResolve &&
 				phase != legacygl::DrawPhase::CoreMatrices &&
+				phase != legacygl::DrawPhase::CoreLighting &&
+				phase != legacygl::DrawPhase::CoreTexture &&
 				phase != legacygl::DrawPhase::CorePrimitives)
 				backendCycles += accumulator.cycles;
 			emit(std::string("phase_") + legacygl::phaseName(phase) + "_cycles " +

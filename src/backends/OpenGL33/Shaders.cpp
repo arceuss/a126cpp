@@ -1,9 +1,13 @@
-#include "backends/OpenGL46/Shaders.h"
+#include "backends/OpenGL33/Shaders.h"
 
 namespace legacygl
 {
 
-static const char *CORE_GL_VERTEX_SHADER = R"GLSL(#version 460 core
+// GLSL 3.30 is the floor this shader actually needs. Explicit vertex-input and
+// fragment-output locations are core in 3.30; the block/sampler `binding`
+// qualifier (4.20) and inter-stage varying locations (4.40) are not, so the
+// binding is assigned from the API and the varyings match by name.
+static const char *CORE_GL_VERTEX_SHADER = R"GLSL(#version 330 core
 
 const uint NORMAL_NONE = 0u;
 const uint NORMAL_RESCALE = 1u;
@@ -38,7 +42,7 @@ struct LightState
 	vec4 attenuationExponent;
 };
 
-layout(std140, binding = 0) uniform LegacyFFPBlock
+layout(std140) uniform LegacyFFPBlock
 {
 	mat4 uModelView;
 	mat4 uProjection;
@@ -66,10 +70,10 @@ layout(location = 4) in vec3 inFlatPosition;
 layout(location = 5) in vec4 inFlatColor;
 layout(location = 6) in vec3 inFlatNormal;
 
-layout(location = 0) out vec3 vTexCoord;
-layout(location = 1) out vec4 vSmoothPrimary;
-layout(location = 2) flat out vec4 vFlatPrimary;
-layout(location = 3) out float vFogCoord;
+out vec3 vTexCoord;
+out vec4 vSmoothPrimary;
+flat out vec4 vFlatPrimary;
+out float vFogCoord;
 
 void applyColorMaterial(inout MaterialState material, vec4 color, uint mode)
 {
@@ -189,7 +193,7 @@ void main()
 }
 )GLSL";
 
-static const char *CORE_GL_FRAGMENT_SHADER = R"GLSL(#version 460 core
+static const char *CORE_GL_FRAGMENT_SHADER = R"GLSL(#version 330 core
 
 const uint FOG_OFF = 0u;
 const uint FOG_LINEAR = 1u;
@@ -228,7 +232,7 @@ struct LightState
 	vec4 attenuationExponent;
 };
 
-layout(std140, binding = 0) uniform LegacyFFPBlock
+layout(std140) uniform LegacyFFPBlock
 {
 	mat4 uModelView;
 	mat4 uProjection;
@@ -248,12 +252,12 @@ layout(std140, binding = 0) uniform LegacyFFPBlock
 	uvec4 uFlags3;
 };
 
-layout(binding = 0) uniform sampler2D uTextureSampler;
+uniform sampler2D uTextureSampler;
 
-layout(location = 0) in vec3 vTexCoord;
-layout(location = 1) in vec4 vSmoothPrimary;
-layout(location = 2) flat in vec4 vFlatPrimary;
-layout(location = 3) in float vFogCoord;
+in vec3 vTexCoord;
+in vec4 vSmoothPrimary;
+flat in vec4 vFlatPrimary;
+in float vFogCoord;
 
 layout(location = 0) out vec4 outColor;
 

@@ -6,7 +6,7 @@ multi-scene, multi-driver golden corpus described below.
 
 Production comparisons use one executable and select the provider before
 graphics initialization with
-`--backend nativegl|gl21|gl46|vulkan|d3d12`.
+`--backend nativegl|gl21|gl33|vulkan|d3d12`.
 `A126_DEFAULT_RENDER_BACKEND` is compiler/CMake-selected, defaults to `gl21`,
 and selection cannot change after startup; executable filenames are never
 consulted. The platform is selected independently with
@@ -50,7 +50,7 @@ excluded, and sequence numbers are relative to that frame. The capture fixture
 also freezes `currentTimeMillis` only for this render so `renderHit` cannot put
 wall-clock time into the texture-matrix trace. Normal gameplay is unchanged.
 
-Fresh NativeGL, GL46, Vulkan and D3D12 final-frame traces contain 2,165 lines
+Fresh NativeGL, GL33, Vulkan and D3D12 final-frame traces contain 2,165 lines
 and 73,251 bytes each, and are byte identical:
 
 ```text
@@ -90,7 +90,7 @@ being submitted. State correctness and dispatch correctness are separate
 properties and both need a test.
 
 With `A126_ENABLE_GL_GPU_TESTS=ON`, CMake additionally builds five small
-executables, linked separately to NativeGL, GL2.1, OpenGL46, Vulkan and D3D12.
+executables, linked separately to NativeGL, GL2.1, OpenGL33, Vulkan and D3D12.
 Each records the same 153 cases. Coverage includes all alpha and depth
 comparisons, cull/front-face combinations, the exercised blend factors, all 16
 logic operations, texture sampling and legacy clamp, all seven unsigned-byte
@@ -176,7 +176,7 @@ renderer depends on it; measuring the driver decided the rule.
 
 The first deterministic comparison is complete:
 
-| result | native | GL2.1 resident VBO | OpenGL 4.6 Core | Vulkan | D3D12 |
+| result | native | GL2.1 resident VBO | OpenGL 3.3 Core | Vulkan | D3D12 |
 |---|---|---|---|---|---|
 | repeated 1920x1080 PNG SHA-256 | `824e477c0b6725197db04a78f574b6aa583bdd966c1a3b04fbdd474dc2d04159` | `b86792a82bcff507fa4828e9c242d342aee709b5ca6641cc075b56c70436cc84` | `e19d921844011aa2c508be3ec5bf1a56d9c91d563cf91b77c8ac3f43da668db3` | `7a8794f8a5ffb3d2da87a8eda65f9340727e43ed30828bd9d0035ebbf5ffdba9` | `630dc77d443cfeb74cc2e7ac2d48942affd0bd79c512acec1f2c2d2d1616b17e` |
 | repeat determinism | byte-identical | byte-identical | byte-identical | byte-identical | byte-identical |
@@ -184,14 +184,14 @@ The first deterministic comparison is complete:
 | pair | mismatched pixels | percent | alpha |
 |---|---:|---:|---|
 | NativeGL - GL2.1 | 477 | 0.023003472% | exact |
-| NativeGL - GL46 | 512 | 0.024691358% | exact |
+| NativeGL - GL33 | 512 | 0.024691358% | exact |
 | NativeGL - Vulkan | 490 | 0.023630401% | exact |
-| GL46 - Vulkan | 55 | 0.002652392% | exact |
+| GL33 - Vulkan | 55 | 0.002652392% | exact |
 | NativeGL - D3D12 | 2,211 | 0.106626157% | exact |
-| GL46 - D3D12 | 1,812 | 0.087384259% | exact |
+| GL33 - D3D12 | 1,812 | 0.087384259% | exact |
 | Vulkan - D3D12 | 1,773 | 0.085503472% | exact |
 
-NativeGL, GL2.1, GL46 and Vulkan retain their sparse
+NativeGL, GL2.1, GL33 and Vulkan retain their sparse
 rasterization/interpolation edge pattern. D3D12's additional differences are
 sparse edge/line components, including its classified width-2 fallback. These
 are measured classifications, not a global epsilon or widened semantic
@@ -237,9 +237,9 @@ providers:
 | world load and in-world rendering | renders: terrain chunk display lists, sky, clouds, leaves under alpha test, held item with rescale-normal lighting, hotbar, hearts, crosshair |
 | pause menu over the world | renders: darkening gradient with smooth shading and blending, night lighting |
 | `Minecraft::checkGlError` | no GL errors reported at startup, pre-render or post-render |
-| hidden deterministic capture | NativeGL, GL2.1, GL46, Vulkan and D3D12 render the full 1920x1080 scene and exit cleanly |
+| hidden deterministic capture | NativeGL, GL2.1, GL33, Vulkan and D3D12 render the full 1920x1080 scene and exit cleanly |
 | graceful quit | clean exit, validation summary printed |
-| GL46 context | NVIDIA 610.88, OpenGL 4.6, `profile=core`; compatibility fallback refused |
+| GL33 context | NVIDIA 610.88, OpenGL 3.3, `profile=core`; compatibility fallback refused |
 | Vulkan runtime | loader 1.4.357, NVIDIA device API 1.4.341, `line rasterization=bresenham, subpixelBits=8`; Debug validation shutdown count zero |
 | D3D12 runtime | full Debug 1920x1080 capture reports zero validation errors; 463 messages are performance-only clear warning ID 820 (459 in the representative smaller run) |
 | serialized Release CTest | 17/17, including five records and all ten pairwise GPU comparisons |
@@ -252,7 +252,7 @@ measured separately in Release with validation, tracing and
 
 Legacy GL enables dithering by default and the renderer never changes it.
 The selected policy is to preserve each API's native behaviour. NativeGL,
-GL2.1 and GL46 keep the driver's `GL_DITHER` path. The verified Vulkan device
+GL2.1 and GL33 keep the driver's `GL_DITHER` path. The verified Vulkan device
 does not expose `VK_EXT_legacy_dithering`, and D3D12 has no equivalent pipeline
 switch, so those backends report `unavailable-no-emulation` and do not invent a
 shader or post-pass approximation.

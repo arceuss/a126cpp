@@ -1,5 +1,5 @@
 param(
-	[string[]]$Backends = @("nativegl", "gl21", "gl46", "vulkan", "d3d12"),
+	[string[]]$Backends = @("nativegl", "gl21", "gl33", "vulkan", "d3d12"),
 	[string[]]$WorkloadNames = @("world", "sign-control", "sign-boards", "sign-text"),
 	[int]$MeasuredFrames = 600,
 	[int]$Repetitions = 5,

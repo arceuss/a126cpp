@@ -29,7 +29,7 @@ declaration but no call site.
   is the behavioural oracle.
 - **tests** - covered by a `legacygl_*` headless test.
 
-OpenGL 2.1, OpenGL 4.6, Vulkan and D3D12 support the complete inventoried
+OpenGL 2.1, OpenGL 3.3, Vulkan and D3D12 support the complete inventoried
 stream through four resolved commands: draw, texture upload, clear and
 readback. Logical object names and `glFinish` are handled directly by each
 sink. Per-entry-point columns for translated backends would therefore repeat
@@ -155,9 +155,9 @@ unrestricted GL access; each translated tree is checked separately:
 | file | why |
 |---|---|
 | `backends/NativeGL/` | the native compatibility backend; this is where frontend calls become compatibility-driver calls |
-| `backends/OpenGL/` | OpenGL context creation, loader initialization and profile verification shared by NativeGL, GL2.1 and GL46 |
+| `backends/OpenGL/` | OpenGL context creation, loader initialization and profile verification shared by NativeGL, GL2.1 and GL33 |
 | `backends/OpenGL21/` | resolved compatibility lowering and display-list VBO residency; fixed-function calls are intentional below the facade |
-| `backends/OpenGL46/` | the translated backend; only modern Core entry points are permitted here |
+| `backends/OpenGL33/` | the translated backend; only modern Core entry points are permitted here |
 | `backends/Vulkan/` | the translated Vulkan backend; no OpenGL entry point is permitted here |
 | `backends/D3D12/` | the translated Direct3D backend; no OpenGL entry point is permitted here |
 | `backends/Platform/` | platform lifetime, window/event operations and graphics-surface plumbing; it does not expand the frontend GL surface |
@@ -177,7 +177,7 @@ boundary do not expand the Alpha-facing inventory.
 `external/glad` is a glad 0.1.36 loader generated for `gl=4.6` with the
 **compatibility** profile and all extensions. One loader covers both the
 fixed-function entry points the oracle backend needs and the core-profile entry
-points the OpenGL 4.6 backend uses, which avoids linking two loaders whose symbols
+points the OpenGL 3.3 backend uses, which avoids linking two loaders whose symbols
 would collide. Regenerate with:
 
 ```text
@@ -191,4 +191,4 @@ The Vulkan backend is compiled with `VK_NO_PROTOTYPES` and resolves its
 exercised global, instance and device functions from the loader entry point
 provided by the platform bridge. The SDK remains a header and shader-tool build
 requirement, but `Vulkan::Vulkan` is not linked into the production executable;
-native, GL46 and D3D12 runtime selections therefore do not load `vulkan-1.dll`.
+native, GL33 and D3D12 runtime selections therefore do not load `vulkan-1.dll`.

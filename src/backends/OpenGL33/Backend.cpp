@@ -1,4 +1,4 @@
-// OpenGL 4.6 Core backend for the LegacyGL semantic frontend.
+// OpenGL 3.3 Core backend for the LegacyGL semantic frontend.
 //
 // This file consumes only resolved commands. The raw Sink callbacks remain
 // no-ops (apart from object-name allocation and glFinish), so fixed-function
@@ -8,7 +8,7 @@
 
 #include "backends/Backend.h"
 #include "backends/OpenGL/Context.h"
-#include "backends/OpenGL46/Shaders.h"
+#include "backends/OpenGL33/Shaders.h"
 #include "legacygl/Sink.h"
 #include "legacygl/PixelFormat.h"
 
@@ -275,7 +275,7 @@ static bool coreValidateUniformLayout(GLuint program)
 	{
 		if (indices[i] == GL_INVALID_INDEX)
 		{
-			std::fprintf(stderr, "LegacyGL gl46: shader block ABI member '%s' is inactive or missing\n",
+			std::fprintf(stderr, "LegacyGL gl33: shader block ABI member '%s' is inactive or missing\n",
 				members[i].name);
 			return false;
 		}
@@ -287,7 +287,7 @@ static bool coreValidateUniformLayout(GLuint program)
 		if (offsets[i] != members[i].offset)
 		{
 			std::fprintf(stderr,
-				"LegacyGL gl46: shader block ABI member '%s' offset mismatch (driver=%d, cpu=%d)\n",
+				"LegacyGL gl33: shader block ABI member '%s' offset mismatch (driver=%d, cpu=%d)\n",
 				members[i].name, offsets[i], members[i].offset);
 			return false;
 		}
@@ -327,7 +327,7 @@ static GLuint coreCompileShader(GLenum type, const char *source)
 	glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
 	std::vector<char> log(static_cast<std::size_t>(std::max(length, 1)), 0);
 	glGetShaderInfoLog(shader, length, nullptr, log.data());
-	std::fprintf(stderr, "LegacyGL gl46 shader compile failed: %s\n", log.data());
+	std::fprintf(stderr, "LegacyGL gl33 shader compile failed: %s\n", log.data());
 	glDeleteShader(shader);
 	return 0;
 }
@@ -359,7 +359,7 @@ static GLuint coreCreateProgram()
 	glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
 	std::vector<char> log(static_cast<std::size_t>(std::max(length, 1)), 0);
 	glGetProgramInfoLog(program, length, nullptr, log.data());
-	std::fprintf(stderr, "LegacyGL gl46 shader link failed: %s\n", log.data());
+	std::fprintf(stderr, "LegacyGL gl33 shader link failed: %s\n", log.data());
 	glDeleteProgram(program);
 	return 0;
 }
@@ -600,7 +600,7 @@ public:
 			names[i] = textureNames.allocate();
 			if (names[i] == 0)
 			{
-				std::fprintf(stderr, "LegacyGL gl46: logical texture-name namespace exhausted\n");
+				std::fprintf(stderr, "LegacyGL gl33: logical texture-name namespace exhausted\n");
 				std::exit(EXIT_FAILURE);
 			}
 		}
@@ -655,7 +655,7 @@ public:
 			buffers[i] = bufferNames.allocate();
 			if (buffers[i] == 0)
 			{
-				std::fprintf(stderr, "LegacyGL gl46: logical buffer-name namespace exhausted\n");
+				std::fprintf(stderr, "LegacyGL gl33: logical buffer-name namespace exhausted\n");
 				std::exit(EXIT_FAILURE);
 			}
 		}
@@ -822,7 +822,7 @@ public:
 	void shutdown()
 	{
 		std::fprintf(stdout,
-			"gl46: shutdown, resident cache hits=%llu, misses=%llu,"
+			"gl33: shutdown, resident cache hits=%llu, misses=%llu,"
 			" resident bytes=%llu, entries=%zu, explicit releases=%llu\n",
 			static_cast<unsigned long long>(residentCacheHits),
 			static_cast<unsigned long long>(residentCacheMisses),
@@ -832,7 +832,7 @@ public:
 		const char *modeName =
 			uniformMode == CoreUniformMode::Persistent ? "persistent" : "legacy";
 		std::fprintf(stdout,
-			"gl46: uniform mode=%s stride=%zu slots=%zu peak_slots=%zu"
+			"gl33: uniform mode=%s stride=%zu slots=%zu peak_slots=%zu"
 			" overflows=%llu fence_waits=%llu\n",
 			modeName, uniformStride, uniformSlots, uniformPeakSlots,
 			static_cast<unsigned long long>(uniformOverflows),
@@ -844,7 +844,7 @@ public:
 	}
 
 	// Two ways to get a per-draw uniform block to the GPU, selectable with
-	// A126_GL46_UNIFORM=persistent|legacy:
+	// A126_GL33_UNIFORM=persistent|legacy:
 	//
 	//   persistent  one immutable coherent mapping, a disjoint slot per draw,
 	//               one fence per frame region (default when available)
@@ -857,11 +857,11 @@ public:
 	// ahead of legacy, so the per-draw uniform transport is not what makes this
 	// backend slow.
 
-	// A126_GL46_UNIFORM selects the transport; persistent is the default when
+	// A126_GL33_UNIFORM selects the transport; persistent is the default when
 	// immutable storage and mapping are available.
 	static CoreUniformMode selectUniformMode()
 	{
-		const char *requested = std::getenv("A126_GL46_UNIFORM");
+		const char *requested = std::getenv("A126_GL33_UNIFORM");
 		const bool canPersist = GLAD_GL_VERSION_4_4 != 0 &&
 			glad_glBufferStorage != nullptr && glad_glMapBufferRange != nullptr &&
 			glad_glFenceSync != nullptr && glad_glClientWaitSync != nullptr;
@@ -989,7 +989,7 @@ public:
 					found->second.hasTexCoord != geometry.hasTexCoord)
 				{
 					throw std::runtime_error(
-						"OpenGL 4.6 resident geometry identity changed while cached");
+						"OpenGL 3.3 resident geometry identity changed while cached");
 				}
 			}
 			else
@@ -1069,7 +1069,7 @@ public:
 			!pixelStorageFormat(command.internalFormat, storage) ||
 			storage.physical != PhysicalPixelFormat::RGBA8)
 		{
-			throw std::runtime_error("OpenGL 4.6 texture upload received an unsupported pixel format");
+			throw std::runtime_error("OpenGL 3.3 texture upload received an unsupported pixel format");
 		}
 
 		if (command.pixels != nullptr && command.width > 0 && command.height > 0)
@@ -1088,7 +1088,7 @@ public:
 						command.sourceFormat, rgba) ||
 						!applyIntendedPixelFormat(storage.intended, rgba))
 					{
-						throw std::runtime_error("OpenGL 4.6 texture upload conversion failed");
+						throw std::runtime_error("OpenGL 3.3 texture upload conversion failed");
 					}
 					const std::size_t destination = (static_cast<std::size_t>(command.y + y) *
 						static_cast<std::size_t>(level.width) + static_cast<std::size_t>(command.x + x)) * 4;
@@ -1108,7 +1108,7 @@ public:
 		const PixelTransferFormat *transfer =
 			unsignedBytePixelTransferFormat(command.format);
 		if (command.type != GL_UNSIGNED_BYTE || transfer == nullptr)
-			throw std::runtime_error("OpenGL 4.6 readback received an unsupported pixel format");
+			throw std::runtime_error("OpenGL 3.3 readback received an unsupported pixel format");
 
 		std::vector<unsigned char> rgba(static_cast<std::size_t>(command.width) *
 			static_cast<std::size_t>(command.height) * 4);
@@ -1129,7 +1129,7 @@ public:
 					destination + static_cast<std::size_t>(y) * destinationRow +
 						static_cast<std::size_t>(x) * static_cast<std::size_t>(components)))
 				{
-					throw std::runtime_error("OpenGL 4.6 readback conversion failed");
+					throw std::runtime_error("OpenGL 3.3 readback conversion failed");
 				}
 			}
 		}
@@ -1214,18 +1214,18 @@ private:
 	{
 		if (initialized)
 			return;
-		if (!GLAD_GL_VERSION_4_6 || glad_glCreateShader == nullptr ||
+		// The backend's own requirements are OpenGL 3.3: every entry point it
+		// calls is core in 3.3 except glBufferStorage, which is optional and
+		// selected at runtime. RGBA8 is a required colour-renderable format in
+		// 3.3, so it is not queried; glGetInternalformativ is 4.2 and asking
+		// for it would have been a version gate with no verified reason.
+		if (!GLAD_GL_VERSION_3_3 || glad_glCreateShader == nullptr ||
 			glad_glGenVertexArrays == nullptr || glad_glGenBuffers == nullptr ||
-			glad_glGetInternalformativ == nullptr || glad_glTexImage2D == nullptr ||
+			glad_glTexImage2D == nullptr ||
 			glad_glDrawArrays == nullptr || glad_glReadPixels == nullptr)
 		{
-			throw std::runtime_error("OpenGL 4.6 Core backend is missing required functions");
+			throw std::runtime_error("OpenGL Core backend is missing required functions");
 		}
-		GLint rgba8Supported = GL_FALSE;
-		glGetInternalformativ(GL_TEXTURE_2D, GL_RGBA8, GL_INTERNALFORMAT_SUPPORTED,
-			1, &rgba8Supported);
-		if (rgba8Supported != GL_TRUE)
-			throw std::runtime_error("OpenGL 4.6 Core backend requires GL_RGBA8 texture support");
 
 		program = coreCreateProgram();
 		if (program == 0)
@@ -1237,13 +1237,20 @@ private:
 			glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_DATA_SIZE, &blockSize);
 		if (block == GL_INVALID_INDEX || blockSize != static_cast<GLint>(sizeof(CoreGPUState)))
 		{
-			std::fprintf(stderr, "LegacyGL gl46: shader block ABI mismatch (driver=%d, cpu=%zu)\n",
+			std::fprintf(stderr, "LegacyGL gl33: shader block ABI mismatch (driver=%d, cpu=%zu)\n",
 				blockSize, sizeof(CoreGPUState));
 			std::exit(EXIT_FAILURE);
 		}
 		if (!coreValidateUniformLayout(program))
 			std::exit(EXIT_FAILURE);
 		glUniformBlockBinding(program, block, 0);
+		// The sampler's texture unit came from a 4.20 `binding` qualifier; in
+		// 3.30 it is assigned here instead. Sampler uniforms default to unit 0,
+		// so this is explicit rather than load-bearing.
+		glUseProgram(program);
+		const GLint samplerLocation = glGetUniformLocation(program, "uTextureSampler");
+		if (samplerLocation >= 0)
+			glUniform1i(samplerLocation, 0);
 
 		glGenVertexArrays(1, &vertexArray);
 		glGenBuffers(1, &vertexBuffer);
@@ -1272,7 +1279,7 @@ private:
 			{
 				// An immutable store cannot be reallocated, so start over.
 				std::fprintf(stderr,
-					"LegacyGL gl46: persistent uniform mapping failed; using legacy uploads\n");
+					"LegacyGL gl33: persistent uniform mapping failed; using legacy uploads\n");
 				glDeleteBuffers(1, &uniformBuffer);
 				glGenBuffers(1, &uniformBuffer);
 				glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer);
@@ -1298,11 +1305,11 @@ private:
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 		glGetFloatv(GL_ALIASED_LINE_WIDTH_RANGE, lineWidthRange);
-		std::fprintf(stderr, "LegacyGL gl46: aliased line width range %.3g..%.3g; width 2 is %s\n",
+		std::fprintf(stderr, "LegacyGL gl33: aliased line width range %.3g..%.3g; width 2 is %s\n",
 			lineWidthRange[0], lineWidthRange[1],
 			(lineWidthRange[0] <= 2.0f && lineWidthRange[1] >= 2.0f) ? "native" : "fallback-to-1");
 		std::fprintf(stdout,
-			"LegacyGL gl46: capability_report profile=core texture_storage=GL_RGBA8"
+			"LegacyGL gl33: capability_report profile=core texture_storage=GL_RGBA8"
 			" sampled=native transfer_src=native transfer_dst=native"
 			" line_width=%s legacy_dither=driver resource_state=driver-managed\n",
 			(lineWidthRange[0] <= 2.0f && lineWidthRange[1] >= 2.0f) ?
@@ -1598,7 +1605,7 @@ private:
 			glLineWidth(1.0f);
 			if (!lineWidthFallbackReported)
 			{
-				std::fprintf(stderr, "LegacyGL gl46: line width %.3g is unavailable; using classified fallback width 1\n",
+				std::fprintf(stderr, "LegacyGL gl33: line width %.3g is unavailable; using classified fallback width 1\n",
 					requestedWidth);
 				lineWidthFallbackReported = true;
 			}
@@ -1657,56 +1664,56 @@ static CoreGLSink theCoreGLSink;
 namespace renderbackend
 {
 
-static const Configuration &openGL46Configuration()
+static const Configuration &openGL33Configuration()
 {
 	static const Configuration config = {
-		"gl46",
-		4, 6, OpenGLProfile::Core,
-		4, 6, OpenGLProfile::Core,
+		"gl33",
+		3, 3, OpenGLProfile::Core,
+		3, 3, OpenGLProfile::Core,
 		true,
 		false
 	};
 	return config;
 }
 
-static void openGL46Initialize()
+static void openGL33Initialize()
 {
-	openglbackend::initialize(openGL46Configuration());
+	openglbackend::initialize(openGL33Configuration());
 }
 
-static void openGL46Present()
+static void openGL33Present()
 {
 	openglbackend::present();
 	// Frame boundary: recycle the uniform arena here, never in the draw path.
 	legacygl::theCoreGLSink.beginFrame();
 }
 
-static void openGL46Shutdown()
+static void openGL33Shutdown()
 {
 	legacygl::theCoreGLSink.shutdown();
 	openglbackend::shutdown();
 }
 
-static bool openGL46HasCapability(const char *capability)
+static bool openGL33HasCapability(const char *capability)
 {
 	return openglbackend::hasCapability(capability);
 }
 
-static legacygl::Sink *openGL46Sink()
+static legacygl::Sink *openGL33Sink()
 {
 	return &legacygl::theCoreGLSink;
 }
 
-const Backend &openGL46Backend()
+const Backend &openGL33Backend()
 {
 	static const Backend backend = {
-		"gl46",
-		openGL46Configuration,
-		openGL46Initialize,
-		openGL46Present,
-		openGL46Shutdown,
-		openGL46HasCapability,
-		openGL46Sink
+		"gl33",
+		openGL33Configuration,
+		openGL33Initialize,
+		openGL33Present,
+		openGL33Shutdown,
+		openGL33HasCapability,
+		openGL33Sink
 	};
 	return backend;
 }
