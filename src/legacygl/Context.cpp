@@ -380,6 +380,39 @@ void Context::record(const ListCommand &command)
 	compilingDefinition.commands.push_back(command);
 }
 
+// Vertices per primitive for the modes whose primitives are independent, so
+// two draws concatenate into one without changing what is assembled. Strips,
+// fans, loops and polygons span the whole draw and return 0.
+static int independentPrimitiveSize(GLenum mode)
+{
+	switch (mode)
+	{
+	case GL_POINTS: return 1;
+	case GL_LINES: return 2;
+	case GL_TRIANGLES: return 3;
+	case GL_QUADS: return 4;
+	default: return 0;
+	}
+}
+
+static bool mergeableListGeometry(const Geometry &previous, const Geometry &next)
+{
+	const int primitiveSize = independentPrimitiveSize(next.mode);
+	if (primitiveSize == 0 || previous.mode != next.mode)
+		return false;
+	if (previous.hasColor != next.hasColor || previous.hasTexCoord != next.hasTexCoord ||
+		previous.hasNormal != next.hasNormal)
+		return false;
+	// Both must be fully decoded: a sink that walks the application's arrays
+	// itself leaves the vectors empty, and that replay must stay call-exact.
+	if (previous.vertices.size() != static_cast<std::size_t>(previous.vertexCount) ||
+		next.vertices.size() != static_cast<std::size_t>(next.vertexCount))
+		return false;
+	// A trailing incomplete primitive is dropped by the draw that submitted
+	// it; appending vertices after it would complete it instead.
+	return previous.vertexCount % primitiveSize == 0;
+}
+
 void Context::releaseDisplayListGeometry(const DisplayList &list)
 {
 	for (const Geometry &geometry : list.geometry)
@@ -2878,7 +2911,7 @@ void Context::noteIndeterminateUse(const char *what)
 	}
 }
 
-void Context::executeGeometry(const Geometry &geometry)
+void Context::executeGeometry(Geometry &geometry)
 {
 	// Times the whole resolve including the sink call. The core's own share is
 	// this total minus the backend phases, which are timed inside the sink.
@@ -2948,11 +2981,13 @@ void Context::executeGeometry(const Geometry &geometry)
 	// triangle per draw, and a terrain frame replays thousands of lists.
 	// 26.2 and Sodium avoid the work entirely by sharing one prebuilt index
 	// buffer per topology; the provoking-vertex mapping fixed-function flat
-	// shading needs is what keeps us from sharing a single table, so the
-	// result is memoized per list instead. The cached batch is produced by the
-	// same canonicalizePrimitives call as before, so winding and provoking
-	// vertices are unchanged by construction.
-	const PrimitiveBatch *resolvedPrimitives = &lastDrawPrimitives;
+	// shading needs is what keeps us from sharing a single table, so backends
+	// that need the mapping memoize it per list instead. A compatibility backend
+	// that draws the submitted topology directly opts out. The cached batch is
+	// produced by the same canonicalizePrimitives call as before, so winding and
+	// provoking vertices are unchanged by construction.
+	const PrimitiveBatch *resolvedPrimitives = nullptr;
+	if (activeSink->wantsCanonicalPrimitives())
 	{
 		PhaseScope primitivePhase(DrawPhase::CorePrimitives);
 		if (geometry.residencyId != 0)
@@ -2970,6 +3005,7 @@ void Context::executeGeometry(const Geometry &geometry)
 		else
 		{
 			canonicalizePrimitives(geometry.mode, geometry.vertexCount, lastDrawPrimitives);
+			resolvedPrimitives = &lastDrawPrimitives;
 		}
 	}
 
@@ -3066,6 +3102,12 @@ void Context::executeGeometry(const Geometry &geometry)
 	}
 
 	activeSink->resolvedDraw(command);
+	if (geometry.residencyId != 0 && !validate && !snapshotGeometry &&
+		!geometry.vertices.empty() &&
+		activeSink->isCanonicalGeometryResident(geometry.residencyId))
+	{
+		geometry.releaseVertices();
+	}
 }
 
 // OpenGL leaves the current colour undefined after an array draw whose colour
@@ -3128,7 +3170,7 @@ void Context::drawArrays(GLenum mode, GLint first, GLsizei count)
 		(compilingListName != 0 ? activeSink->wantsCanonicalGeometry() :
 			activeSink->wantsTransientCanonicalGeometry()));
 	const Vertex colorBeforeDraw = current;
-	const Geometry *drawnGeometry = nullptr;
+	Geometry *drawnGeometry = nullptr;
 
 	// The backend draws first, from the application's own arrays, exactly as the
 	// game submitted them. Everything below is semantic bookkeeping.
@@ -3143,6 +3185,30 @@ void Context::drawArrays(GLenum mode, GLint first, GLsizei count)
 		Geometry captured;
 		if (!decodeArrays(mode, first, count, captured, wantGeometry))
 			return;
+
+		// Coalesce with the draw recorded immediately before it when nothing
+		// separates them and the primitives are independent. Alpha's model
+		// path tesselates one draw per cube face, so a compiled cube is six
+		// consecutive GL_TRIANGLES draws with identical attribute sets; a native
+		// display-list compiler folds those into one, and replaying them as six
+		// resolved draws is what made models and signs expensive on the
+		// translated backends. Pixel output is unchanged: independent
+		// primitives keep their vertex order and per-triangle provoking vertex,
+		// every vertex already carries its own normal, and an attribute that
+		// neither draw supplied is filled from the same current value at
+		// execution because no command can sit between them.
+		if (recordingOnly() && !list.commands.empty() &&
+			list.commands.back().op == ListOp::Geometry &&
+			list.commands.back().aux == static_cast<int>(list.geometry.size()) - 1 &&
+			mergeableListGeometry(list.geometry.back(), captured))
+		{
+			Geometry &previous = list.geometry.back();
+			previous.vertices.insert(previous.vertices.end(),
+				captured.vertices.begin(), captured.vertices.end());
+			previous.vertexCount += captured.vertexCount;
+			return;
+		}
+
 		captured.residencyId = allocateGeometryResidencyId();
 
 		ListCommand command;
@@ -3357,6 +3423,46 @@ const DisplayList *Context::displayList(GLuint name) const
 	return it == displayLists.end() ? nullptr : &it->second;
 }
 
+Context::RetainedGeometry Context::retainedGeometry() const
+{
+	RetainedGeometry totals;
+
+	for (const auto &entry : displayLists)
+	{
+		const DisplayList &list = entry.second;
+		totals.lists++;
+		if (list.defined)
+			totals.definedLists++;
+
+		totals.commandBytes += list.commands.capacity() * sizeof(ListCommand);
+		totals.commandBytes += list.doubles.capacity() * sizeof(double);
+		totals.commandBytes += list.names.capacity() * sizeof(unsigned int);
+
+		for (const Geometry &geometry : list.geometry)
+		{
+			totals.geometries++;
+			totals.vertices += geometry.vertices.size();
+			// capacity, not size: retained slack is resident too.
+			totals.vertexBytes += geometry.vertices.capacity() * sizeof(Vertex);
+		}
+	}
+
+	for (const auto &entry : canonicalPrimitiveCache)
+	{
+		totals.cachedBatches++;
+		totals.cachedPrimitives += entry.second.primitives.size();
+		totals.cachedBytes +=
+			entry.second.primitives.capacity() * sizeof(CanonicalPrimitive);
+	}
+
+	return totals;
+}
+
+bool Context::backendResidentStats(Sink::ResidentStats &out) const
+{
+	return activeSink != nullptr && activeSink->queryResidentStats(out);
+}
+
 GLuint Context::genLists(GLsizei range)
 {
 	nextSequence();
@@ -3466,7 +3572,7 @@ void Context::executeList(GLuint name)
 	// so nothing a list executes can redefine or delete the definition being
 	// walked. Copying it would duplicate a chunk's captured vertices on every
 	// call.
-	const DisplayList &list = it->second;
+	DisplayList &list = it->second;
 	for (const ListCommand &command : list.commands)
 	{
 		switch (command.op)

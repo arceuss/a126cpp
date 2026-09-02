@@ -40,10 +40,12 @@ public:
 	void setPos(float x, float y, float z);
 
 	void render(float scale);
-	// Same model geometry as render(), but emitted directly.  Intended for an
-	// enclosing display-list compilation where nesting Cube lists would retain
-	// thousands of driver-side list dispatches.
-	void renderImmediate(float scale);
 	void translateTo(float scale);
+	// Compiles the list once. Callers that record this cube inside their own
+	// display list must call it first, because glNewList cannot nest.
+	void ensureCompiled(float scale);
+	// Emits the cube's polygons through a caller's matrix into an open
+	// Tesselator batch, for renderers that bake many models into one draw.
+	void emitTransformed(Tesselator &t, float scale, const ModelMatrix &transform);
 	void compile(float scale);
 };

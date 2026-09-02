@@ -8,6 +8,7 @@
 #include "client/renderer/Textures.h"
 #include "client/renderer/OffsettedRenderList.h"
 #include "client/renderer/culling/Culler.h"
+#include "client/renderer/culling/OcclusionCuller.h"
 
 #include "world/level/Level.h"
 #include "world/level/LevelListener.h"
@@ -65,6 +66,10 @@ private:
 	int_t totalEntities = 0;
 	int_t renderedEntities = 0;
 	int_t culledEntities = 0;
+
+	// Skips entities the terrain hides from the player. Alpha's F3 "B:"
+	// count, always 0 in Alpha, reports how many a frame skipped.
+	OcclusionCuller occlusionCuller;
 
 public:
 	std::array<int_t, 50000> toRender = {};

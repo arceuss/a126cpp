@@ -5,6 +5,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "client/Minecraft.h"
@@ -16,7 +17,9 @@
 #include "legacygl/Trace.h"
 #include "lwjgl/Display.h"
 #include "util/Memory.h"
+#include "util/Mth.h"
 #include "client/player/LocalPlayer.h"
+#include "world/entity/monster/Zombie.h"
 #include "world/level/Level.h"
 #include "world/level/dimension/Dimension.h"
 #include "world/phys/AABB.h"
@@ -57,6 +60,13 @@ struct CaptureOptions
 	// Alpha's F3 overlay. Useful when a capture does not look like what was
 	// expected: it reports the camera position and the chunk counts.
 	bool debugOverlay = false;
+	// Item id placed in the selected hotbar slot, so the held-item renderer
+	// is exercised; 0 leaves the hand empty.
+	int holdItem = 0;
+	// Pins two zombies four blocks ahead of the camera: one on the surface,
+	// one eight blocks under it, so a capture exercises the occlusion test
+	// with a known visible and a known hidden entity.
+	bool zombies = false;
 	float yaw = 0.0f;
 	float pitch = 0.0f;
 	bool drawGui = true;
@@ -103,6 +113,8 @@ static void printUsage()
 		"  --rot <yaw> <pitch> camera rotation in degrees (default 0 0)\n"
 		"  --no-gui            render the world only, without the HUD\n"
 		"  --debug             draw the F3 overlay (camera position, chunk counts)\n"
+		"  --hold <itemId>     put this item in the selected hotbar slot (default: none)\n"
+		"  --zombies           pin a zombie ahead of the camera and one under the ground\n"
 		"\n"
 		"The capture runs headless: the window stays hidden, no input is read and\n"
 		"the camera is held at the requested position and angles. Two runs with the\n"
@@ -127,6 +139,16 @@ static bool parseOptions(int argc, char **argv, int firstArgument, CaptureOption
 		if (argument == "--debug")
 		{
 			options.debugOverlay = true;
+			continue;
+		}
+		if (argument == "--hold" && i + 1 < argc)
+		{
+			options.holdItem = std::atoi(argv[++i]);
+			continue;
+		}
+		if (argument == "--zombies")
+		{
+			options.zombies = true;
 			continue;
 		}
 		if (argument == "--no-gui")
@@ -287,6 +309,8 @@ try
 	minecraft.setScreen(nullptr);
 	minecraft.level->time = static_cast<long_t>(options.timeOfDay);
 	minecraft.options.showDebugInfo = options.debugOverlay;
+	if (options.holdItem > 0)
+		minecraft.player->inventory.mainInventory[0] = ItemStack(options.holdItem);
 
 	// The camera the capture asked for. It is reapplied after every tick: the
 	// client's tick reads look input and runs player physics, and a capture that
@@ -323,7 +347,40 @@ try
 		player.health = 20;
 	};
 
+	// The zombies are held in place the same way: sunlight sets them on fire
+	// and the buried one would otherwise suffocate and drift.
+	std::vector<std::pair<std::shared_ptr<Zombie>, double>> zombies;
+	if (options.zombies)
+	{
+		const int_t zx = Mth::floor(cameraX);
+		const int_t zz = Mth::floor(cameraZ) + 4;
+		// A mob's position is its feet, unlike the player's.
+		const double surface = static_cast<double>(minecraft.level->getHeightmap(zx, zz));
+		for (double y : { surface, surface - 8.0 })
+		{
+			auto zombie = std::make_shared<Zombie>(*minecraft.level);
+			zombie->moveTo(zx + 0.5, y, zz + 0.5, 180.0f, 0.0f);
+			minecraft.level->addEntity(zombie);
+			zombies.emplace_back(zombie, y);
+		}
+	}
+	auto pinZombies = [&]()
+	{
+		for (auto &entry : zombies)
+		{
+			Zombie &zombie = *entry.first;
+			zombie.moveTo(Mth::floor(cameraX) + 0.5, entry.second, Mth::floor(cameraZ) + 4.5, 180.0f, 0.0f);
+			zombie.yRotO = 180.0f;
+			zombie.xRotO = 0.0f;
+			zombie.xd = 0.0;
+			zombie.yd = 0.0;
+			zombie.zd = 0.0;
+			zombie.health = 20;
+		}
+	};
+
 	pinCamera();
+	pinZombies();
 
 	// Let the world settle: lighting, then chunk meshes. updateAllChunks forces
 	// the whole visible set instead of the handful the renderer would rebuild
@@ -360,6 +417,7 @@ try
 		minecraft.tick();
 
 		pinCamera();
+		pinZombies();
 		minecraft.level->time = static_cast<long_t>(options.timeOfDay);
 
 		while (minecraft.level->updateLights())

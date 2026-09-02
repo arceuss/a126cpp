@@ -1,5 +1,7 @@
 #include "client/gui/Gui.h"
 
+#include "tools/MemoryProbe.h"
+
 #include "client/Lighting.h"
 #include "client/gui/ScreenSizeCalculator.h"
 #include "client/gui/GuiNewChat.h"
@@ -160,15 +162,24 @@ void Gui::render(float a, bool inScreen, int_t xm, int_t ym)
 	// Debug text
 	if (minecraft.options.showDebugInfo)
 	{
-		font.drawShadow(Minecraft::VERSION_STRING + u" (" + minecraft.fpsString + u")", 2, 2, 0xFFFFFF);
-		font.drawShadow(minecraft.gatherStats1(), 2, 12, 0xFFFFFF);
-		font.drawShadow(minecraft.gatherStats2(), 2, 22, 0xFFFFFF);
-		font.drawShadow(minecraft.gatherStats3(), 2, 32, 0xFFFFFF);
-		font.drawShadow(minecraft.gatherStats4(), 2, 42, 0xFFFFFF);
+		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::GuiStats);
+			font.drawShadow(Minecraft::VERSION_STRING + u" (" + minecraft.fpsString + u")", 2, 2, 0xFFFFFF);
+			font.drawShadow(minecraft.gatherStats1(), 2, 12, 0xFFFFFF);
+			font.drawShadow(minecraft.gatherStats2(), 2, 22, 0xFFFFFF);
+			font.drawShadow(minecraft.gatherStats3(), 2, 32, 0xFFFFFF);
+			font.drawShadow(minecraft.gatherStats4(), 2, 42, 0xFFFFFF);
+		}
 
-		long_t maxMemory = Runtime::getRuntime().maxMemory();
-		long_t totalMemory = Runtime::getRuntime().totalMemory();
-		long_t freeMemory = Runtime::getRuntime().freeMemory();
+		long_t maxMemory = 0;
+		long_t totalMemory = 0;
+		long_t freeMemory = 0;
+		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::GuiMemory);
+			maxMemory = Runtime::getRuntime().maxMemory();
+			totalMemory = Runtime::getRuntime().totalMemory();
+			freeMemory = Runtime::getRuntime().freeMemory();
+		}
 		long_t usedMemory = totalMemory - freeMemory;
 
 		jstring str = u"Used memory: " + String::toString(usedMemory * 100 / maxMemory) + u"% (" + String::toString(usedMemory / 1024 / 1024) + u"MB) of " + String::toString(maxMemory / 1024 / 1024) + u"MB";

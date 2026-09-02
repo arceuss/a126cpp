@@ -28,10 +28,11 @@ struct Vertex
 // surrounding glColor4f.
 //
 // vertexCount is always the number of vertices the draw submitted. The vertices
-// vector is filled only when the active backend consumes resolved geometry; the
+// vector is filled only when the active backend consumes resolved geometry, and
+// may be released after an immutable display-list copy becomes resident. The
 // native compatibility backend walks the application's arrays itself, so
-// duplicating a chunk's vertices in the semantic core would double
-// display-list memory for no observable gain.
+// duplicating a chunk's vertices in the semantic core would double display-list
+// memory for no observable gain.
 struct Geometry
 {
 	// Nonzero only for immutable array geometry captured by a display list.
@@ -55,11 +56,18 @@ struct Geometry
 		hasNormal = false;
 		vertices.clear();
 	}
+
+	void releaseVertices()
+	{
+		std::vector<Vertex>().swap(vertices);
+	}
 };
 
-// OpenGL 1.1 table 2.6. Signed formats use (2c+1)/(2^b-1), which is not the
-// c/(2^(b-1)-1) rule later versions adopted; the byte normals Tesselator packs
-// are read back through this one.
+// OpenGL 1.1 table 2.6. Signed formats use (2c+1)/(2^b-1). OpenGL
+// 3.3 normalized signed generic vertex attributes use the same full-range
+// equation; the alternative max(c/(2^(b-1)-1), -1) mapping applies to other
+// normalized uses, not this vertex-array path. Tesselator byte normals pass
+// through this conversion.
 inline float normalizeUnsignedByte(unsigned char c)
 {
 	return static_cast<float>(c) / 255.0f;

@@ -339,6 +339,27 @@ public:
 
 	// Display lists
 	const DisplayList *displayList(GLuint name) const;
+
+	// Retained display-list payload, for the profiling probe. Walks the list
+	// map, so call it at a reporting interval rather than per frame.
+	struct RetainedGeometry
+	{
+		std::uint64_t lists = 0;
+		std::uint64_t definedLists = 0;
+		std::uint64_t geometries = 0;
+		std::uint64_t vertices = 0;
+		std::uint64_t vertexBytes = 0;
+		std::uint64_t commandBytes = 0;
+		// Optional retained copy: canonicalised primitive indices, keyed by
+		// residency id and freed only when the owning list is deleted. Backends
+		// that draw the submitted topology directly do not populate it.
+		std::uint64_t cachedBatches = 0;
+		std::uint64_t cachedPrimitives = 0;
+		std::uint64_t cachedBytes = 0;
+	};
+	RetainedGeometry retainedGeometry() const;
+	// Forwards the active sink's resident-geometry accounting to the probe.
+	bool backendResidentStats(Sink::ResidentStats &out) const;
 	bool compilingList() const { return compilingListName != 0; }
 	GLuint compilingListNameValue() const { return compilingListName; }
 	GLenum compilingListMode() const { return compilingListModeValue; }
@@ -433,7 +454,7 @@ private:
 		GLint border, GLenum format, GLenum type, GLint unpackAlignment, const GLvoid *pixels, bool forwardRaw);
 	void executeTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
 		GLsizei height, GLenum format, GLenum type, GLint unpackAlignment, const GLvoid *pixels, bool forwardRaw);
-	void executeGeometry(const Geometry &geometry);
+	void executeGeometry(Geometry &geometry);
 	void releaseDisplayListGeometry(const DisplayList &list);
 	std::uint64_t allocateGeometryResidencyId();
 	void emitResolvedClear(GLbitfield mask);

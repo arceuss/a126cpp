@@ -9,6 +9,7 @@
 #include "backends/Backend.h"
 #include "backends/OpenGL/Context.h"
 #include "backends/OpenGL33/Shaders.h"
+#include "legacygl/PhaseProfile.h"
 #include "legacygl/Sink.h"
 #include "legacygl/PixelFormat.h"
 
@@ -32,7 +33,25 @@ namespace legacygl
 
 static const int CORE_TEXTURE_LEVELS = 16;
 
+// The vertex the shader consumes: position, colour, normal, texcoord, 48
+// bytes. Flat shading reads attribute locations 4/5/6, which the vertex array
+// aliases onto these same fields; the provoking vertex is emitted last in every
+// triangle and glProvokingVertex(GL_LAST_VERTEX_CONVENTION) makes the flat
+// varying take its value from that vertex, so no duplicated copy is needed.
 struct CoreGPUVertex
+{
+	float position[3];
+	float color[4];
+	float normal[3];
+	float texCoord[2];
+};
+
+// The one source mode rotation cannot serve: a legacy quad's provoking vertex
+// is its fourth, which the first of its two triangles does not contain. Those
+// draws keep an explicit copy of the provoking attributes per vertex, 88 bytes.
+// No game code submits GL_QUADS (Tesselator converts to triangles first), so
+// this layout exists for the layer's generality rather than the game's paths.
+struct CoreGPUFlatVertex
 {
 	float position[3];
 	float color[4];
@@ -43,11 +62,34 @@ struct CoreGPUVertex
 	float flatNormal[3];
 };
 
+enum class CoreVertexLayout
+{
+	Compact,
+	Expanded
+};
+
+static GLsizei coreVertexStride(CoreVertexLayout layout)
+{
+	return layout == CoreVertexLayout::Compact ?
+		static_cast<GLsizei>(sizeof(CoreGPUVertex)) :
+		static_cast<GLsizei>(sizeof(CoreGPUFlatVertex));
+}
+
+// Vertex data ready for upload, in whichever layout the batch needs.
+struct CoreVertexData
+{
+	CoreVertexLayout layout = CoreVertexLayout::Compact;
+	std::size_t count = 0;
+	std::vector<unsigned char> bytes;
+
+	GLsizeiptr byteSize() const { return static_cast<GLsizeiptr>(bytes.size()); }
+};
+
 // Page-backed residency, for the reason measured on GL2.1: a vertex array per
 // display list makes every draw rebind, and that one call dominated the draw
-// cost. Pages are keyed by attribute layout because the enabled attribute set
-// is vertex-array state; the stride is always CoreGPUVertex, so a page can
-// hold any geometry sharing its layout and the draw supplies a first-vertex.
+// cost. Pages are keyed by attribute set and vertex layout because both are
+// vertex-array state; within a page the stride is fixed, so it can hold any
+// geometry sharing that key and the draw supplies a first-vertex.
 struct CoreResidentFreeRange
 {
 	GLsizeiptr offset = 0;
@@ -59,7 +101,9 @@ struct CoreResidentPage
 	GLuint buffer = 0;
 	GLuint vertexArray = 0;
 	unsigned int attributeMask = 0;
+	CoreVertexLayout layout = CoreVertexLayout::Compact;
 	GLsizeiptr capacity = 0;
+	std::size_t liveEntries = 0;
 	std::vector<CoreResidentFreeRange> freeRanges;
 };
 
@@ -152,6 +196,12 @@ enum class CoreUniformMode
 };
 
 static const std::size_t CORE_UNIFORM_REGIONS = 3;
+// Transient vertex data streams through a persistently mapped ring with the
+// same three regions and fences as the uniforms, for the reason measured on
+// the Switch: glBufferData per transient draw cost 26us there, the buffer
+// store being reallocated every call. A draw larger than one region takes a
+// separate mutable buffer; nothing the game draws transiently comes close.
+static const GLsizeiptr CORE_STREAM_REGION_BYTES = 4 * 1024 * 1024;
 
 class CoreLogicalNameAllocator
 {
@@ -461,9 +511,19 @@ static void coreCopyMaterial(CoreGPUMaterial &destination, const MaterialState &
 	destination.shininess[3] = 0.0f;
 }
 
-static CoreGPUVertex coreGPUVertex(const Vertex &vertex, const Vertex &flat)
+static CoreGPUVertex coreGPUVertex(const Vertex &vertex)
 {
 	CoreGPUVertex result;
+	result.position[0] = vertex.x; result.position[1] = vertex.y; result.position[2] = vertex.z;
+	result.color[0] = vertex.r; result.color[1] = vertex.g; result.color[2] = vertex.b; result.color[3] = vertex.a;
+	result.normal[0] = vertex.nx; result.normal[1] = vertex.ny; result.normal[2] = vertex.nz;
+	result.texCoord[0] = vertex.s; result.texCoord[1] = vertex.t;
+	return result;
+}
+
+static CoreGPUFlatVertex coreGPUFlatVertex(const Vertex &vertex, const Vertex &flat)
+{
+	CoreGPUFlatVertex result;
 	result.position[0] = vertex.x; result.position[1] = vertex.y; result.position[2] = vertex.z;
 	result.color[0] = vertex.r; result.color[1] = vertex.g; result.color[2] = vertex.b; result.color[3] = vertex.a;
 	result.normal[0] = vertex.nx; result.normal[1] = vertex.ny; result.normal[2] = vertex.nz;
@@ -472,6 +532,11 @@ static CoreGPUVertex coreGPUVertex(const Vertex &vertex, const Vertex &flat)
 	result.flatColor[0] = flat.r; result.flatColor[1] = flat.g; result.flatColor[2] = flat.b; result.flatColor[3] = flat.a;
 	result.flatNormal[0] = flat.nx; result.flatNormal[1] = flat.ny; result.flatNormal[2] = flat.nz;
 	return result;
+}
+
+static CoreVertexLayout coreLayoutForBatch(const PrimitiveBatch &batch)
+{
+	return batch.sourceMode == GL_QUADS ? CoreVertexLayout::Expanded : CoreVertexLayout::Compact;
 }
 
 // Which optional attributes a draw supplies. The stream vertex array only has
@@ -529,24 +594,73 @@ static bool coreSamePipeline(const ResolvedPipelineState &left,
 		coreSameBits(left.polygonOffsetUnits, right.polygonOffsetUnits);
 }
 
-static std::vector<CoreGPUVertex> coreGPUVertices(const ResolvedDraw &command,
-	int verticesPerPrimitive)
+template <typename T>
+static void coreAppendVertex(std::vector<unsigned char> &bytes, const T &vertex)
 {
-	std::vector<CoreGPUVertex> vertices;
-	vertices.reserve(command.primitives->primitives.size() *
-		static_cast<std::size_t>(verticesPerPrimitive));
-	for (const CanonicalPrimitive &primitive : command.primitives->primitives)
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&vertex);
+	bytes.insert(bytes.end(), raw, raw + sizeof(T));
+}
+
+// Emits each canonical primitive with its legacy provoking vertex in the last
+// slot, which under GL_LAST_VERTEX_CONVENTION is where the flat varying is
+// sourced. Triangles are rotated cyclically, which preserves winding. Lines
+// and points already arrive provoking-last from the canonicalizer, and a
+// reversed line would rasterize differently, so those are checked rather than
+// reordered. A legacy quad's first triangle cannot contain its provoking
+// vertex at all; that source mode takes the expanded layout instead.
+static CoreVertexData coreGPUVertices(const ResolvedDraw &command, int verticesPerPrimitive)
+{
+	const PrimitiveBatch &batch = *command.primitives;
+	const std::vector<Vertex> &source = command.geometry->vertices;
+	CoreVertexData data;
+	data.layout = coreLayoutForBatch(batch);
+	data.count = batch.primitives.size() * static_cast<std::size_t>(verticesPerPrimitive);
+	data.bytes.reserve(data.count * static_cast<std::size_t>(coreVertexStride(data.layout)));
+
+	for (const CanonicalPrimitive &primitive : batch.primitives)
 	{
-		const Vertex &flat = command.geometry->vertices[
-			static_cast<std::size_t>(primitive.provoking)];
+		if (data.layout == CoreVertexLayout::Expanded)
+		{
+			const Vertex &flat = source[static_cast<std::size_t>(primitive.provoking)];
+			for (int i = 0; i < verticesPerPrimitive; i++)
+			{
+				coreAppendVertex(data.bytes, coreGPUFlatVertex(
+					source[static_cast<std::size_t>(primitive.indices[i])], flat));
+			}
+			continue;
+		}
+
+		int order[3] = { 0, 1, 2 };
+		if (verticesPerPrimitive == 3)
+		{
+			int provokingSlot = -1;
+			for (int i = 0; i < 3; i++)
+			{
+				if (primitive.indices[i] == primitive.provoking)
+					provokingSlot = i;
+			}
+			if (provokingSlot < 0)
+			{
+				throw std::runtime_error(
+					"OpenGL 3.3 compact layout: provoking vertex outside its triangle");
+			}
+			order[0] = (provokingSlot + 1) % 3;
+			order[1] = (provokingSlot + 2) % 3;
+			order[2] = provokingSlot;
+		}
+		else if (primitive.indices[verticesPerPrimitive - 1] != primitive.provoking)
+		{
+			throw std::runtime_error(
+				"OpenGL 3.3 compact layout: provoking vertex is not last in a line or point");
+		}
+
 		for (int i = 0; i < verticesPerPrimitive; i++)
 		{
-			const Vertex &vertex = command.geometry->vertices[
-				static_cast<std::size_t>(primitive.indices[i])];
-			vertices.push_back(coreGPUVertex(vertex, flat));
+			coreAppendVertex(data.bytes, coreGPUVertex(
+				source[static_cast<std::size_t>(primitive.indices[order[i]])]));
 		}
 	}
-	return vertices;
+	return data;
 }
 
 class CoreGLSink : public Sink
@@ -692,6 +806,25 @@ public:
 	void finish() override { glFinish(); }
 
 	bool wantsCanonicalGeometry() const override { return true; }
+	bool isCanonicalGeometryResident(std::uint64_t residencyId) const override
+	{
+		return residencyId != 0 && residentGeometry.find(residencyId) != residentGeometry.end();
+	}
+	bool queryResidentStats(legacygl::Sink::ResidentStats &out) const override
+	{
+		out.logicalBytes = residentGeometryBytes;
+		out.entries = residentGeometry.size();
+		out.pages = 0;
+		out.pageCapacityBytes = 0;
+		for (const CoreResidentPage &page : residentPages)
+		{
+			if (page.buffer == 0)
+				continue;
+			out.pages++;
+			out.pageCapacityBytes += static_cast<std::uint64_t>(page.capacity);
+		}
+		return true;
+	}
 
 	void releaseCanonicalGeometry(std::uint64_t residencyId) override
 	{
@@ -700,18 +833,36 @@ public:
 		auto entry = residentGeometry.find(residencyId);
 		if (entry == residentGeometry.end())
 			return;
-		residentGeometryBytes -= entry->second.vertexCount * sizeof(CoreGPUVertex);
+		residentGeometryBytes -= static_cast<std::uint64_t>(entry->second.byteSize);
 		residentGeometryReleases++;
 		freeResidentRange(entry->second);
 		residentGeometry.erase(entry);
 	}
 
-	// Returns a range to its page and merges it with any neighbour.
+	// Returns a range to its page and merges it with any neighbour. A completely
+	// empty page is deleted and its stable vector slot is reused later.
 	void freeResidentRange(const CoreResidentGeometryEntry &entry)
 	{
 		if (entry.page >= residentPages.size())
 			return;
 		CoreResidentPage &page = residentPages[entry.page];
+		if (page.buffer == 0 || page.liveEntries == 0)
+			return;
+		page.liveEntries--;
+		if (page.liveEntries == 0)
+		{
+			if (boundVertexArray == page.vertexArray)
+			{
+				glBindVertexArray(0);
+				boundVertexArray = 0;
+			}
+			glDeleteVertexArrays(1, &page.vertexArray);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			glDeleteBuffers(1, &page.buffer);
+			page = CoreResidentPage();
+			return;
+		}
+
 		const CoreResidentFreeRange released = { entry.byteOffset, entry.byteSize };
 		std::size_t insertAt = page.freeRanges.size();
 		for (std::size_t i = 0; i < page.freeRanges.size(); i++)
@@ -740,20 +891,20 @@ public:
 	}
 
 	// Sub-allocates from a page whose vertex array already describes this
-	// attribute layout, uploading into the shared buffer.
+	// attribute set and vertex layout, uploading into the shared buffer.
 	CoreResidentGeometryEntry allocateResidentGeometry(const ResolvedDraw &command,
-		const Geometry &geometry, const std::vector<CoreGPUVertex> &vertices)
+		const Geometry &geometry, const CoreVertexData &vertices)
 	{
-		const GLsizeiptr size =
-			static_cast<GLsizeiptr>(vertices.size() * sizeof(CoreGPUVertex));
+		const GLsizeiptr size = vertices.byteSize();
 		const unsigned int attributeMask = coreAttributeMask(geometry);
+		const CoreVertexLayout layout = vertices.layout;
 
 		std::size_t pageIndex = residentPages.size();
 		GLsizeiptr offset = 0;
 		for (std::size_t i = 0; i < residentPages.size(); i++)
 		{
 			CoreResidentPage &page = residentPages[i];
-			if (page.attributeMask != attributeMask)
+			if (page.buffer == 0 || page.attributeMask != attributeMask || page.layout != layout)
 				continue;
 			for (std::size_t range = 0; range < page.freeRanges.size(); range++)
 			{
@@ -778,29 +929,45 @@ public:
 		{
 			CoreResidentPage page;
 			page.attributeMask = attributeMask;
+			page.layout = layout;
 			page.capacity = std::max<GLsizeiptr>(CORE_RESIDENT_PAGE_BYTES, size);
+			page.liveEntries = 1;
 			glGenVertexArrays(1, &page.vertexArray);
 			glGenBuffers(1, &page.buffer);
-			configureVertexArray(page.vertexArray, page.buffer, geometry);
+			configureVertexArray(page.vertexArray, page.buffer, geometry, layout);
 			glBufferData(GL_ARRAY_BUFFER, page.capacity, nullptr, GL_STATIC_DRAW);
 			if (page.capacity > size)
 				page.freeRanges.push_back({ size, page.capacity - size });
 			offset = 0;
-			residentPages.push_back(std::move(page));
+
+			for (std::size_t i = 0; i < residentPages.size(); i++)
+			{
+				if (residentPages[i].buffer != 0)
+					continue;
+				residentPages[i] = std::move(page);
+				pageIndex = i;
+				break;
+			}
+			if (pageIndex == residentPages.size())
+				residentPages.push_back(std::move(page));
+		}
+		else
+		{
+			residentPages[pageIndex].liveEntries++;
 		}
 
 		CoreResidentPage &page = residentPages[pageIndex];
 		glBindBuffer(GL_ARRAY_BUFFER, page.buffer);
-		glBufferSubData(GL_ARRAY_BUFFER, offset, size, vertices.data());
+		glBufferSubData(GL_ARRAY_BUFFER, offset, size, vertices.bytes.data());
 
 		CoreResidentGeometryEntry entry;
 		entry.page = pageIndex;
 		entry.byteOffset = offset;
 		entry.byteSize = size;
 		entry.firstVertex =
-			static_cast<GLint>(offset / static_cast<GLsizeiptr>(sizeof(CoreGPUVertex)));
+			static_cast<GLint>(offset / static_cast<GLsizeiptr>(coreVertexStride(layout)));
 		entry.topology = command.primitives->topology;
-		entry.vertexCount = vertices.size();
+		entry.vertexCount = vertices.count;
 		entry.hasColor = geometry.hasColor;
 		entry.hasNormal = geometry.hasNormal;
 		entry.hasTexCoord = geometry.hasTexCoord;
@@ -811,8 +978,10 @@ public:
 	{
 		for (CoreResidentPage &page : residentPages)
 		{
-			glDeleteVertexArrays(1, &page.vertexArray);
-			glDeleteBuffers(1, &page.buffer);
+			if (page.vertexArray != 0)
+				glDeleteVertexArrays(1, &page.vertexArray);
+			if (page.buffer != 0)
+				glDeleteBuffers(1, &page.buffer);
 		}
 		residentPages.clear();
 		residentGeometry.clear();
@@ -821,13 +990,24 @@ public:
 	}
 	void shutdown()
 	{
+		std::size_t residentPageCount = 0;
+		std::uint64_t residentPageBytes = 0;
+		for (const CoreResidentPage &page : residentPages)
+		{
+			if (page.buffer == 0)
+				continue;
+			residentPageCount++;
+			residentPageBytes += static_cast<std::uint64_t>(page.capacity);
+		}
 		std::fprintf(stdout,
 			"gl33: shutdown, resident cache hits=%llu, misses=%llu,"
-			" resident bytes=%llu, entries=%zu, explicit releases=%llu\n",
+			" resident bytes=%llu, entries=%zu, pages=%zu, page bytes=%llu,"
+			" explicit releases=%llu\n",
 			static_cast<unsigned long long>(residentCacheHits),
 			static_cast<unsigned long long>(residentCacheMisses),
 			static_cast<unsigned long long>(residentGeometryBytes),
-			residentGeometry.size(),
+			residentGeometry.size(), residentPageCount,
+			static_cast<unsigned long long>(residentPageBytes),
 			static_cast<unsigned long long>(residentGeometryReleases));
 		const char *modeName =
 			uniformMode == CoreUniformMode::Persistent ? "persistent" : "legacy";
@@ -837,6 +1017,12 @@ public:
 			modeName, uniformStride, uniformSlots, uniformPeakSlots,
 			static_cast<unsigned long long>(uniformOverflows),
 			static_cast<unsigned long long>(uniformFenceWaits));
+		std::fprintf(stdout,
+			"gl33: vertex stream=%s region=%lld peak_bytes=%lld overflows=%llu\n",
+			streamMapped != nullptr ? "persistent" : "glBufferData",
+			static_cast<long long>(CORE_STREAM_REGION_BYTES),
+			static_cast<long long>(streamPeakBytes),
+			static_cast<unsigned long long>(streamOverflows));
 		releaseAllCanonicalGeometry();
 		residentCacheHits = 0;
 		residentCacheMisses = 0;
@@ -854,15 +1040,19 @@ public:
 	// A third variant, a mutable buffer orphaned once per frame with a disjoint
 	// glBufferSubData per draw, measured 23.2ms against 9.4ms for legacy on an
 	// RTX 5070 and was removed. On the same machine persistent is only about 4%
-	// ahead of legacy, so the per-draw uniform transport is not what makes this
-	// backend slow.
+	// ahead of legacy. That is a proprietary-driver result: on the Switch's
+	// Mesa/nouveau the legacy glBufferSubData per draw measured 4.4us, 29% of
+	// the whole draw path, so the transport matters there.
 
 	// A126_GL33_UNIFORM selects the transport; persistent is the default when
-	// immutable storage and mapping are available.
+	// immutable storage and mapping are available. GL_ARB_buffer_storage is the
+	// same functionality on a 4.3 context, so the extension counts as well as
+	// the 4.4 core version; the capability report logs which one was found.
 	static CoreUniformMode selectUniformMode()
 	{
 		const char *requested = std::getenv("A126_GL33_UNIFORM");
-		const bool canPersist = GLAD_GL_VERSION_4_4 != 0 &&
+		const bool canPersist =
+			(GLAD_GL_VERSION_4_4 != 0 || GLAD_GL_ARB_buffer_storage != 0) &&
 			glad_glBufferStorage != nullptr && glad_glMapBufferRange != nullptr &&
 			glad_glFenceSync != nullptr && glad_glClientWaitSync != nullptr;
 		if (requested != nullptr)
@@ -903,6 +1093,8 @@ public:
 			uniformFences[uniformRegion] = nullptr;
 		}
 		uniformCursor = 0;
+		streamPeakBytes = std::max(streamPeakBytes, streamCursor);
+		streamCursor = 0;
 	}
 
 	// Returns the byte offset of the slot this draw owns.
@@ -941,8 +1133,7 @@ public:
 	void resolvedDraw(const ResolvedDraw &command) override
 	{
 		initialize();
-		if (command.geometry == nullptr || command.primitives == nullptr ||
-			command.geometry->vertices.empty())
+		if (command.geometry == nullptr || command.primitives == nullptr)
 			return;
 
 		const Geometry &geometry = *command.geometry;
@@ -955,26 +1146,69 @@ public:
 
 		GLuint drawVertexArray = vertexArray;
 		GLint drawFirstVertex = 0;
+		{
+		legacygl::PhaseScope phase(legacygl::DrawPhase::Geometry);
 		if (command.geometryResidencyId == 0)
 		{
-			const std::vector<CoreGPUVertex> vertices =
-				coreGPUVertices(command, verticesPerPrimitive);
+			legacygl::PhaseScope upload(legacygl::DrawPhase::GeometryUpload);
+			if (geometry.vertices.empty())
+				throw std::runtime_error("OpenGL 3.3 transient geometry has no CPU source");
+			const CoreVertexData vertices = coreGPUVertices(command, verticesPerPrimitive);
 			const unsigned int attributeMask = coreAttributeMask(geometry);
-			if (!streamLayoutValid || streamAttributeMask != attributeMask)
+			const GLsizeiptr stride = coreVertexStride(vertices.layout);
+			GLuint sourceBuffer = vertexBuffer;
+
+			if (streamMapped != nullptr && vertices.byteSize() <= CORE_STREAM_REGION_BYTES)
 			{
-				configureVertexArray(vertexArray, vertexBuffer, geometry);
+				// First-vertex addressing needs the absolute offset to be a
+				// multiple of the stride, so align it as such within the region.
+				const GLsizeiptr regionBase = static_cast<GLsizeiptr>(uniformRegion) *
+					CORE_STREAM_REGION_BYTES;
+				GLsizeiptr absolute = regionBase + streamCursor;
+				absolute = (absolute + stride - 1) / stride * stride;
+				if (absolute + vertices.byteSize() > regionBase + CORE_STREAM_REGION_BYTES)
+				{
+					// A frame outgrew its region: drain, then reuse it. Counted so
+					// the shutdown line shows it rather than hiding it.
+					streamOverflows++;
+					glFinish();
+					absolute = (regionBase + stride - 1) / stride * stride;
+				}
+				std::memcpy(streamMapped + absolute, vertices.bytes.data(),
+					static_cast<std::size_t>(vertices.byteSize()));
+				drawFirstVertex = static_cast<GLint>(absolute / stride);
+				streamCursor = absolute + vertices.byteSize() - regionBase;
+			}
+			else if (streamMapped != nullptr)
+			{
+				// Larger than a region: a mutable buffer of its own. The vertex
+				// array must be re-pointed at it and back afterwards.
+				if (streamOverflowBuffer == 0)
+					glGenBuffers(1, &streamOverflowBuffer);
+				sourceBuffer = streamOverflowBuffer;
+				streamLayoutValid = false;
+			}
+
+			if (!streamLayoutValid || streamAttributeMask != attributeMask ||
+				streamVertexLayout != vertices.layout)
+			{
+				configureVertexArray(vertexArray, sourceBuffer, geometry, vertices.layout);
 				streamAttributeMask = attributeMask;
-				streamLayoutValid = true;
+				streamVertexLayout = vertices.layout;
+				streamLayoutValid = sourceBuffer == vertexBuffer;
 			}
 			else
 			{
 				glBindVertexArray(vertexArray);
 				boundVertexArray = vertexArray;
-				glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
 			}
-			glBufferData(GL_ARRAY_BUFFER,
-				static_cast<GLsizeiptr>(vertices.size() * sizeof(CoreGPUVertex)),
-				vertices.data(), GL_STREAM_DRAW);
+
+			if (sourceBuffer != vertexBuffer || streamMapped == nullptr)
+			{
+				glBindBuffer(GL_ARRAY_BUFFER, sourceBuffer);
+				glBufferData(GL_ARRAY_BUFFER, vertices.byteSize(), vertices.bytes.data(),
+					GL_STREAM_DRAW);
+			}
 		}
 		else
 		{
@@ -994,23 +1228,37 @@ public:
 			}
 			else
 			{
+				legacygl::PhaseScope upload(legacygl::DrawPhase::GeometryUpload);
+				if (geometry.vertices.empty())
+				{
+					throw std::runtime_error(
+						"OpenGL 3.3 resident geometry source was released before upload");
+				}
 				residentCacheMisses++;
-				const std::vector<CoreGPUVertex> vertices =
-					coreGPUVertices(command, verticesPerPrimitive);
+				const CoreVertexData vertices = coreGPUVertices(command, verticesPerPrimitive);
 				found = residentGeometry.emplace(command.geometryResidencyId,
 					allocateResidentGeometry(command, geometry, vertices)).first;
-				residentGeometryBytes += vertexCount * sizeof(CoreGPUVertex);
+				residentGeometryBytes += static_cast<std::uint64_t>(found->second.byteSize);
 			}
 			drawVertexArray = residentPages[found->second.page].vertexArray;
 			drawFirstVertex = found->second.firstVertex;
 		}
+		}
 
 		CoreGPUState state = {};
+		{
+		legacygl::PhaseScope phase(legacygl::DrawPhase::StatePack);
 		fillGPUState(command, state);
+		}
+		{
+		legacygl::PhaseScope phase(legacygl::DrawPhase::Bind);
 		applyPipeline(command);
 		bindTexture(command, state);
-
 		glUseProgram(program);
+		}
+
+		{
+		legacygl::PhaseScope phase(legacygl::DrawPhase::StateUpload);
 		const GLintptr uniformOffset = reserveUniformSlot();
 		writeUniformSlot(uniformOffset, state);
 		if (uniformMode != CoreUniformMode::Legacy)
@@ -1020,15 +1268,22 @@ public:
 			glBindBufferRange(GL_UNIFORM_BUFFER, 0, uniformBuffer, uniformOffset,
 				static_cast<GLsizeiptr>(sizeof(state)));
 		}
+		}
 
+		{
+		legacygl::PhaseScope phase(legacygl::DrawPhase::Bind);
 		if (boundVertexArray != drawVertexArray)
 		{
 			glBindVertexArray(drawVertexArray);
 			boundVertexArray = drawVertexArray;
 		}
 		applyCurrentAttributes(command);
+		}
+		{
+		legacygl::PhaseScope phase(legacygl::DrawPhase::Draw);
 		glDrawArrays(coreTopology(command.primitives->topology), drawFirstVertex,
 			static_cast<GLsizei>(vertexCount));
+		}
 	}
 
 	void resolvedClear(const ResolvedClear &command) override
@@ -1136,23 +1391,44 @@ public:
 	}
 
 private:
-	void configureVertexArray(GLuint array, GLuint buffer, const Geometry &geometry)
+	// The shader's flat inputs (locations 4/5/6) alias the smooth fields in the
+	// compact layout, because the provoking vertex is last and the flat varying
+	// takes its value from it; only the expanded layout has separate fields.
+	void configureVertexArray(GLuint array, GLuint buffer, const Geometry &geometry,
+		CoreVertexLayout layout)
 	{
+		const bool expanded = layout == CoreVertexLayout::Expanded;
+		const GLsizei stride = coreVertexStride(layout);
+		const std::size_t positionOffset = expanded ?
+			offsetof(CoreGPUFlatVertex, position) : offsetof(CoreGPUVertex, position);
+		const std::size_t colorOffset = expanded ?
+			offsetof(CoreGPUFlatVertex, color) : offsetof(CoreGPUVertex, color);
+		const std::size_t normalOffset = expanded ?
+			offsetof(CoreGPUFlatVertex, normal) : offsetof(CoreGPUVertex, normal);
+		const std::size_t texCoordOffset = expanded ?
+			offsetof(CoreGPUFlatVertex, texCoord) : offsetof(CoreGPUVertex, texCoord);
+		const std::size_t flatPositionOffset = expanded ?
+			offsetof(CoreGPUFlatVertex, flatPosition) : positionOffset;
+		const std::size_t flatColorOffset = expanded ?
+			offsetof(CoreGPUFlatVertex, flatColor) : colorOffset;
+		const std::size_t flatNormalOffset = expanded ?
+			offsetof(CoreGPUFlatVertex, flatNormal) : normalOffset;
+
 		glBindVertexArray(array);
 		boundVertexArray = array;
 		glBindBuffer(GL_ARRAY_BUFFER, buffer);
 		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-			reinterpret_cast<const void *>(offsetof(CoreGPUVertex, position)));
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride,
+			reinterpret_cast<const void *>(positionOffset));
 
 		if (geometry.hasColor)
 		{
 			glEnableVertexAttribArray(1);
-			glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-				reinterpret_cast<const void *>(offsetof(CoreGPUVertex, color)));
+			glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride,
+				reinterpret_cast<const void *>(colorOffset));
 			glEnableVertexAttribArray(5);
-			glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-				reinterpret_cast<const void *>(offsetof(CoreGPUVertex, flatColor)));
+			glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, stride,
+				reinterpret_cast<const void *>(flatColorOffset));
 		}
 		else
 		{
@@ -1163,11 +1439,11 @@ private:
 		if (geometry.hasNormal)
 		{
 			glEnableVertexAttribArray(2);
-			glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-				reinterpret_cast<const void *>(offsetof(CoreGPUVertex, normal)));
+			glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride,
+				reinterpret_cast<const void *>(normalOffset));
 			glEnableVertexAttribArray(6);
-			glVertexAttribPointer(6, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-				reinterpret_cast<const void *>(offsetof(CoreGPUVertex, flatNormal)));
+			glVertexAttribPointer(6, 3, GL_FLOAT, GL_FALSE, stride,
+				reinterpret_cast<const void *>(flatNormalOffset));
 		}
 		else
 		{
@@ -1178,15 +1454,15 @@ private:
 		if (geometry.hasTexCoord)
 		{
 			glEnableVertexAttribArray(3);
-			glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-				reinterpret_cast<const void *>(offsetof(CoreGPUVertex, texCoord)));
+			glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, stride,
+				reinterpret_cast<const void *>(texCoordOffset));
 		}
 		else
 			glDisableVertexAttribArray(3);
 
 		glEnableVertexAttribArray(4);
-		glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, sizeof(CoreGPUVertex),
-			reinterpret_cast<const void *>(offsetof(CoreGPUVertex, flatPosition)));
+		glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, stride,
+			reinterpret_cast<const void *>(flatPositionOffset));
 	}
 
 	static void applyCurrentAttributes(const ResolvedDraw &command)
@@ -1221,11 +1497,16 @@ private:
 		// for it would have been a version gate with no verified reason.
 		if (!GLAD_GL_VERSION_3_3 || glad_glCreateShader == nullptr ||
 			glad_glGenVertexArrays == nullptr || glad_glGenBuffers == nullptr ||
-			glad_glTexImage2D == nullptr ||
+			glad_glTexImage2D == nullptr || glad_glProvokingVertex == nullptr ||
 			glad_glDrawArrays == nullptr || glad_glReadPixels == nullptr)
 		{
 			throw std::runtime_error("OpenGL Core backend is missing required functions");
 		}
+
+		// The compact vertex layout emits each primitive's legacy provoking
+		// vertex last (OpenGL 3.3 core 2.18, table 2.14). LAST_VERTEX_CONVENTION
+		// is the initial state, set explicitly so the layout never depends on it.
+		glProvokingVertex(GL_LAST_VERTEX_CONVENTION);
 
 		program = coreCreateProgram();
 		if (program == 0)
@@ -1292,6 +1573,26 @@ private:
 			glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniformBuffer);
 		}
 
+		// The transient vertex ring uses the same storage and mapping as the
+		// uniforms, so it exists exactly when persistent uniforms do.
+		if (uniformMode == CoreUniformMode::Persistent)
+		{
+			const GLsizeiptr total = CORE_STREAM_REGION_BYTES *
+				static_cast<GLsizeiptr>(CORE_UNIFORM_REGIONS);
+			const GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT |
+				GL_MAP_COHERENT_BIT;
+			glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+			glBufferStorage(GL_ARRAY_BUFFER, total, nullptr, flags);
+			streamMapped = static_cast<unsigned char *>(
+				glMapBufferRange(GL_ARRAY_BUFFER, 0, total, flags));
+			if (streamMapped == nullptr)
+			{
+				std::fprintf(stderr,
+					"LegacyGL gl33: persistent vertex mapping failed; using glBufferData\n");
+				glDeleteBuffers(1, &vertexBuffer);
+				glGenBuffers(1, &vertexBuffer);
+			}
+		}
 
 		glGenTextures(1, &fallbackTexture);
 		glBindTexture(GL_TEXTURE_2D, fallbackTexture);
@@ -1311,9 +1612,13 @@ private:
 		std::fprintf(stdout,
 			"LegacyGL gl33: capability_report profile=core texture_storage=GL_RGBA8"
 			" sampled=native transfer_src=native transfer_dst=native"
-			" line_width=%s legacy_dither=driver resource_state=driver-managed\n",
+			" line_width=%s legacy_dither=driver resource_state=driver-managed"
+			" uniforms=%s buffer_storage=%s\n",
 			(lineWidthRange[0] <= 2.0f && lineWidthRange[1] >= 2.0f) ?
-				"native" : "width1-fallback");
+				"native" : "width1-fallback",
+			uniformMode == CoreUniformMode::Persistent ? "persistent" : "legacy",
+			GLAD_GL_VERSION_4_4 != 0 ? "core44" :
+				(GLAD_GL_ARB_buffer_storage != 0 ? "arb" : "none"));
 		initialized = true;
 	}
 
@@ -1491,6 +1796,7 @@ private:
 		coreCopyMaterial(state.backMaterial, command.lighting.backMaterial);
 
 		unsigned int lightMask = 0;
+		unsigned int lightCount = 0;
 		for (int i = 0; i < 8; i++)
 		{
 			const LightState &source = command.lighting.lights[i];
@@ -1509,7 +1815,10 @@ private:
 			destination.attenuationExponent[2] = source.quadraticAttenuation;
 			destination.attenuationExponent[3] = source.spotExponent;
 			if (source.enabled)
+			{
 				lightMask |= 1u << i;
+				lightCount = static_cast<unsigned int>(i) + 1u;
+			}
 		}
 
 		coreCopy4(state.fogColor, command.fog.color);
@@ -1522,9 +1831,16 @@ private:
 		state.flags0[0] = command.enables.lighting ? 1u : 0u;
 		state.flags0[1] = command.enables.texture2D ? 1u : 0u;
 		state.flags0[2] = command.enables.colorMaterial ? 1u : 0u;
-		state.flags0[3] = command.pipeline.shadeModel == GL_FLAT ? 1u : 0u;
+		// Bit 0: GL_FLAT. Bit 1: the draw's vertex layout carries separate flat
+		// attributes (legacy quads); otherwise the flat inputs alias the smooth
+		// ones and the shader computes the primary colour once.
+		state.flags0[3] = (command.pipeline.shadeModel == GL_FLAT ? 1u : 0u) |
+			(coreLayoutForBatch(*command.primitives) == CoreVertexLayout::Expanded ? 2u : 0u);
 		state.flags1[0] = command.enables.normalize ? 2u : (command.enables.rescaleNormal ? 1u : 0u);
-		state.flags1[1] = lightMask;
+		// Low byte: the enabled-light mask. Bits 8+: one past the highest
+		// enabled light, so the shader loop stops there. Alpha enables at most
+		// GL_LIGHT0 and GL_LIGHT1, which makes that two iterations, not eight.
+		state.flags1[1] = lightMask | (lightCount << 8);
 		state.flags1[2] = coreFogMode(command.fog.mode, command.enables.fog);
 		state.flags1[3] = command.fog.distanceMode == GL_EYE_RADIAL_NV ? 2u :
 			(command.fog.distanceMode == GL_EYE_PLANE ? 1u : 0u);
@@ -1640,6 +1956,15 @@ private:
 	std::size_t uniformRegion = 0;
 	std::uint64_t uniformOverflows = 0;
 	std::uint64_t uniformFenceWaits = 0;
+	// Transient vertex ring, mapped alongside the uniforms and sharing their
+	// region and fence; null when persistent storage is unavailable, in which
+	// case the transient path falls back to glBufferData.
+	unsigned char *streamMapped = nullptr;
+	GLsizeiptr streamCursor = 0;
+	GLsizeiptr streamPeakBytes = 0;
+	std::uint64_t streamOverflows = 0;
+	// Mutable buffer for the rare transient draw larger than a ring region.
+	GLuint streamOverflowBuffer = 0;
 	bool pipelineStateValid = false;
 	CoreLogicalNameAllocator textureNames;
 	CoreLogicalNameAllocator bufferNames;
@@ -1654,6 +1979,7 @@ private:
 	std::uint64_t residentGeometryBytes = 0;
 	std::uint64_t residentGeometryReleases = 0;
 	unsigned int streamAttributeMask = 0;
+	CoreVertexLayout streamVertexLayout = CoreVertexLayout::Compact;
 	bool streamLayoutValid = false;
 };
 

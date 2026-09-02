@@ -4,6 +4,9 @@
 #include "world/item/ItemStack.h"
 
 #include "java/Type.h"
+#include "OpenGL.h"
+
+#include <unordered_map>
 
 class Minecraft;
 
@@ -18,6 +21,10 @@ private:
 	TileRenderer tileRenderer;
 
 	int_t lastSlot = -1;  // Beta: lastSlot - tracks last slot (ItemInHandRenderer.java:22)
+
+	// Compiled item geometry by (kind, item, data or icon). Block items and
+	// icon extrusions are pure functions of those, so each is tesselated once.
+	std::unordered_map<int_t, GLuint> itemLists;
 
 public:
 	// Beta: renderItem() - renders item in hand (ItemInHandRenderer.java:28-130)

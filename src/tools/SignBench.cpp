@@ -1,5 +1,7 @@
 #include "tools/SignBench.h"
 
+#include "tools/MemoryProbe.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -40,6 +42,10 @@
 #include "OpenGL.h"
 #include "world/level/tile/StoneTile.h"
 #include "world/level/tile/entity/SignTileEntity.h"
+#include "client/renderer/tileentity/SignRenderer.h"
+#include "client/renderer/tileentity/TileEntityRenderDispatcher.h"
+#include "backends/Platform/Platform.h"
+#include "stb_image_write.h"
 #include "world/phys/AABB.h"
 #include "world/phys/Vec3.h"
 
@@ -274,6 +280,11 @@ try
 	if (signCount < 0)
 		signCount = 4096;
 	signbench::g_blankText = blankText;
+#ifdef A126_ENABLE_MEMORY_PROBE
+	// The profiling build attributes every bench; a console has no
+	// environment in which to request it.
+	legacygl::phaseProfileEnabled = true;
+#endif
 
 	const int measuredFrameTarget = frames;
 	const int frameWidth = 854;
@@ -282,11 +293,15 @@ try
 	minecraft.unattended = true;
 	std::cerr << "sign-bench: client initialised" << std::endl;
 	minecraft.init();
+#ifndef __SWITCH__
+	// A desktop bench must stay headless. The console has one fullscreen
+	// surface and no notion of a hidden window, so the check does not apply.
 	if (lwjgl::Display::isVisible())
 	{
 		std::cerr << "sign-bench: unattended window became visible" << std::endl;
 		return 1;
 	}
+#endif
 
 	std::shared_ptr<Level> level;
 	const int_t baseX = 0;
@@ -350,9 +365,13 @@ try
 		AABB::resetPool();
 		Vec3::resetPool();
 		// Discard warm-up phase cycles so the attribution covers exactly the
-		// frames the frame-time metrics cover.
+		// frames the frame-time metrics cover. The probe report at this point
+		// flushes and resets its buckets the same way.
 		if (frame == warmupFrames)
+		{
+			A126_PROBE_REPORT("warmup");
 			legacygl::resetPhaseProfile();
+		}
 
 		if (lwjgl::Display::isCloseRequested())
 			break;
@@ -373,10 +392,18 @@ try
 
 		level->updateLights();
 		auto afterLight = std::chrono::steady_clock::now();
-		lwjgl::Display::update();
+		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::Swap);
+			lwjgl::Display::update();
+		}
 		const float partialTick = static_cast<float>(frame % benchmarkTickInterval) /
 			static_cast<float>(benchmarkTickInterval);
-		minecraft.gameRenderer.render(partialTick);
+		{
+			// The probe's frame bucket, so the renderer phases the profiling
+			// build attributes land in the bench's report as well.
+			A126_PROBE_SCOPE(memoryprobe::Bucket::Frame);
+			minecraft.gameRenderer.render(partialTick);
+		}
 		auto afterRender = std::chrono::steady_clock::now();
 
 		if (finishEachFrame)
@@ -476,12 +503,14 @@ try
 			const legacygl::DrawPhase phase = static_cast<legacygl::DrawPhase>(i);
 			const legacygl::PhaseAccumulator &accumulator = legacygl::phaseAccumulators[i];
 			// CoreMatrices and CorePrimitives are nested inside CoreResolve, so
-			// they are core detail rather than backend cost.
+			// they are core detail rather than backend cost; GeometryUpload is
+			// nested inside Geometry for the same reason.
 			if (phase != legacygl::DrawPhase::CoreResolve &&
 				phase != legacygl::DrawPhase::CoreMatrices &&
 				phase != legacygl::DrawPhase::CoreLighting &&
 				phase != legacygl::DrawPhase::CoreTexture &&
-				phase != legacygl::DrawPhase::CorePrimitives)
+				phase != legacygl::DrawPhase::CorePrimitives &&
+				phase != legacygl::DrawPhase::GeometryUpload)
 				backendCycles += accumulator.cycles;
 			emit(std::string("phase_") + legacygl::phaseName(phase) + "_cycles " +
 				std::to_string(accumulator.cycles));
@@ -497,6 +526,45 @@ try
 			totalCycles > backendCycles ? totalCycles - backendCycles : 0));
 		emit("phase_backend_cycles " + std::to_string(backendCycles));
 	}
+
+	// A126_SIGN_BENCH_CAPTURE=<dir> writes the final frame twice: once through
+	// the batched region lists and once through Alpha's per-sign chain, so the
+	// two can be diffed. Read before the swap; a swapped buffer is undefined.
+	if (const char *captureDir = std::getenv("A126_SIGN_BENCH_CAPTURE"))
+	{
+		SignRenderer *signRenderer = dynamic_cast<SignRenderer *>(
+			TileEntityRenderDispatcher::instance.getRenderer<SignTileEntity>());
+		auto captureFrame = [&](const std::string &path)
+		{
+			lwjgl::Display::update();
+			minecraft.gameRenderer.render(0.0f);
+			glFinish();
+			int drawableWidth = 0;
+			int drawableHeight = 0;
+			platform::getDrawableSize(drawableWidth, drawableHeight);
+			std::vector<unsigned char> pixels(
+				static_cast<std::size_t>(drawableWidth) * static_cast<std::size_t>(drawableHeight) * 3);
+			glPixelStorei(GL_PACK_ALIGNMENT, 1);
+			glReadPixels(0, 0, drawableWidth, drawableHeight, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+			stbi_flip_vertically_on_write(1);
+			const int written = stbi_write_png(path.c_str(), drawableWidth, drawableHeight, 3,
+				pixels.data(), drawableWidth * 3);
+			stbi_flip_vertically_on_write(0);
+			std::cerr << "sign-bench: " << (written != 0 ? "wrote " : "could not write ") << path << std::endl;
+		};
+		const std::string directory(captureDir);
+		captureFrame(directory + "/signs-batched.png");
+		if (signRenderer != nullptr)
+		{
+			signRenderer->batchWorldSigns = false;
+			captureFrame(directory + "/signs-direct.png");
+			signRenderer->batchWorldSigns = true;
+		}
+	}
+
+	// Renderer-phase buckets for the measured frames, written after the phase
+	// summary above because the report resets the phase counters.
+	A126_PROBE_REPORT("bench");
 
 	minecraft.stop();
 	return 0;

@@ -1,4 +1,6 @@
 #include "client/multiplayer/MultiPlayerLevel.h"
+
+#include "tools/MemoryProbe.h"
 #include "network/Packet255KickDisconnect.h"
 #include "network/NetClientHandler.h"
 #include "client/multiplayer/MultiPlayerChunkCache.h"
@@ -91,6 +93,7 @@ void MultiPlayerLevel::tick()
 		if (mc != nullptr && mc->level.get() == this)
 		{
 			// Java: this.sendQueue.processReadPackets();
+			A126_PROBE_SCOPE(memoryprobe::Bucket::TickPackets);
 			connection->processReadPackets();
 		}
 	}

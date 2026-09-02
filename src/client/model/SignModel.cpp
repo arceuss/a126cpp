@@ -18,9 +18,16 @@ void SignModel::render()
 	cube2.render(scale);    // Beta: this.cube2.render(0.0625F) (SignModel.java:15)
 }
 
-void SignModel::renderImmediate()
+void SignModel::ensureCompiled()
 {
 	float scale = 0.0625f;
-	cube.renderImmediate(scale);
-	cube2.renderImmediate(scale);
+	cube.ensureCompiled(scale);
+	cube2.ensureCompiled(scale);
+}
+
+void SignModel::emitTransformed(Tesselator &t, const ModelMatrix &transform)
+{
+	float scale = 0.0625f;
+	cube.emitTransformed(t, scale, transform);
+	cube2.emitTransformed(t, scale, transform);
 }

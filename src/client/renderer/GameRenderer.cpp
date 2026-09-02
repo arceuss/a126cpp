@@ -1,5 +1,7 @@
 #include "client/renderer/GameRenderer.h"
 
+#include "tools/MemoryProbe.h"
+
 #include "client/Minecraft.h"
 #include "client/Lighting.h"
 #include "client/gui/ScreenSizeCalculator.h"
@@ -345,7 +347,10 @@ void GameRenderer::render(float a)
 	{
 		renderLevel(a);
 		if (!lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_F1))
+		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::Gui);
 			mc.gui.render(a, mc.screen != nullptr, xm, ym);
+		}
 	}
 	else
 	{
@@ -447,8 +452,14 @@ void GameRenderer::renderLevel(float a)
 		FrustumCuller culler;
 		culler.prepare(xOff, yOff, zOff);
 
-		mc.levelRenderer.cull(culler, a);
-		mc.levelRenderer.updateDirtyChunks(*player, Minecraft::FLYBY_MODE);
+		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::LevelCull);
+			mc.levelRenderer.cull(culler, a);
+		}
+		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::LevelDirty);
+			mc.levelRenderer.updateDirtyChunks(*player, Minecraft::FLYBY_MODE);
+		}
 		
 		setupFog(0);
 
@@ -458,14 +469,23 @@ void GameRenderer::renderLevel(float a)
 		// Alpha: EntityRenderer.func_4136_b() - two-pass rendering (EntityRenderer.java:439-500)
 		// Pass 0: Opaque blocks
 		Lighting::turnOff();
-		levelRenderer.render(*player, 0, a);
+		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::LevelOpaque);
+			levelRenderer.render(*player, 0, a);
+		}
 
 		// Alpha: Render entities between passes (EntityRenderer.java:441-445)
 		Lighting::turnOn();
-		levelRenderer.renderEntities(*player->getPos(a), culler, a);
+		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::LevelEntities);
+			levelRenderer.renderEntities(*player->getPos(a), culler, a);
+		}
 		
 		// Beta: Render lit particles (GameRenderer.java:405)
-		mc.particleEngine.renderLit(*player, a);
+		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::LevelParticles);
+			mc.particleEngine.renderLit(*player, a);
+		}
 		Lighting::turnOff();
 
 		setupFog(0);
@@ -498,6 +518,8 @@ void GameRenderer::renderLevel(float a)
 
 		// Alpha: Render pass 1 (translucent) - EntityRenderer.java:485/499
 		// Alpha: In fancy graphics mode, uses color mask trick for depth prepass
+		{
+		A126_PROBE_SCOPE(memoryprobe::Bucket::LevelTranslucent);
 		if (mc.options.fancyGraphics)
 		{
 			// Alpha: Depth prepass with color mask disabled (EntityRenderer.java:484-496)
@@ -526,6 +548,7 @@ void GameRenderer::renderLevel(float a)
 		{
 			// Alpha: Fast graphics - direct render (EntityRenderer.java:499)
 			levelRenderer.render(*player, 1, a);
+		}
 		}
 
 		// Alpha: Restore GL state after translucent pass (EntityRenderer.java:502-504)
@@ -565,7 +588,10 @@ void GameRenderer::renderLevel(float a)
 
 		setupFog(0);  // Beta: this.setupFog(0) (GameRenderer.java:454)
 		glEnable(GL_FOG);  // Beta: GL11.glEnable(2912) (GameRenderer.java:455)
-		levelRenderer.renderClouds(a);  // Beta: var3.renderClouds(var1) (GameRenderer.java:456)
+		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::LevelClouds);
+			levelRenderer.renderClouds(a);  // Beta: var3.renderClouds(var1) (GameRenderer.java:456)
+		}
 		glDisable(GL_FOG);  // Beta: GL11.glDisable(2912) (GameRenderer.java:457)
 
 		if (!Minecraft::FLYBY_MODE)
@@ -592,7 +618,10 @@ void GameRenderer::renderLevel(float a)
 					glTranslatef((eye * 2 - 1) * 0.1f, 0.0f, 0.0f);
 				
 				glClear(GL_DEPTH_BUFFER_BIT);
-				renderItemInHand(a, eye);
+				{
+					A126_PROBE_SCOPE(memoryprobe::Bucket::ItemInHand);
+					renderItemInHand(a, eye);
+				}
 				
 				// Restore previous matrices
 				glPopMatrix();

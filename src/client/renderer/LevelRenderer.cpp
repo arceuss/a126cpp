@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <iostream>
 #include <typeinfo>
+#include <chrono>
+
+#include "tools/MemoryProbe.h"
+#include "legacygl/PhaseProfile.h"
 
 #include "client/Minecraft.h"
 #include "world/entity/item/EntityItem.h"
@@ -284,6 +288,11 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 	TileEntityRenderDispatcher::yOff = player.yOld + (player.y - player.yOld) * a;
 	TileEntityRenderDispatcher::zOff = player.zOld + (player.z - player.zOld) * a;
 
+	// Rays start at the player's eye, which is what Alpha's camera orbits in
+	// third person too.
+	occlusionCuller.beginPass(*level, EntityRenderDispatcher::xOff, EntityRenderDispatcher::yOff,
+		EntityRenderDispatcher::zOff, ticks);
+
 	const auto &entities = level->getAllEntities();
 	totalEntities = entities.size();  // Beta: this.totalEntities = entities.size() (LevelRenderer.java:301)
 
@@ -303,6 +312,13 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 		
 		if (!culler.isVisible(entity->bb))
 			continue;
+
+		// Players are never occluded: their name tags draw through walls.
+		if (!entity->isPlayer() && !occlusionCuller.shouldRender(entity->cullState, entity->bb))
+		{
+			culledEntities++;
+			continue;
+		}
 		
 		// Cache floor calculations
 		const int_t ex = Mth::floor(entity->x);
@@ -313,7 +329,21 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 			continue;
 		
 			renderedEntities++;
+#ifdef A126_ENABLE_MEMORY_PROBE
+			// Attribute the draws each entity type issues. The class name from
+			// typeid is static storage, so the probe can key on the pointer.
+			const std::uint64_t drawsBefore = legacygl::phaseAccumulators[
+				static_cast<std::size_t>(legacygl::DrawPhase::CoreResolve)].calls;
+			const auto entityStart = std::chrono::steady_clock::now();
 			EntityRenderDispatcher::instance.render(*entity, a);
+			const std::uint64_t drawsAfter = legacygl::phaseAccumulators[
+				static_cast<std::size_t>(legacygl::DrawPhase::CoreResolve)].calls;
+			A126_PROBE_TALLY(typeid(*entity).name(), drawsAfter - drawsBefore,
+				std::chrono::duration_cast<std::chrono::nanoseconds>(
+					std::chrono::steady_clock::now() - entityStart).count());
+#else
+			EntityRenderDispatcher::instance.render(*entity, a);
+#endif
 	}
 	
 	// Beta: Restore GL state after entity rendering (prevents state from affecting clouds/items)
@@ -324,23 +354,16 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 	// Beta: Render tile entities (LevelRenderer.java:314-316)
 	// Java: Iterates through renderableTileEntities list, not level.tileEntityList.
 	// Signs are immutable in normal world rendering between tile-entity change
-	// notifications, so their exact board/text command streams are cached by
-	// SignRenderer.  We still perform Alpha's distance test and the port's
-	// existing per-entity frustum test here, in the same list order, then submit
-	// the approved cached sign lists together.  Non-sign tile entities flush the
-	// pending sign batch first so future renderer types retain list ordering.
+	// notifications, so SignRenderer batches them per region into cached lists.
+	// Alpha's per-sign distance test is kept here; the frustum test is applied
+	// per region at flush time, so a region's list does not depend on where
+	// the camera points. Non-sign tile entities flush the pending regions
+	// first so future renderer types retain list ordering.
 	SignRenderer *signRenderer = dynamic_cast<SignRenderer *>(
 		TileEntityRenderDispatcher::instance.getRenderer<SignTileEntity>());
 	for (int_t ix = 0; ix < static_cast<int_t>(renderableTileEntities.size()); ix++)  // newb12: for (int ix = 0; ix < this.renderableTileEntities.size(); ix++) (LevelRenderer.java:314)
 	{
 		TileEntity *tileEntity = renderableTileEntities[ix].get();
-		
-		// Performance optimization: Frustum cull tile entities before rendering
-		// Create a small AABB for the tile entity (1 block)
-		AABB tileEntityBB(tileEntity->x, tileEntity->y, tileEntity->z, 
-		                   tileEntity->x + 1.0, tileEntity->y + 1.0, tileEntity->z + 1.0);
-		if (!culler.isVisible(tileEntityBB))
-			continue;
 
 		SignTileEntity *sign = dynamic_cast<SignTileEntity *>(tileEntity);
 		if (sign != nullptr && signRenderer != nullptr)
@@ -356,13 +379,22 @@ void LevelRenderer::renderEntities(Vec3 &cam, Culler &culler, float a)
 			if (signRenderer->queueWorld(*sign, br))
 				continue;
 		}
+		
+		// Performance optimization: Frustum cull tile entities before rendering
+		// Create a small AABB for the tile entity (1 block)
+		AABB tileEntityBB(tileEntity->x, tileEntity->y, tileEntity->z, 
+		                   tileEntity->x + 1.0, tileEntity->y + 1.0, tileEntity->z + 1.0);
+		if (!culler.isVisible(tileEntityBB))
+			continue;
+		if (!occlusionCuller.shouldRender(tileEntity->cullState, tileEntityBB))
+			continue;
 
 		if (signRenderer != nullptr)
-			signRenderer->flushWorldBatch();
+			signRenderer->flushWorldBatch(culler);
 		TileEntityRenderDispatcher::instance.render(tileEntity, a);  // newb12: TileEntityRenderDispatcher.instance.render(this.renderableTileEntities.get(ix), a) (LevelRenderer.java:315)
 	}
 	if (signRenderer != nullptr)
-		signRenderer->flushWorldBatch();
+		signRenderer->flushWorldBatch(culler);
 	
 	// Beta: Reset color after tile entity rendering (prevents dark color from affecting translucent blocks)
 	// TileEntityRenderDispatcher sets glColor3f(br, br, br) which can leave color darker than white
@@ -1028,7 +1060,10 @@ bool LevelRenderer::updateDirtyChunks(Player &player, bool force)
 
 		for (int_t i = 0; i < pendingChunkSize; i++)
 		{
-			std::shared_ptr<Chunk> chunk = dirtyChunks[i];
+			// Borrowed, not copied: a shared_ptr copy per dirty chunk per frame
+			// is atomic refcount traffic, which measured 2.3 ms a frame on the
+			// Switch with a long dirty list.
+			const std::shared_ptr<Chunk> &chunk = dirtyChunks[i];
 			if (!force)
 			{
 				if (chunk->distanceToSqr(player) > 1024.0f)
@@ -1051,8 +1086,7 @@ bool LevelRenderer::updateDirtyChunks(Player &player, bool force)
 			}
 
 			pendingChunkRemoved++;
-			nearChunks.emplace_back(chunk);
-			dirtyChunks[i] = nullptr;
+			nearChunks.emplace_back(std::move(dirtyChunks[i]));
 			continue;
 		}
 
@@ -1091,11 +1125,11 @@ bool LevelRenderer::updateDirtyChunks(Player &player, bool force)
 		int_t arraySize = dirtyChunks.size();
 		while (cursor != arraySize)
 		{
-			std::shared_ptr<Chunk> chunk = dirtyChunks[cursor];
+			const std::shared_ptr<Chunk> &chunk = dirtyChunks[cursor];
 			if (chunk != nullptr && chunk != toAdd[0] && chunk != toAdd[1] && chunk != toAdd[2])
 			{
 				if (target != cursor)
-					dirtyChunks[target] = chunk;
+					dirtyChunks[target] = std::move(dirtyChunks[cursor]);
 				target++;
 			}
 			cursor++;

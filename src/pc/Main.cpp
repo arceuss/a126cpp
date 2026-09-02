@@ -8,9 +8,11 @@
 #include <string>
 #include <sstream>
 #include <memory>
+#include <vector>
 
 #include "backends/Backend.h"
 #include "client/Minecraft.h"
+#include "client/renderer/culling/OcclusionCuller.h"
 #include "tools/SignBench.h"
 #include "tools/SceneCapture.h"
 
@@ -35,8 +37,47 @@ extern "C" void userAppExit(void)
 }
 #endif
 
+#if defined(__SWITCH__) && defined(A126_ENABLE_MEMORY_PROBE)
+// Homebrew launched from an emulator or hbmenu gets no argv, which leaves the
+// developer fixtures (--sign-bench and friends) unreachable on the console. The
+// profiling build reads them from a file instead, one whitespace-separated
+// command line, so a bench can run unattended. Absent file: normal startup.
+static std::vector<std::string> readArgumentFile()
+{
+	std::vector<std::string> arguments;
+	FILE *file = std::fopen("sdmc:/switch/a126cpp-args.txt", "r");
+	if (file == nullptr)
+		return arguments;
+	std::string content;
+	char chunk[256];
+	std::size_t read = 0;
+	while ((read = std::fread(chunk, 1, sizeof(chunk), file)) > 0)
+		content.append(chunk, read);
+	std::fclose(file);
+	std::istringstream stream(content);
+	std::string token;
+	while (stream >> token)
+		arguments.push_back(token);
+	if (!arguments.empty())
+		std::fprintf(stderr, "switch: %zu arguments read from a126cpp-args.txt\n", arguments.size());
+	return arguments;
+}
+#endif
+
 int main(int argc, char *argv[])
 {
+#if defined(__SWITCH__) && defined(A126_ENABLE_MEMORY_PROBE)
+	const std::vector<std::string> fileArguments = readArgumentFile();
+	std::vector<char *> fileArgv;
+	if (!fileArguments.empty())
+	{
+		fileArgv.push_back(argc > 0 ? argv[0] : const_cast<char *>("Alpha126Cpp"));
+		for (const std::string &argument : fileArguments)
+			fileArgv.push_back(const_cast<char *>(argument.c_str()));
+		argc = static_cast<int>(fileArgv.size());
+		argv = fileArgv.data();
+	}
+#endif
 
 	int firstArgument = 1;
 	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--backend") == 0)
@@ -62,6 +103,13 @@ int main(int argc, char *argv[])
 			std::fprintf(stderr, "error: duplicate --backend option\n");
 			return 2;
 		}
+	}
+	// Developer fixture control, for A/B runs of any mode below: draws the
+	// entities the terrain hides from the player.
+	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--no-occlusion") == 0)
+	{
+		OcclusionCuller::enabled = false;
+		++firstArgument;
 	}
 	if (firstArgument < argc && std::strcmp(argv[firstArgument], "--") == 0)
 		++firstArgument;

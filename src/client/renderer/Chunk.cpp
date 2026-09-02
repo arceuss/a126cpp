@@ -1,3 +1,7 @@
+#include "tools/MemoryProbe.h"
+
+#include <memory>
+
 #include "client/renderer/Chunk.h"
 
 #include <algorithm>
@@ -76,6 +80,7 @@ void Chunk::translateToPos()
 void Chunk::rebuild()
 {
 	if (!dirty) return;
+	A126_PROBE_SCOPE(memoryprobe::Bucket::ChunkRebuild);
 	updates++;
 
 	int_t x0 = x;
@@ -92,7 +97,12 @@ void Chunk::rebuild()
 	std::vector<std::shared_ptr<TileEntity>> discoveredTileEntities;
 
 	int_t r = 1;
-	Region region(level, x0 - r, y0 - r, z0 - r, x1 + r, y1 + r, z1 + r);
+	std::unique_ptr<Region> regionStorage;
+	{
+		A126_PROBE_SCOPE(memoryprobe::Bucket::ChunkRegion);
+		regionStorage = std::make_unique<Region>(level, x0 - r, y0 - r, z0 - r, x1 + r, y1 + r, z1 + r);
+	}
+	Region &region = *regionStorage;
 	TileRenderer tileRenderer(&region);
 
 	for (int_t i = 0; i < 2; i++)
@@ -144,6 +154,7 @@ void Chunk::rebuild()
 					}
 					else if (renderLayer == i)
 					{
+						A126_PROBE_SCOPE(memoryprobe::Bucket::ChunkTesselate);
 						rendered |= tileRenderer.tesselateInWorld(*tile, x, y, z);
 					}
 					}
@@ -153,7 +164,12 @@ void Chunk::rebuild()
 
 		if (started)
 		{
-			t.end();
+			{
+				// The draw's capture into the display list: legacygl decodes the
+				// Tesselator packet into canonical vertices here.
+				A126_PROBE_SCOPE(memoryprobe::Bucket::ChunkCapture);
+				t.end();
+			}
 			glPopMatrix();
 			glEndList();
 			t.offset(0.0, 0.0, 0.0);

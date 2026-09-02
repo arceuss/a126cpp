@@ -13,5 +13,9 @@ public:
 	SignModel();
 	
 	void render();
-	void renderImmediate();
+	// Compiles both cube lists so render() can be recorded inside a caller's
+	// own display list, where a lazy compile would nest glNewList.
+	void ensureCompiled();
+	// render() baked through a matrix into an open Tesselator batch.
+	void emitTransformed(Tesselator &t, const ModelMatrix &transform);
 };

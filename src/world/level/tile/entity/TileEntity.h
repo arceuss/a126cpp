@@ -6,6 +6,7 @@
 #include "nbt/CompoundTag.h"
 
 #include "java/Type.h"
+#include "client/renderer/culling/OcclusionCullState.h"
 
 #include "util/Memory.h"
 
@@ -20,6 +21,8 @@ public:
 	std::shared_ptr<Level> level;
 
 	int_t x = 0, y = 0, z = 0;
+	// Client render memory for LevelRenderer's occlusion test.
+	OcclusionCullState cullState;
 
 	virtual ~TileEntity() {}
 

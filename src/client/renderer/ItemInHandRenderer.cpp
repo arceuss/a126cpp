@@ -1,5 +1,7 @@
 #include "client/renderer/ItemInHandRenderer.h"
 
+#include "client/MemoryTracker.h"
+
 #include "client/Minecraft.h"
 #include "client/Lighting.h"
 #include "client/renderer/entity/EntityRenderDispatcher.h"
@@ -33,9 +35,20 @@ void ItemInHandRenderer::renderItem(ItemStack &item)
 		Tile *tile = Tile::tiles[item.itemID];
 		if (tile != nullptr && TileRenderer::canRender(tile->getRenderShape()))
 		{
-			// Beta: Render as block
+			// Beta: Render as block. The geometry depends only on the tile and
+			// its data, so it is compiled once and replayed: every held or
+			// dropped block re-tesselated its faces per frame before.
 			glBindTexture(GL_TEXTURE_2D, mc.textures.loadTexture(u"/terrain.png"));
-			tileRenderer.renderTile(*tile, item.getAuxValue());
+			const int_t key = (1 << 24) | (item.itemID << 8) | (item.getAuxValue() & 0xFF);
+			GLuint &list = itemLists[key];
+			if (list == 0)
+			{
+				list = MemoryTracker::genLists(1);
+				glNewList(list, GL_COMPILE);
+				tileRenderer.renderTile(*tile, item.getAuxValue());
+				glEndList();
+			}
+			glCallList(list);
 			renderedAsBlock = true;
 		}
 	}
@@ -72,7 +85,18 @@ void ItemInHandRenderer::renderItem(ItemStack &item)
 		glRotatef(335.0f, 0.0f, 0.0f, 1.0f);
 		glTranslatef(-0.9375f, -0.0625f, 0.0f);
 		float dd = 0.0625f;
-		
+
+		// The six extruded-sprite draws below depend only on the icon and its
+		// atlas, so they are compiled once per icon. A skeleton's bow measured
+		// 365us a frame on the Switch through the transient path; the list
+		// replays as one merged draw.
+		const int_t key = (2 << 24) | ((item.itemID < 256 ? 1 : 0) << 16) | icon;
+		GLuint &list = itemLists[key];
+		if (list == 0)
+		{
+		list = MemoryTracker::genLists(1);
+		glNewList(list, GL_COMPILE);
+
 		// Beta: Front face (ItemInHandRenderer.java:56-62)
 		t.begin();
 		t.normal(0.0f, 0.0f, 1.0f);
@@ -150,7 +174,11 @@ void ItemInHandRenderer::renderItem(ItemStack &item)
 			t.vertexUV(r, yy, 0.0f - dd, u1, vv);
 		}
 		t.end();
-		
+
+		glEndList();
+		}
+		glCallList(list);
+
 		glDisable(GL_RESCALE_NORMAL_EXT);  // Beta: GL11.glDisable(32826)
 	}
 	

@@ -6,6 +6,7 @@
 #include "world/entity/EntityPos.h"
 #include "world/entity/EntityIO.h"
 #include "world/entity/DataWatcher.h"
+#include "client/renderer/culling/OcclusionCullState.h"
 
 #include "nbt/CompoundTag.h"
 #include "nbt/ListTag.h"
@@ -63,6 +64,8 @@ public:
 	float yRotO = 0.0, xRotO = 0.0;
 
 	AABB bb = AABB(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+	// Client render memory for LevelRenderer's occlusion test.
+	OcclusionCullState cullState;
 
 	bool onGround = false;
 	bool horizontalCollision = false;

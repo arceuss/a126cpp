@@ -96,9 +96,10 @@ vec4 computeLighting(MaterialState material, vec3 normalEye, vec3 eyePosition)
 {
 	vec3 rgb = material.emission.rgb + uGlobalAmbient.rgb * material.ambient.rgb;
 	float alpha = material.diffuse.a;
-	uint lightMask = uFlags1.y;
+	uint lightMask = uFlags1.y & 0xFFu;
+	uint lightCount = uFlags1.y >> 8;
 
-	for (uint i = 0u; i < 8u; ++i)
+	for (uint i = 0u; i < lightCount; ++i)
 	{
 		if ((lightMask & (1u << i)) == 0u)
 			continue;
@@ -186,8 +187,14 @@ void main()
 
 	vec4 transformedTexCoord = uTexture * vec4(inTexCoord, 0.0, 1.0);
 	vTexCoord = transformedTexCoord.xyw;
-	vSmoothPrimary = computePrimary(inPosition, inColor, inNormal);
-	vFlatPrimary = computePrimary(inFlatPosition, inFlatColor, inFlatNormal);
+	vec4 primary = computePrimary(inPosition, inColor, inNormal);
+	vSmoothPrimary = primary;
+	// The flat inputs only carry distinct data in the expanded layout (bit 1),
+	// and only matter under GL_FLAT (bit 0). Otherwise the provoking vertex is
+	// last and the flat varying takes this vertex's own primary colour, so
+	// lighting runs once rather than twice per vertex.
+	vFlatPrimary = (uFlags0.w & 3u) == 3u ?
+		computePrimary(inFlatPosition, inFlatColor, inFlatNormal) : primary;
 	vFogCoord = uFlags1.w == 2u ? length(eyePosition.xyz) :
 		(uFlags1.w == 1u ? eyePosition.z : abs(eyePosition.z));
 }
@@ -316,7 +323,7 @@ float fogFactor(float coordinate)
 
 void main()
 {
-	vec4 color = uFlags0.w != 0u ? vFlatPrimary : vSmoothPrimary;
+	vec4 color = (uFlags0.w & 1u) != 0u ? vFlatPrimary : vSmoothPrimary;
 	if (uFlags0.y != 0u && uFlags3.z != 0u)
 	{
 		vec2 coordinate = vTexCoord.xy / vTexCoord.z;

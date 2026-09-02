@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <functional>
 #include <unordered_map>
 #include <vector>
 
@@ -10,56 +9,70 @@
 #include "OpenGL.h"
 
 class SignTileEntity;
+class Culler;
 
 // newb12: TileEntitySignRenderer (TileEntitySignRenderer.java)
 class SignRenderer : public TileEntityRenderer
 {
 private:
-	struct WorldSignKey
+	// World signs are batched per region of REGION_SIZE blocks on each axis.
+	// One display list per region holds every queued sign's board and text
+	// geometry, pre-transformed into the region's own frame, so a region draws
+	// as two draws (boards, then text) however many signs it holds.
+	static const int_t REGION_SHIFT = 5;
+	static const int_t REGION_SIZE = 1 << REGION_SHIFT;
+
+	struct RegionKey
 	{
 		int_t x = 0;
 		int_t y = 0;
 		int_t z = 0;
 
-		bool operator==(const WorldSignKey &other) const
+		bool operator==(const RegionKey &other) const
 		{
 			return x == other.x && y == other.y && z == other.z;
 		}
 	};
 
-	struct WorldSignKeyHash
+	struct RegionKeyHash
 	{
-		std::size_t operator()(const WorldSignKey &key) const;
+		std::size_t operator()(const RegionKey &key) const;
 	};
 
-	struct CachedWorldSign
+	// What a compiled region was built from. A frame whose queued signs match
+	// this exactly reuses the list; anything else recompiles the region.
+	struct QueuedSign
 	{
-		GLuint list = 0;
-		float brightness = -1.0f;
-		int_t tileId = -1;
-		int_t data = -1;
 		SignTileEntity *owner = nullptr;
-	};
-
-	// A queued sign keeps its block position so the submission loop can
-	// reproduce Alpha's camera-relative translate in double precision.
-	struct QueuedWorldSign
-	{
-		GLuint list = 0;
 		int_t x = 0;
 		int_t y = 0;
 		int_t z = 0;
+		float brightness = 0.0f;
+		int_t tileId = 0;
+		int_t data = 0;
+
+		bool operator==(const QueuedSign &other) const
+		{
+			return owner == other.owner && x == other.x && y == other.y && z == other.z &&
+				brightness == other.brightness && tileId == other.tileId && data == other.data;
+		}
+	};
+
+	struct CachedRegion
+	{
+		GLuint list = 0;
+		std::vector<QueuedSign> signs;
 	};
 
 	SignModel signModel;
-	std::unordered_map<WorldSignKey, CachedWorldSign, WorldSignKeyHash> worldCache;
-	std::vector<QueuedWorldSign> worldBatch;
+	std::unordered_map<RegionKey, CachedRegion, RegionKeyHash> regionCache;
+	std::unordered_map<RegionKey, std::vector<QueuedSign>, RegionKeyHash> pendingRegions;
 
 	void renderImpl(SignTileEntity &sign, double x, double y, double z, float a,
-		bool immediateGeometry, bool omitPositionTranslate);
-	GLuint compileWorldList(SignTileEntity &sign, float brightness, int_t tileId, int_t data);
-	void deleteCachedList(CachedWorldSign &cached);
-	static WorldSignKey makeWorldSignKey(int_t x, int_t y, int_t z);
+		bool omitPositionTranslate);
+	GLuint compileRegionList(const RegionKey &key, const std::vector<QueuedSign> &signs);
+	static void deleteRegionList(CachedRegion &cached);
+	static RegionKey regionKeyFor(int_t x, int_t y, int_t z);
 
 public:
 	SignRenderer();
@@ -70,17 +83,18 @@ public:
 	// Helper to render from TileEntity*
 	void renderEntity(TileEntity *entity, double x, double y, double z, float a);
 
-	// World-only cache. Each immutable sign is flattened into one server-side
-	// OpenGL display list holding its rotation, board and per-glyph text
-	// geometry. The sign's world position stays out of that list, because a
-	// large absolute coordinate rounded to float loses its low bits and makes
-	// distant signs jitter; flushWorldBatch applies Alpha's exact
-	// camera-relative translate instead. LevelRenderer preserves Alpha's
-	// per-sign distance/frustum decisions and list order, and the edit-screen
-	// path continues to use render() directly.
+	// World-only cache. Signs that pass LevelRenderer's per-sign distance and
+	// frustum tests are queued; flushWorldBatch draws each region that has
+	// queued signs with Alpha's exact camera-relative translate, compiling the
+	// region first when its sign set or any sign's brightness changed. The
+	// edit-screen path continues to use render() directly.
 	bool queueWorld(SignTileEntity &sign, float brightness);
-	void flushWorldBatch();
+	void flushWorldBatch(Culler &culler);
 	void invalidateWorldSign(SignTileEntity *sign);
+	// Developer fixture control: false makes queueWorld decline every sign so
+	// LevelRenderer falls through to the per-sign render() path, which lets a
+	// bench compare the batched image against Alpha's original chain.
+	bool batchWorldSigns = true;
 	void invalidateWorldSignAt(int_t x, int_t y, int_t z);
 	void clearWorldCache();
 };

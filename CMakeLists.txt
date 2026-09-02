@@ -211,6 +211,9 @@ set(Alpha126Cpp_SOURCES
 	"src/client/renderer/culling/FrustumCuller.cpp"
 	"src/client/renderer/culling/FrustumCuller.h"
 	"src/client/renderer/culling/FrustumData.cpp"
+	"src/client/renderer/culling/OcclusionCullState.h"
+	"src/client/renderer/culling/OcclusionCuller.cpp"
+	"src/client/renderer/culling/OcclusionCuller.h"
 	"src/client/renderer/culling/FrustumData.h"
 	
 	"src/client/renderer/entity/EntityRenderDispatcher.cpp"
@@ -345,6 +348,8 @@ set(Alpha126Cpp_SOURCES
 
 	"src/util/BackgroundTask.cpp"
 	"src/util/BackgroundTask.h"
+	"src/tools/MemoryProbe.cpp"
+	"src/tools/MemoryProbe.h"
 	"src/util/GLU.cpp"
 	"src/util/GLU.h"
 	"src/util/HttpGet.cpp"
@@ -1056,12 +1061,12 @@ elseif(APPLE)
 		"src/pc/linux/java/Runtime.cpp"
 	)
 elseif(NINTENDO_SWITCH)
-	# The POSIX implementation works against libnx's devoptab (romfs:/sdmc:);
-	# File.cpp carries __SWITCH__ arms for the resource and working roots.
+	# The POSIX File/Resource work against libnx's devoptab (romfs:/sdmc:), but
+	# Runtime needs the malloc arena rather than the stubbed Linux values.
 	target_sources(Alpha126CppCore PRIVATE
 		"src/pc/linux/java/File.cpp"
 		"src/pc/linux/java/Resource.cpp"
-		"src/pc/linux/java/Runtime.cpp"
+		"src/pc/switch/java/Runtime.cpp"
 		"src/pc/switch/SwitchRuntime.cpp"
 		"src/pc/switch/SwitchRuntime.h"
 	)
@@ -1158,7 +1163,21 @@ else()
 endif()
 option(A126_ENABLE_GL_GPU_TESTS "Enable serialized LegacyGL GPU parity tests" OFF)
 option(A126_ENABLE_RENDER_DIAGNOSTICS "Compile renderer diagnostics instrumentation" OFF)
-set(A126_DEFAULT_RENDER_BACKEND "gl21" CACHE STRING "Default renderer: nativegl, gl21, gl33, vulkan or d3d12")
+# Profiling probe build: appends memory and per-subsystem timings to
+# a126cpp-profile.txt beside the executable. Off by default; the shipping build
+# carries no instrumentation.
+option(A126_ENABLE_MEMORY_PROBE "Compile the memory and timing probe" OFF)
+if(A126_ENABLE_MEMORY_PROBE)
+	target_compile_definitions(Alpha126CppCore PUBLIC A126_ENABLE_MEMORY_PROBE=1)
+endif()
+if(NINTENDO_SWITCH)
+	set(A126_INITIAL_RENDER_BACKEND "nativegl")
+else()
+	set(A126_INITIAL_RENDER_BACKEND "gl21")
+endif()
+set(A126_DEFAULT_RENDER_BACKEND "${A126_INITIAL_RENDER_BACKEND}" CACHE STRING
+	"Default renderer: nativegl, gl21, gl33, vulkan or d3d12")
+unset(A126_INITIAL_RENDER_BACKEND)
 set_property(CACHE A126_DEFAULT_RENDER_BACKEND PROPERTY STRINGS nativegl gl21 gl33 vulkan d3d12)
 set(A126_EXECUTABLE_NAME "Alpha126Cpp" CACHE STRING "Client executable output name")
 

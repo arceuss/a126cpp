@@ -127,15 +127,43 @@ public:
 	// walks the client arrays itself, so decoding them again would be pure
 	// overhead on the reference path.
 	virtual bool wantsCanonicalGeometry() const { return false; }
+	// Primitive canonicalization is separate from vertex decoding. Backends that
+	// draw the submitted legacy topology directly can opt out without changing
+	// the geometry they receive.
+	virtual bool wantsCanonicalPrimitives() const { return true; }
 	// Some compatibility backends need canonical display-list geometry for
 	// static residency but keep transient draws on the original raw path.
 	virtual bool wantsTransientCanonicalGeometry() const { return wantsCanonicalGeometry(); }
 	// GPU-free semantic tests inspect Context::lastGeometry(). Production
-	// backends leave this off so fully supplied resident geometry stays borrowed.
+	// backends leave this off so resident display-list geometry stays borrowed.
 	virtual bool wantsLastGeometrySnapshot() const { return false; }
 
 	// Loader-neutral work emitted after the semantic core has validated each
-	// call and resolved all legacy state needed by a translated backend.
+	// call and resolved all legacy state needed by a translated backend. A true
+	// residency query means the sink owns a complete immutable representation and
+	// guarantees it will remain valid until releaseCanonicalGeometry is called.
+	// The semantic core may release Geometry::vertices after that confirmation.
+	virtual bool isCanonicalGeometryResident(std::uint64_t residencyId) const
+	{
+		(void)residencyId;
+		return false;
+	}
+	// Diagnostic accounting for the memory probe: logical bytes of resident
+	// geometry, live entry count, live page count, and total allocated page
+	// capacity. A sink without residency returns false and the probe omits the
+	// line. Purely observational; must not touch GL state.
+	struct ResidentStats
+	{
+		std::uint64_t logicalBytes = 0;
+		std::uint64_t pageCapacityBytes = 0;
+		std::size_t entries = 0;
+		std::size_t pages = 0;
+	};
+	virtual bool queryResidentStats(ResidentStats &out) const
+	{
+		(void)out;
+		return false;
+	}
 	virtual void releaseCanonicalGeometry(std::uint64_t residencyId) { (void)residencyId; }
 	virtual void resolvedDraw(const ResolvedDraw &command) { (void)command; }
 	virtual void resolvedClear(const ResolvedClear &command) { (void)command; }

@@ -138,14 +138,15 @@ void initialize(const renderbackend::Configuration &backend)
 	// "rgba=8/8/8/0 depth=24 stencil=0". Switch EGL otherwise hands out a
 	// 16-bit depth buffer, which z-fights visibly on Alpha's cloud plane.
 	//
-	// Alpha and stencil are requested as 0 because the game reads neither.
-	// Switch still reports rgba=8/8/8/8: its native window surface is
-	// RGBA8888, so EGL has no alpha-less config to offer and grants the
-	// channel regardless. Depth and stencil do match desktop.
+	// Alpha is not set here: SDL's default request is 0, which is what the
+	// game wants since it never reads destination alpha, and the GPU parity
+	// fixture requests 8 before this runs because its cases do read it.
+	// Switch reports rgba=8/8/8/8 either way: its native window surface is
+	// RGBA8888, so EGL has no alpha-less config to offer. Depth and stencil
+	// do match desktop.
 	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);

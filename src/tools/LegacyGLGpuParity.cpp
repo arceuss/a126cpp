@@ -354,6 +354,27 @@ void recordAlphaCases(ResultSet &results, bool enforceExpected)
 			addCase(results, name, passed ? "1" : "0");
 		}
 	}
+
+	// The game's own test is GREATER against 0.1, a reference between two
+	// 8-bit values (25.5/255). A float comparison and a comparison after
+	// fixed-point conversion of both operands (OpenGL 1.1 4.1.3) disagree on
+	// a fragment alpha of 26/255, so this records what the native driver does.
+	glAlphaFunc(GL_GREATER, 0.1f);
+	const unsigned int boundaryBytes[] = { 25, 26, 27 };
+	for (std::size_t alpha = 0; alpha < 3; alpha++)
+	{
+		const float left = 2.0f + static_cast<float>(alpha) * 10.0f;
+		const float bottom = 2.0f + 2.0f * 10.0f;
+		glColor4f(1.0f, 1.0f, 1.0f, static_cast<float>(boundaryBytes[alpha]) / 255.0f);
+		drawQuad(left, bottom, left + 6.0f, bottom + 6.0f, 0.0f);
+	}
+	glFinish();
+	for (std::size_t alpha = 0; alpha < 3; alpha++)
+	{
+		const Rgb pixel = readRgb(5 + static_cast<int>(alpha) * 10, 5 + 2 * 10);
+		const bool passed = pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0;
+		addCase(results, "alpha.greater-0.1." + std::to_string(boundaryBytes[alpha]), passed ? "1" : "0");
+	}
 	glDisable(GL_ALPHA_TEST);
 }
 

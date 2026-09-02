@@ -1,6 +1,7 @@
 #include "client/model/Polygon.h"
 #include "client/renderer/Tesselator.h"
 #include "OpenGL.h"
+#include <cmath>
 
 Poly::Poly()
 {
@@ -58,31 +59,37 @@ void Poly::render(Tesselator &t, float scale)
 	t.end();
 }
 
-void Poly::renderImmediate(float scale)
+// The same normal, vertex order and texture coordinates as render(), with the
+// positions and normal taken through a caller's matrix so many polygons can
+// share one Tesselator draw instead of one per model.
+void Poly::emitTransformed(Tesselator &t, float scale, const ModelMatrix &transform)
 {
 	Vec3 *v0 = vertices[1].pos.vectorTo(vertices[0].pos);
 	Vec3 *v1 = vertices[1].pos.vectorTo(vertices[2].pos);
 	Vec3 *n = v1->cross(*v0)->normalize();
 
-	float nx = flipNormalFlag ? -n->x : n->x;
-	float ny = flipNormalFlag ? -n->y : n->y;
-	float nz = flipNormalFlag ? -n->z : n->z;
-
-	// Match Tesselator::normal's packed GL_BYTE normal representation exactly.
-	GLbyte bx = static_cast<GLbyte>(static_cast<unsigned char>(nx * 128.0f));
-	GLbyte by = static_cast<GLbyte>(static_cast<unsigned char>(ny * 127.0f));
-	GLbyte bz = static_cast<GLbyte>(static_cast<unsigned char>(nz * 127.0f));
-
-	static const int_t indices[6] = { 0, 1, 2, 0, 2, 3 };
-	glBegin(GL_TRIANGLES);
-	glNormal3b(bx, by, bz);
-	for (int_t index : indices)
+	float nx = static_cast<float>(flipNormalFlag ? -n->x : n->x);
+	float ny = static_cast<float>(flipNormalFlag ? -n->y : n->y);
+	float nz = static_cast<float>(flipNormalFlag ? -n->z : n->z);
+	float tx = 0.0f, ty = 0.0f, tz = 0.0f;
+	transform.transformNormal(nx, ny, nz, tx, ty, tz);
+	const float length = std::sqrt(tx * tx + ty * ty + tz * tz);
+	if (length > 0.0f)
 	{
-		Vertex &v = vertices[static_cast<size_t>(index)];
-		glTexCoord2f(v.u, v.v);
-		glVertex3f(v.pos.x * scale, v.pos.y * scale, v.pos.z * scale);
+		tx /= length;
+		ty /= length;
+		tz /= length;
 	}
-	glEnd();
+	t.normal(tx, ty, tz);
+
+	for (int_t i = 0; i < vertices.size(); i++)
+	{
+		Vertex &v = vertices[i];
+		float x = 0.0f, y = 0.0f, z = 0.0f;
+		transform.transformPoint(static_cast<float>(v.pos.x * scale),
+			static_cast<float>(v.pos.y * scale), static_cast<float>(v.pos.z * scale), x, y, z);
+		t.vertexUV(x, y, z, v.u, v.v);
+	}
 }
 
 Poly &Poly::flipNormal()

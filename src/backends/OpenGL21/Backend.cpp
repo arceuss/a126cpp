@@ -52,6 +52,7 @@ struct GL21ResidentPage
 	// vertex-array state, so geometry with a different layout needs its own.
 	unsigned int attributeMask = 0;
 	GLsizeiptr capacity = 0;
+	std::size_t liveEntries = 0;
 	std::vector<GL21ResidentFreeRange> freeRanges;
 };
 
@@ -178,13 +179,24 @@ public:
 	{
 		if (!initialized)
 			return;
+		std::size_t residentPageCount = 0;
+		std::uint64_t residentPageBytes = 0;
+		for (const GL21ResidentPage &page : residentPages)
+		{
+			if (page.buffer == 0)
+				continue;
+			residentPageCount++;
+			residentPageBytes += static_cast<std::uint64_t>(page.capacity);
+		}
 		std::fprintf(stdout,
 			"gl21: shutdown, resident cache hits=%llu, misses=%llu,"
-			" resident bytes=%llu, entries=%zu, explicit releases=%llu\n",
+			" resident bytes=%llu, entries=%zu, pages=%zu, page bytes=%llu,"
+			" explicit releases=%llu\n",
 			static_cast<unsigned long long>(residentCacheHits),
 			static_cast<unsigned long long>(residentCacheMisses),
 			static_cast<unsigned long long>(residentGeometryBytes),
-			residentGeometry.size(),
+			residentGeometry.size(), residentPageCount,
+			static_cast<unsigned long long>(residentPageBytes),
 			static_cast<unsigned long long>(residentGeometryReleases));
 		std::fprintf(stdout,
 			"gl21: state sync requests=%llu"
@@ -369,6 +381,26 @@ public:
 	void finish() override { glFinish(); }
 
 	bool wantsCanonicalGeometry() const override { return true; }
+	bool wantsCanonicalPrimitives() const override { return false; }
+	bool isCanonicalGeometryResident(std::uint64_t residencyId) const override
+	{
+		return residencyId != 0 && residentGeometry.find(residencyId) != residentGeometry.end();
+	}
+	bool queryResidentStats(legacygl::Sink::ResidentStats &out) const override
+	{
+		out.logicalBytes = residentGeometryBytes;
+		out.entries = residentGeometry.size();
+		out.pages = 0;
+		out.pageCapacityBytes = 0;
+		for (const GL21ResidentPage &page : residentPages)
+		{
+			if (page.buffer == 0)
+				continue;
+			out.pages++;
+			out.pageCapacityBytes += static_cast<std::uint64_t>(page.capacity);
+		}
+		return true;
+	}
 
 	void releaseCanonicalGeometry(std::uint64_t residencyId) override
 	{
@@ -383,7 +415,7 @@ public:
 
 	void resolvedDraw(const ResolvedDraw &command) override
 	{
-		if (command.geometry == nullptr || command.geometry->vertices.empty())
+		if (command.geometry == nullptr || command.geometry->vertexCount <= 0)
 			return;
 		initialize();
 		{
@@ -394,13 +426,15 @@ public:
 		const Geometry &geometry = *command.geometry;
 		GLuint vertexBuffer = streamVertexBuffer;
 		GLuint vertexArray = streamVertexArray;
-		const std::size_t vertexCount = geometry.vertices.size();
+		const std::size_t vertexCount = static_cast<std::size_t>(geometry.vertexCount);
 		bool configureArrays = true;
 		GLint firstVertex = 0;
 		{
 		legacygl::PhaseScope phase(legacygl::DrawPhase::Geometry);
 		if (command.geometryResidencyId == 0)
 		{
+			if (geometry.vertices.size() != vertexCount)
+				throw std::runtime_error("OpenGL 2.1 transient geometry has no CPU source");
 			glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
 			glBufferData(GL_ARRAY_BUFFER,
 				static_cast<GLsizeiptr>(vertexCount * sizeof(Vertex)),
@@ -411,6 +445,11 @@ public:
 			auto found = residentGeometry.find(command.geometryResidencyId);
 			if (found == residentGeometry.end())
 			{
+				if (geometry.vertices.size() != vertexCount)
+				{
+					throw std::runtime_error(
+						"OpenGL 2.1 resident geometry source was released before upload");
+				}
 				residentCacheMisses++;
 				found = residentGeometry.emplace(command.geometryResidencyId,
 					allocateResidentGeometry(geometry, vertexCount)).first;
@@ -494,7 +533,7 @@ public:
 		for (std::size_t i = 0; i < residentPages.size(); i++)
 		{
 			GL21ResidentPage &page = residentPages[i];
-			if (page.attributeMask != attributeMask)
+			if (page.buffer == 0 || page.attributeMask != attributeMask)
 				continue;
 			for (std::size_t range = 0; range < page.freeRanges.size(); range++)
 			{
@@ -517,6 +556,7 @@ public:
 			GL21ResidentPage page;
 			page.attributeMask = attributeMask;
 			page.capacity = std::max<GLsizeiptr>(RESIDENT_PAGE_BYTES, size);
+			page.liveEntries = 1;
 			glGenBuffers(1, &page.buffer);
 			glBindBuffer(GL_ARRAY_BUFFER, page.buffer);
 			glBufferData(GL_ARRAY_BUFFER, page.capacity, nullptr, GL_STATIC_DRAW);
@@ -530,7 +570,21 @@ public:
 			if (page.capacity > size)
 				page.freeRanges.push_back({ size, page.capacity - size });
 			offset = 0;
-			residentPages.push_back(std::move(page));
+
+			for (std::size_t i = 0; i < residentPages.size(); i++)
+			{
+				if (residentPages[i].buffer != 0)
+					continue;
+				residentPages[i] = std::move(page);
+				pageIndex = i;
+				break;
+			}
+			if (pageIndex == residentPages.size())
+				residentPages.push_back(std::move(page));
+		}
+		else
+		{
+			residentPages[pageIndex].liveEntries++;
 		}
 
 		GL21ResidentPage &page = residentPages[pageIndex];
@@ -551,12 +605,31 @@ public:
 	}
 
 	// Returns a range to its page and merges it with any neighbour, so repeated
-	// chunk rebuilds reuse space instead of growing the arena.
+	// chunk rebuilds reuse space instead of growing the arena. A completely empty
+	// page is deleted and its stable vector slot is reused by a later allocation.
 	void freeResidentRange(const GL21ResidentGeometryEntry &entry)
 	{
 		if (entry.page >= residentPages.size())
 			return;
 		GL21ResidentPage &page = residentPages[entry.page];
+		if (page.buffer == 0 || page.liveEntries == 0)
+			return;
+		page.liveEntries--;
+		if (page.liveEntries == 0)
+		{
+			if (boundVertexArray == page.vertexArray && page.vertexArray != 0)
+			{
+				glBindVertexArray(0);
+				boundVertexArray = 0;
+			}
+			if (page.vertexArray != 0)
+				glDeleteVertexArrays(1, &page.vertexArray);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			glDeleteBuffers(1, &page.buffer);
+			page = GL21ResidentPage();
+			return;
+		}
+
 		GL21ResidentFreeRange released = { entry.byteOffset, entry.byteSize };
 		std::size_t insertAt = page.freeRanges.size();
 		for (std::size_t i = 0; i < page.freeRanges.size(); i++)
@@ -1130,7 +1203,8 @@ private:
 		{
 			if (page.vertexArray != 0)
 				glDeleteVertexArrays(1, &page.vertexArray);
-			glDeleteBuffers(1, &page.buffer);
+			if (page.buffer != 0)
+				glDeleteBuffers(1, &page.buffer);
 		}
 		residentPages.clear();
 		residentGeometry.clear();

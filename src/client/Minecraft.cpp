@@ -55,6 +55,7 @@
 #include "lwjgl/Keyboard.h"
 #include "lwjgl/Gamepad.h"
 #include "util/BackgroundTask.h"
+#include "tools/MemoryProbe.h"
 
 #include "CrashHandler.h"
 
@@ -469,6 +470,9 @@ void Minecraft::run()
 
 		while (running)
 		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::Frame);
+			A126_PROBE_TICK();
+
 			AABB::resetPool();
 			Vec3::resetPool();
 
@@ -513,7 +517,10 @@ void Minecraft::run()
 				std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
 			if (!lwjgl::Keyboard::isKeyDown(lwjgl::Keyboard::KEY_F7))
+			{
+				A126_PROBE_SCOPE(memoryprobe::Bucket::Swap);
 				lwjgl::Display::update();
+			}
 
 			if (!noRender)
 			{
@@ -575,6 +582,7 @@ void Minecraft::run()
 		// Outstanding skin downloads and connection handshakes must finish
 		// before the objects they touch go away.
 		BackgroundTask::joinAll();
+		A126_PROBE_REPORT("shutdown");
 #ifdef NDEBUG
 	}
 	catch (std::exception &e)
@@ -878,6 +886,8 @@ void Minecraft::handleGrabTexture()
 
 void Minecraft::tick()
 {
+	A126_PROBE_SCOPE(memoryprobe::Bucket::Tick);
+
 	// Reclaim finished background threads (skin downloads, connection
 	// handshakes). They are joinable rather than detached; see BackgroundTask.
 	BackgroundTask::reap();
@@ -1108,6 +1118,7 @@ void Minecraft::tick()
 			// in Java for the rest of the loop. Hold a reference so the frames
 			// still running on the old level keep a live object.
 			std::shared_ptr<Level> tickingLevel = level;
+			A126_PROBE_SCOPE(memoryprobe::Bucket::TickEntities);
 			tickingLevel->tickEntities();
 		}
 		if (!pause || isOnline())
@@ -1117,6 +1128,7 @@ void Minecraft::tick()
 			std::shared_ptr<Level> currentLevel = level;  // Capture shared_ptr to keep it alive
 			if (currentLevel != nullptr)
 			{
+				A126_PROBE_SCOPE(memoryprobe::Bucket::TickLevel);
 				currentLevel->setSpawnSettings(options.difficulty > 0, true);
 				currentLevel->tick();
 			}
@@ -1125,7 +1137,10 @@ void Minecraft::tick()
 			level->animateTick(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));
 		// Beta: Tick particle engine (Minecraft.java:1170-1172)
 		if (!pause)
+		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::TickParticles);
 			particleEngine.tick();
+		}
 	}
 
 	// Beta 1.2/newb12: Tick GUI (increments ticks for chat messages)

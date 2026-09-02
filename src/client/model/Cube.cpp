@@ -110,7 +110,7 @@ void Cube::render(float scale)
 {
 	if (neverRender) return;
 	if (!visible) return;
-	if (!compiled) compile(scale);
+	ensureCompiled(scale);
 
 	if (xRot != 0.0f || yRot != 0.0f || zRot != 0.0f)
 	{
@@ -135,34 +135,44 @@ void Cube::render(float scale)
 	}
 }
 
-void Cube::renderImmediate(float scale)
+// Compiles the cube's list ahead of an enclosing glNewList, which cannot nest
+// a compile of its own; render() and translateTo() also go through here.
+void Cube::ensureCompiled(float scale)
+{
+	if (!compiled)
+		compile(scale);
+}
+
+// render() with the cube's own translate and rotations composed onto the
+// caller's matrix, in glTranslatef/glRotatef order, and every polygon emitted
+// through it into the caller's open Tesselator batch.
+void Cube::emitTransformed(Tesselator &t, float scale, const ModelMatrix &transform)
 {
 	if (neverRender) return;
 	if (!visible) return;
 
-	bool transformed = xRot != 0.0f || yRot != 0.0f || zRot != 0.0f ||
-		x != 0.0f || y != 0.0f || z != 0.0f;
-	if (transformed)
+	ModelMatrix local = transform;
+	if (xRot != 0.0f || yRot != 0.0f || zRot != 0.0f)
 	{
-		glPushMatrix();
-		glTranslatef(x * scale, y * scale, z * scale);
-		if (zRot != 0.0f) glRotatef(zRot * c, 0.0f, 0.0f, 1.0f);
-		if (yRot != 0.0f) glRotatef(yRot * c, 0.0f, 1.0f, 0.0f);
-		if (xRot != 0.0f) glRotatef(xRot * c, 1.0f, 0.0f, 0.0f);
+		local.translate(x * scale, y * scale, z * scale);
+		if (zRot != 0.0f) local.rotate(zRot * c, 0.0f, 0.0f, 1.0f);
+		if (yRot != 0.0f) local.rotate(yRot * c, 0.0f, 1.0f, 0.0f);
+		if (xRot != 0.0f) local.rotate(xRot * c, 1.0f, 0.0f, 0.0f);
+	}
+	else if (x != 0.0f || y != 0.0f || z != 0.0f)
+	{
+		local.translate(x * scale, y * scale, z * scale);
 	}
 
 	for (auto &p : polygons)
-		p.renderImmediate(scale);
-
-	if (transformed)
-		glPopMatrix();
+		p.emitTransformed(t, scale, local);
 }
 
 void Cube::translateTo(float scale)
 {
 	if (neverRender) return;
 	if (!visible) return;
-	if (!compiled) compile(scale);
+	ensureCompiled(scale);
 
 	if (xRot != 0.0f || yRot != 0.0f || zRot != 0.0f)
 	{

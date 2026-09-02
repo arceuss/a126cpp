@@ -42,6 +42,10 @@ enum class DrawPhase : std::size_t
 	CoreTexture,
 	// Backend: building or locating the vertex data for this draw.
 	Geometry,
+	// Backend: the subset of Geometry that converts and uploads vertex data
+	// (transient draws and resident misses); Geometry minus this is the
+	// resident-hit lookup cost.
+	GeometryUpload,
 	// Backend: packing resolved state into the backend's constant layout.
 	StatePack,
 	// Backend: getting that constant data to the GPU.
@@ -59,7 +63,10 @@ struct PhaseAccumulator
 	std::uint64_t calls = 0;
 };
 
-inline const bool phaseProfileEnabled = std::getenv("A126_PHASE_PROFILE") != nullptr;
+// Mutable so the memory-probe build can switch it on at startup: a console has
+// no environment to set the variable in, and a compile-time definition would
+// not reach the backend libraries, which are separate targets.
+inline bool phaseProfileEnabled = std::getenv("A126_PHASE_PROFILE") != nullptr;
 inline PhaseAccumulator phaseAccumulators[static_cast<std::size_t>(DrawPhase::Count)];
 
 inline std::uint64_t readPhaseCounter()
@@ -80,6 +87,7 @@ inline const char *phaseName(DrawPhase phase)
 	case DrawPhase::CorePrimitives: return "core_primitives";
 	case DrawPhase::CoreResolve: return "core_resolve";
 	case DrawPhase::Geometry: return "geometry";
+	case DrawPhase::GeometryUpload: return "geometry_upload";
 	case DrawPhase::CoreLighting: return "core_lighting";
 	case DrawPhase::CoreTexture: return "core_texture";
 	case DrawPhase::StatePack: return "state_pack";

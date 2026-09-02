@@ -1,3 +1,5 @@
+#include "tools/MemoryProbe.h"
+
 #include "world/level/Level.h"
 
 #include <algorithm>
@@ -1653,6 +1655,8 @@ void Level::updateLight(int_t layer, int_t x0, int_t y0, int_t z0, int_t x1, int
 
 void Level::updateLight(int_t layer, int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1, bool checkExpansion)
 {
+	A126_PROBE_SCOPE(memoryprobe::Bucket::LightUpdate);
+
 	if (dimension->hasCeiling && layer == LightLayer::Sky)
 		return;
 
