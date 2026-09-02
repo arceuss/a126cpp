@@ -51,6 +51,9 @@ protected:
 	virtual void mouseClicked(int_t x, int_t y, int_t buttonNum);
 	virtual void mouseReleased(int_t x, int_t y, int_t buttonNum);
 
+	// True when the control under the pointer consumed the step.
+	bool stepHoveredValue(int_t direction);
+
 	virtual void buttonClicked(Button &button);
 
 public:

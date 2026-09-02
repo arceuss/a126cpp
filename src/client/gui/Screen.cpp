@@ -7,6 +7,7 @@
 
 #include "lwjgl/Keyboard.h"
 #include "lwjgl/Mouse.h"
+#include "lwjgl/Gamepad.h"
 
 #include <iostream>
 
@@ -118,6 +119,26 @@ void Screen::mouseEvent()
 	}
 }
 
+bool Screen::stepHoveredValue(int_t direction)
+{
+	// Alpha has no keyboard focus model, so the pointer's hovered control
+	// stands in for LCE's focused control.
+	const int_t xm = lwjgl::Mouse::getX() * width / minecraft.width;
+	const int_t ym = height - lwjgl::Mouse::getY() * height / minecraft.height - 1;
+
+	for (auto &button : buttons)
+	{
+		if (!button->clicked(minecraft, xm, ym))
+			continue;
+		if (!button->stepValue(minecraft, direction))
+			continue;
+
+		minecraft.soundEngine.playUI(u"random.click", 1.0f, 1.0f);
+		return true;
+	}
+	return false;
+}
+
 void Screen::keyboardEvent()
 {
 	if (lwjgl::Keyboard::getEventKeyState())
@@ -127,6 +148,18 @@ void Screen::keyboardEvent()
 			minecraft.toggleFullscreen();
 			return;
 		}
+
+		// Only while a pad is driving: a keyboard player adjusts sliders by
+		// dragging, and text fields need the arrow keys for the caret.
+		if (lwjgl::Gamepad::isConnected())
+		{
+			const int_t key = lwjgl::Keyboard::getEventKey();
+			if (key == lwjgl::Keyboard::KEY_LEFT && stepHoveredValue(-1))
+				return;
+			if (key == lwjgl::Keyboard::KEY_RIGHT && stepHoveredValue(1))
+				return;
+		}
+
 		keyPressed(lwjgl::Keyboard::getEventCharacter(), lwjgl::Keyboard::getEventKey());
 	}
 }

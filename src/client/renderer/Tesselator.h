@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <memory>
 
 #include "java/Type.h"
@@ -39,7 +41,9 @@ private:
 	double yo = 0.0;
 	double zo = 0.0;
 
-	int_t normalValue = 0;
+	// Raw interleaved bytes rather than an int: each component is a signed
+	// byte, and the packing has to match what GL_BYTE reads back.
+	std::array<std::uint8_t, 4> normalValue = { 0, 0, 0, 0 };
 
 public:
 	static Tesselator instance;

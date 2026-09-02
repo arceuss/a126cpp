@@ -53,3 +53,18 @@ void SlideButton::released(int_t mx, int_t my)
 {
 	sliding = false;
 }
+
+// Twenty steps across the track, so a stick or D-pad can land on a value
+// precisely. Dragging still works for a mouse; this is the discrete path.
+bool SlideButton::stepValue(Minecraft &minecraft, int_t direction)
+{
+	if (!active || !visible || direction == 0)
+		return false;
+
+	const float stepped = value + (direction > 0 ? 0.05f : -0.05f);
+	value = stepped < 0.0f ? 0.0f : (stepped > 1.0f ? 1.0f : stepped);
+
+	minecraft.options.set(*option, value);
+	msg = minecraft.options.getMessage(*option);
+	return true;
+}

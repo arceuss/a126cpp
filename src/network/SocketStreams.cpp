@@ -14,7 +14,33 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <poll.h>
 #endif
+
+// Matches the 30-second SO_RCVTIMEO NetworkManager sets on the socket.
+static const int SOCKET_READ_TIMEOUT_MS = 30000;
+
+// Waits for the socket to become readable before reading it.
+//
+// A blocking recv is not dependable on every platform: the Switch BSD service
+// returns ETIMEDOUT straight away even when a packet is already pending, which
+// the readers below would report as a socket timeout and tear the connection
+// down. poll reports readability correctly, and this also gives a real timeout
+// on stacks that ignore SO_RCVTIMEO.
+static bool waitSocketReadable(SocketHandle socket)
+{
+#ifdef _WIN32
+	WSAPOLLFD waiting = {};
+	waiting.fd = socket;
+	waiting.events = POLLRDNORM;
+	return WSAPoll(&waiting, 1, SOCKET_READ_TIMEOUT_MS) > 0;
+#else
+	struct pollfd waiting = {};
+	waiting.fd = socket;
+	waiting.events = POLLIN;
+	return ::poll(&waiting, 1, SOCKET_READ_TIMEOUT_MS) > 0;
+#endif
+}
 
 // ============================================================================
 // SocketInputStream - matches Java DataInputStream exactly
@@ -59,7 +85,10 @@ int SocketInputStream::read()
 	// - does NOT throw on EOF (DataInputStream.readFully does)
 	// - throws SocketTimeoutException on timeout (which should be caught and handled gracefully)
 	byte_t b;
-	// Read single byte directly
+	// Wait for readability first; see waitSocketReadable.
+	if (!waitSocketReadable(socket))
+		throw std::runtime_error("Socket timeout");
+
 #ifdef _WIN32
 	int result = recv(socket, reinterpret_cast<char*>(&b), 1, 0);
 	if (result == SOCKET_ERROR)
@@ -118,6 +147,10 @@ void SocketInputStream::readFully(byte_t* buf, size_t len)
 	size_t totalRead = 0;
 	while (totalRead < len)
 	{
+		// Wait for readability first; see waitSocketReadable.
+		if (!waitSocketReadable(socket))
+			throw std::runtime_error("Socket timeout");
+
 #ifdef _WIN32
 		int bytesRead = recv(socket, reinterpret_cast<char*>(buf + totalRead), static_cast<int>(len - totalRead), 0);
 		if (bytesRead == SOCKET_ERROR)

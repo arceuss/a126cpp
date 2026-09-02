@@ -24,4 +24,5 @@ protected:
 public:
 	bool clicked(Minecraft &minecraft, int_t xm, int_t xy) override;
 	void released(int_t mx, int_t my) override;
+	bool stepValue(Minecraft &minecraft, int_t direction) override;
 };

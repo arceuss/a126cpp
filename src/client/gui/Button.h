@@ -43,4 +43,10 @@ public:
 	virtual bool clicked(Minecraft &minecraft, int_t mx, int_t my);
 
 	virtual bool isSmallButton() const { return false; }
+
+	// Adjusts a value control by one step. Legacy Console Edition drives its
+	// sliders as discrete min..max steps on the focused control rather than by
+	// dragging, which is what a stick can actually do precisely. Returns false
+	// for controls that hold no adjustable value.
+	virtual bool stepValue(Minecraft &minecraft, int_t direction);
 };

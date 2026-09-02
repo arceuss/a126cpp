@@ -177,6 +177,13 @@ static void releaseAllInjectedControls()
 {
     releaseInjectedGameplayControls();
     injectMenuClick(false);
+
+    /*
+     * Hand the pointer back to the real mouse. Without this, a screen opened
+     * while no pad is attached would leave Mouse::getX/getY reporting the
+     * frozen synthetic position, which breaks button hover and sliders.
+     */
+    Mouse::detail::setSyntheticPointerActive(false);
 }
 
 static bool openControllerIndex(int index)
@@ -288,10 +295,15 @@ static void pollMenu(double seconds)
         SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY),
         x, y);
 
-    if(buttonDown(SDL_CONTROLLER_BUTTON_DPAD_LEFT))
-        x = -1.0f;
-    else if(buttonDown(SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
-        x = 1.0f;
+    /*
+     * D-pad left/right adjusts the hovered value control instead of nudging
+     * the pointer, mirroring how Legacy Console Edition steps a focused
+     * slider. The stick still moves the pointer, so nothing else is lost.
+     */
+    if(buttonPressed(SDL_CONTROLLER_BUTTON_DPAD_LEFT))
+        Keyboard::detail::pulseSyntheticKey(Keyboard::KEY_LEFT);
+    else if(buttonPressed(SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
+        Keyboard::detail::pulseSyntheticKey(Keyboard::KEY_RIGHT);
 
     if(buttonDown(SDL_CONTROLLER_BUTTON_DPAD_UP))
         y = -1.0f;
@@ -502,17 +514,18 @@ void setMenuMode(bool enabled)
     pointerRemainderX = 0.0;
     pointerRemainderY = 0.0;
 
-    if(menuMode)
+    /*
+     * Only take over the pointer when a pad is actually driving. A desktop
+     * player with no controller must keep the real mouse.
+     */
+    const bool pointerDriven = menuMode && controller != nullptr;
+    if(pointerDriven)
     {
         Mouse::detail::setSyntheticPointerPosition(
             std::max(0, Display::getWidth() / 2),
             std::max(0, Display::getHeight() / 2));
-        Mouse::detail::setSyntheticPointerActive(true);
     }
-    else
-    {
-        Mouse::detail::setSyntheticPointerActive(false);
-    }
+    Mouse::detail::setSyntheticPointerActive(pointerDriven);
 
     snapshotButtons();
 }

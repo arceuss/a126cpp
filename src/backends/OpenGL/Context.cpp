@@ -132,6 +132,24 @@ void initialize(const renderbackend::Configuration &backend)
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
 	}
 
+	// Pin the framebuffer format instead of taking whatever the driver
+	// defaults to, so every platform renders into a comparable target. These
+	// are the values a desktop NVIDIA driver picks on its own, measured as
+	// "rgba=8/8/8/0 depth=24 stencil=0". Switch EGL otherwise hands out a
+	// 16-bit depth buffer, which z-fights visibly on Alpha's cloud plane.
+	//
+	// Alpha and stencil are requested as 0 because the game reads neither.
+	// Switch still reports rgba=8/8/8/8: its native window surface is
+	// RGBA8888, so EGL has no alpha-less config to offer and grants the
+	// channel regardless. Depth and stencil do match desktop.
+	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
+	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+	SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
+	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
+	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+
 	// SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
 
 #ifdef MC_DEBUG_GL

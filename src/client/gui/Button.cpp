@@ -69,3 +69,10 @@ bool Button::clicked(Minecraft &minecraft, int_t mx, int_t my)
 {
 	return active && mx >= x && my >= y && mx < x + w && my < y + h;
 }
+
+bool Button::stepValue(Minecraft &minecraft, int_t direction)
+{
+	(void)minecraft;
+	(void)direction;
+	return false;
+}

@@ -3,11 +3,32 @@
 #include <iostream>
 #include <stdexcept>
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <cstring>
 
 #include "lwjgl/GLContext.h"
 
 Tesselator Tesselator::instance(MAX_FLOATS);
+
+// Java packs each component as (byte)(int)(value * 127.0F): truncate toward
+// zero, then keep the signed byte's two's-complement bits. Scaling X by 128
+// instead made a +1.0 normal pack as 0x80, which GL_BYTE reads back as -128,
+// flipping the lighting on every +X face.
+//
+// No range clamp: every caller passes an axis-aligned unit vector or a
+// normalize()d polygon normal, so the input is already within [-1,1], and
+// clamping would silently disagree with Java for anything outside it. The
+// NaN guard is not defensive padding, it matches Java, where (int)NaN is 0
+// while the same cast is undefined in C++.
+static std::uint8_t packNormalComponent(float value)
+{
+	if (!std::isfinite(value))
+		return 0;
+
+	const int packed = static_cast<int>(value * 127.0f);
+	return static_cast<std::uint8_t>(static_cast<std::int8_t>(packed));
+}
 
 Tesselator::Tesselator(int_t size)
 {
@@ -199,6 +220,10 @@ void Tesselator::vertex(double x, double y, double z)
 				std::memcpy(buffer_p + 3 * 4, from_p + 3 * 4, 2 * 4);
 			if (hasColor)
 				std::memcpy(buffer_p + 5 * 4, from_p + 5 * 4, 4);
+			// The expanded vertices need the normal too, or they keep whatever
+			// was left in the buffer from an earlier primitive.
+			if (hasNormal)
+				std::memcpy(buffer_p + 6 * 4, from_p + 6 * 4, 4);
 			std::memcpy(buffer_p + 0 * 4, from_p + 0 * 4, 3 * 4);
 
 			vertices++;
@@ -216,7 +241,7 @@ void Tesselator::vertex(double x, double y, double z)
 	if (hasColor)
 		std::memcpy(buffer_p + 5 * 4, &col, 1 * 4);
 	if (hasNormal)
-		std::memcpy(buffer_p + 6 * 4, &normalValue, 1 * 4);
+		std::memcpy(buffer_p + 6 * 4, normalValue.data(), normalValue.size());
 
 	float fx = static_cast<float>(x + xo);
 	float fy = static_cast<float>(y + yo);
@@ -263,10 +288,10 @@ void Tesselator::normal(float x, float y, float z)
 		std::cout << "But...\n";
 
 	hasNormal = true;
-	uint_t bx = static_cast<unsigned char>(x * 128.0f);
-	uint_t by = static_cast<unsigned char>(y * 127.0f);
-	uint_t bz = static_cast<unsigned char>(z * 127.0f);
-	normalValue = (bx << 0) | (by << 8) | (bz << 16);
+	normalValue[0] = packNormalComponent(x);
+	normalValue[1] = packNormalComponent(y);
+	normalValue[2] = packNormalComponent(z);
+	normalValue[3] = 0;
 }
 
 void Tesselator::offset(double x, double y, double z)
