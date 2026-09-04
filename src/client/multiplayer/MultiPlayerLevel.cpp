@@ -418,33 +418,6 @@ bool MultiPlayerLevel::doSetTileAndData(int_t x, int_t y, int_t z, int_t tile, i
 		// Alpha 1.2.6: Mark tiles dirty for this block
 		setTilesDirty(x, y, z, x, y, z);
 		
-		// Alpha 1.2.6: Update lighting for neighboring steps and farmland
-		// These blocks check their neighbors' stored lighting values, so we need to
-		// ensure those stored values are updated when neighbors change
-		int_t neighbors[6][3] = {
-			{x - 1, y, z}, {x + 1, y, z},
-			{x, y - 1, z}, {x, y + 1, z},
-			{x, y, z - 1}, {x, y, z + 1}
-		};
-		
-		for (int i = 0; i < 6; i++)
-		{
-			int_t nx = neighbors[i][0];
-			int_t ny = neighbors[i][1];
-			int_t nz = neighbors[i][2];
-			int_t neighborTile = getTile(nx, ny, nz);
-			
-			// If neighbor is a step or farmland, update its lighting to recalculate stored values
-			if (neighborTile == Tile::stoneSlabHalf.id || neighborTile == Tile::farmland.id)
-			{
-				// Trigger lighting update to recalculate and store lighting values
-				updateLight(LightLayer::Sky, nx, ny, nz, nx, ny, nz);
-				updateLight(LightLayer::Block, nx, ny, nz, nx, ny, nz);
-				// Mark dirty for rendering
-				setTilesDirty(nx, ny, nz, nx, ny, nz);
-			}
-		}
-		
 		return true;
 	}
 	return false;
@@ -531,29 +504,6 @@ void MultiPlayerLevel::setChunkData(int_t x, int_t y, int_t z, int_t xSize, int_
 			// Alpha 1.2.6: func_701_b updates render bounds
 			setTilesDirty(var15 * 16 + var16, var13, var18 * 16 + var19,
 			              var15 * 16 + var17, var14, var18 * 16 + var20);
-			
-			// After loading chunk data, update lighting for steps/farmland in this region
-			// These blocks check their neighbors' stored lighting values, so we need to
-			// ensure those stored values are recalculated after chunks load
-			for (int_t lx = var16; lx < var17; ++lx)
-			{
-				for (int_t ly = var13; ly < var14; ++ly)
-				{
-					for (int_t lz = var19; lz < var20; ++lz)
-					{
-						int_t wx = var15 * 16 + lx;
-						int_t wz = var18 * 16 + lz;
-						int_t tile = chunk->getTile(lx, ly, lz);
-						
-						// If this block is a step or farmland, update its lighting
-						if (tile == Tile::stoneSlabHalf.id || tile == Tile::farmland.id)
-						{
-							updateLight(LightLayer::Sky, wx, ly, wz, wx, ly, wz);
-							updateLight(LightLayer::Block, wx, ly, wz, wx, ly, wz);
-						}
-					}
-				}
-			}
 		}
 	}
 }
