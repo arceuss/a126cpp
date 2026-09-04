@@ -173,6 +173,60 @@ Sink *nullSink()
 	return &theNullSink;
 }
 
+// The null sink above never confirms residency, so the core keeps and
+// re-decodes every list's CPU vertices on each draw: a path no production
+// backend takes. The stress harness needs the production path minus the GPU,
+// which is this sink: it claims each list resident on its first draw and lets
+// the core release the vertices, exactly as a packet backend does.
+class ResidentNullSink final : public NullSink
+{
+public:
+	bool wantsLastGeometrySnapshot() const override { return false; }
+
+	bool isCanonicalGeometryResident(std::uint64_t residencyId) const override
+	{
+		return resident.find(residencyId) != resident.end();
+	}
+
+	void resolvedDraw(const ResolvedDraw &command) override
+	{
+		if (command.geometryResidencyId == 0 || command.geometry == nullptr)
+			return;
+		if (resident.emplace(command.geometryResidencyId,
+			static_cast<std::uint64_t>(command.geometry->vertexCount) * sizeof(Vertex)).second)
+			residentBytes += static_cast<std::uint64_t>(command.geometry->vertexCount) * sizeof(Vertex);
+	}
+
+	void releaseCanonicalGeometry(std::uint64_t residencyId) override
+	{
+		auto it = resident.find(residencyId);
+		if (it == resident.end())
+			return;
+		residentBytes -= it->second;
+		resident.erase(it);
+	}
+
+	bool queryResidentStats(ResidentStats &out) const override
+	{
+		out.logicalBytes = residentBytes;
+		out.pageCapacityBytes = residentBytes;
+		out.entries = resident.size();
+		out.pages = 0;
+		return true;
+	}
+
+private:
+	std::unordered_map<std::uint64_t, std::uint64_t> resident;
+	std::uint64_t residentBytes = 0;
+};
+
+static ResidentNullSink theResidentNullSink;
+
+Sink *residentNullSink()
+{
+	return &theResidentNullSink;
+}
+
 static Context theContext;
 
 Context &context()

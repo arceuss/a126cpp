@@ -42,10 +42,14 @@ enum class DrawPhase : std::size_t
 	CoreTexture,
 	// Backend: building or locating the vertex data for this draw.
 	Geometry,
-	// Backend: the subset of Geometry that converts and uploads vertex data
-	// (transient draws and resident misses); Geometry minus this is the
-	// resident-hit lookup cost.
+	// Backend: the subset of Geometry that converts and uploads transient
+	// vertex data (residency id 0); Geometry minus the two upload phases is
+	// the resident-hit lookup cost.
 	GeometryUpload,
+	// Backend: the subset of Geometry that converts and uploads a resident
+	// miss into a shared page. Split from GeometryUpload because on the
+	// Switch the two have very different costs.
+	GeometryResidentUpload,
 	// Backend: packing resolved state into the backend's constant layout.
 	StatePack,
 	// Backend: getting that constant data to the GPU.
@@ -88,6 +92,7 @@ inline const char *phaseName(DrawPhase phase)
 	case DrawPhase::CoreResolve: return "core_resolve";
 	case DrawPhase::Geometry: return "geometry";
 	case DrawPhase::GeometryUpload: return "geometry_upload";
+	case DrawPhase::GeometryResidentUpload: return "geometry_resident_upload";
 	case DrawPhase::CoreLighting: return "core_lighting";
 	case DrawPhase::CoreTexture: return "core_texture";
 	case DrawPhase::StatePack: return "state_pack";

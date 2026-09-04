@@ -1,5 +1,6 @@
 #include "world/level/chunk/ChunkCache.h"
 
+#include "tools/MemoryProbe.h"
 #include "world/level/Level.h"
 
 #include "world/level/chunk/EmptyLevelChunk.h"
@@ -54,6 +55,7 @@ std::shared_ptr<LevelChunk> ChunkCache::getChunk(int_t x, int_t z)
 		if (chunks[ri] != nullptr)
 		{
 			chunks[ri]->unload();
+			A126_PROBE_SCOPE(memoryprobe::Bucket::ChunkSave);
 			save(*chunks[ri]);
 			saveEntities(*chunks[ri]);
 		}
@@ -62,9 +64,14 @@ std::shared_ptr<LevelChunk> ChunkCache::getChunk(int_t x, int_t z)
 		if (chunk == nullptr)
 		{
 			if (source == nullptr)
+			{
 				chunk = emptyChunk;
+			}
 			else
+			{
+				A126_PROBE_SCOPE(memoryprobe::Bucket::ChunkGenerate);
 				chunk = source->getChunk(x, z);
+			}
 		}
 
 		chunks[ri] = chunk;
@@ -98,6 +105,7 @@ std::shared_ptr<LevelChunk> ChunkCache::load(int_t x, int_t z)
 	if (storage == nullptr)
 		return nullptr;
 
+	A126_PROBE_SCOPE(memoryprobe::Bucket::ChunkLoad);
 	std::shared_ptr<LevelChunk> chunk = storage->load(level, x, z);
 	if (chunk != nullptr)
 		chunk->lastSaveTime = level.time;
@@ -125,6 +133,7 @@ void ChunkCache::postProcess(ChunkSource &parent, int_t x, int_t z)
 		chunk->terrainPopulated = true;
 		if (source != nullptr)
 		{
+			A126_PROBE_SCOPE(memoryprobe::Bucket::ChunkPopulate);
 			source->postProcess(parent, x, z);
 			chunk->markUnsaved();
 		}
@@ -155,7 +164,10 @@ bool ChunkCache::save(bool force, std::shared_ptr<ProgressListener> progressList
 				saveEntities(*c);
 			if (c->shouldSave(force))
 			{
-				save(*c);
+				{
+					A126_PROBE_SCOPE(memoryprobe::Bucket::ChunkSave);
+					save(*c);
+				}
 				c->unsaved = false;
 
 				if (++throttle == 2 && !force)

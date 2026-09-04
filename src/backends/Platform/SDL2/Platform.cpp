@@ -15,6 +15,10 @@
 #define IDI_ICON1 1
 #endif
 
+#ifdef __SWITCH__
+#include <switch.h>
+#endif
+
 namespace platform
 {
 
@@ -22,6 +26,15 @@ static SDL_Window *windowHandle = nullptr;
 static WindowGraphicsAPI windowGraphicsAPI = WindowGraphicsAPI::OpenGL;
 static bool initialized = false;
 static bool closeRequested = false;
+
+#ifdef __SWITCH__
+static void panelSize(int &width, int &height)
+{
+	const bool docked = appletGetOperationMode() == AppletOperationMode_Console;
+	width = docked ? 1920 : 1280;
+	height = docked ? 1080 : 720;
+}
+#endif
 
 #ifdef _WIN32
 static void setWindowIcon(SDL_Window *window)
@@ -158,8 +171,18 @@ void createWindow(WindowGraphicsAPI graphicsAPI)
 		case WindowGraphicsAPI::Direct3D:
 			break;
 	}
+	int width = 854;
+	int height = 480;
+#ifdef __SWITCH__
+	// No window system: the SDL port sizes the framebuffer to the window and
+	// the compositor scales it to the panel, so the window is the panel.
+	// 1280x720 handheld, 1920x1080 docked; SDL's own dock/undock handling
+	// resizes between the same two sizes and the game picks that up as an
+	// ordinary window resize.
+	panelSize(width, height);
+#endif
 	windowHandle = SDL_CreateWindow("Minecraft Alpha v1.2.6", SDL_WINDOWPOS_CENTERED,
-		SDL_WINDOWPOS_CENTERED, 854, 480,
+		SDL_WINDOWPOS_CENTERED, width, height,
 		SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | graphicsFlag);
 	if (windowHandle == nullptr)
 		throw SDLException();
@@ -189,7 +212,13 @@ void hideWindow()
 
 void setWindowSize(int width, int height)
 {
+#ifdef __SWITCH__
+	// The window is the panel; a requested size means nothing here.
+	(void)width;
+	(void)height;
+#else
 	SDL_SetWindowSize(windowHandle, width, height);
+#endif
 }
 
 void setFullscreen(bool fullscreen)

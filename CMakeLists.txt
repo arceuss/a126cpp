@@ -1455,6 +1455,8 @@ endif()
 add_executable(Alpha126Cpp
 	"src/backends/Backend.cpp"
 	"src/pc/Main.cpp"
+	"src/tools/BenchUtil.cpp"
+	"src/tools/BenchUtil.h"
 	"src/tools/SceneCapture.cpp"
 	"src/tools/SceneCapture.h"
 	"src/tools/SignBench.cpp"
@@ -1530,6 +1532,44 @@ set_target_properties(a126cpp-headless-tests PROPERTIES
 	CXX_EXTENSIONS NO
 )
 
+# Stress and profiling harness. Links the same production code and backends as
+# the client, drives it through scripted worst-case workloads in a hidden
+# window, and logs per-phase timings and memory. Built with
+# A126_ENABLE_MEMORY_PROBE=ON it also writes the probe's bucket reports.
+add_executable(a126cpp-stress
+	"src/backends/Backend.cpp"
+	"src/tools/BenchUtil.cpp"
+	"src/tools/BenchUtil.h"
+	"src/tools/stress/Scenarios.cpp"
+	"src/tools/stress/StressHarness.cpp"
+	"src/tools/stress/StressHarness.h"
+	"src/tools/stress/StressMain.cpp"
+)
+target_compile_definitions(a126cpp-stress PRIVATE
+	A126_HAS_BACKEND_NATIVEGL=1
+	A126_HAS_BACKEND_OPENGL21=1
+	A126_HAS_BACKEND_OPENGL33=1
+	A126_DEFAULT_RENDER_BACKEND="${A126_DEFAULT_RENDER_BACKEND}"
+)
+target_link_libraries(a126cpp-stress PRIVATE
+	Alpha126CppCore
+	a126cpp-render-backend-nativegl
+	a126cpp-render-backend-opengl33
+)
+if(A126_ENABLE_VULKAN_BACKEND)
+	target_compile_definitions(a126cpp-stress PRIVATE A126_HAS_BACKEND_VULKAN=1)
+	target_link_libraries(a126cpp-stress PRIVATE a126cpp-render-backend-vulkan)
+endif()
+if(A126_ENABLE_D3D12_BACKEND)
+	target_compile_definitions(a126cpp-stress PRIVATE A126_HAS_BACKEND_D3D12=1)
+	target_link_libraries(a126cpp-stress PRIVATE a126cpp-render-backend-d3d12)
+endif()
+set_target_properties(a126cpp-stress PROPERTIES
+	CXX_STANDARD 17
+	CXX_STANDARD_REQUIRED YES
+	CXX_EXTENSIONS NO
+)
+
 # GL inventory checker. Standalone on purpose: it only reads source text, so it
 # does not link the game and stays fast enough to run on every build.
 add_executable(a126cpp-gl-inventory
@@ -1542,6 +1582,47 @@ set_target_properties(a126cpp-gl-inventory PROPERTIES
 	CXX_STANDARD 17
 	CXX_STANDARD_REQUIRED YES
 	CXX_EXTENSIONS NO
+)
+endif()
+
+if(NINTENDO_SWITCH)
+# Stress harness on the console: same sources as the desktop harness, Switch
+# backends, probe-driven. hbmenu passes no argv, so the binary reads
+# sdmc:/switch/a126cpp-args.txt (see StressMain.cpp). Assets ride in romfs
+# exactly like the client.
+add_executable(a126cpp-stress-switch
+	"src/backends/Backend.cpp"
+	"src/tools/BenchUtil.cpp"
+	"src/tools/BenchUtil.h"
+	"src/tools/stress/Scenarios.cpp"
+	"src/tools/stress/StressHarness.cpp"
+	"src/tools/stress/StressHarness.h"
+	"src/tools/stress/StressMain.cpp"
+)
+target_compile_definitions(a126cpp-stress-switch PRIVATE
+	A126_HAS_BACKEND_NATIVEGL=1
+	A126_HAS_BACKEND_OPENGL21=1
+	A126_HAS_BACKEND_OPENGL33=1
+	A126_DEFAULT_RENDER_BACKEND="${A126_DEFAULT_RENDER_BACKEND}"
+)
+target_link_libraries(a126cpp-stress-switch PRIVATE
+	Alpha126CppCore
+	a126cpp-render-backend-nativegl
+	a126cpp-render-backend-opengl33
+)
+set_target_properties(a126cpp-stress-switch PROPERTIES
+	CXX_STANDARD 17
+	CXX_STANDARD_REQUIRED YES
+	CXX_EXTENSIONS NO
+)
+nx_generate_nacp(a126cpp-stress-switch.nacp
+	NAME "a126cpp stress"
+	AUTHOR "a126cpp"
+	VERSION "${PROJECT_VERSION}"
+)
+nx_create_nro(a126cpp-stress-switch
+	NACP "${CMAKE_CURRENT_BINARY_DIR}/a126cpp-stress-switch.nacp"
+	ROMFS "${CMAKE_SOURCE_DIR}/resource"
 )
 endif()
 
@@ -1616,7 +1697,7 @@ set_target_properties(Alpha126Cpp PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
 )
 if(NOT CMAKE_CROSSCOMPILING)
-	set_target_properties(a126cpp-headless-tests a126cpp-gl-inventory PROPERTIES
+	set_target_properties(a126cpp-headless-tests a126cpp-gl-inventory a126cpp-stress PROPERTIES
 		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
 	)
 endif()
@@ -1633,6 +1714,12 @@ if(WIN32 AND TARGET OpenAL32)
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
 			"$<TARGET_FILE:OpenAL32>"
 			"$<TARGET_FILE_DIR:a126cpp-headless-tests>/OpenAL32.dll"
+		COMMENT "Copying OpenAL32.dll to output directory"
+	)
+	add_custom_command(TARGET a126cpp-stress POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"$<TARGET_FILE:OpenAL32>"
+			"$<TARGET_FILE_DIR:a126cpp-stress>/OpenAL32.dll"
 		COMMENT "Copying OpenAL32.dll to output directory"
 	)
 	if(A126_ENABLE_GL_GPU_TESTS)

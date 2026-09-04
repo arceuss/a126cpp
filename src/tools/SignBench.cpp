@@ -1,5 +1,6 @@
 #include "tools/SignBench.h"
 
+#include "tools/BenchUtil.h"
 #include "tools/MemoryProbe.h"
 
 #include <algorithm>
@@ -9,21 +10,8 @@
 #include <memory>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 #include <vector>
-
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#include <psapi.h>
-#pragma comment(lib, "psapi.lib")
-#endif
 
 #include "client/Minecraft.h"
 #include "client/Timer.h"
@@ -148,79 +136,6 @@ int_t buildSignWall(Level &level, int_t targetSigns, int_t baseX, int_t baseY, i
 	return placed;
 }
 
-double percentile(std::vector<double> sorted, double fraction)
-{
-	if (sorted.empty())
-		return 0.0;
-	size_t index = static_cast<size_t>(fraction * (sorted.size() - 1));
-	return sorted[index];
-}
-
-struct ProcessMemory
-{
-	std::uint64_t privateBytes = 0;
-	std::uint64_t workingSetBytes = 0;
-};
-
-ProcessMemory processMemory()
-{
-	ProcessMemory result;
-#if defined(_WIN32)
-	PROCESS_MEMORY_COUNTERS_EX counters = {};
-	counters.cb = sizeof(counters);
-	if (GetProcessMemoryInfo(GetCurrentProcess(),
-		reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&counters), sizeof(counters)))
-	{
-		result.privateBytes = static_cast<std::uint64_t>(counters.PrivateUsage);
-		result.workingSetBytes = static_cast<std::uint64_t>(counters.WorkingSetSize);
-	}
-#endif
-	return result;
-}
-
-// Buckets every busy heap block by exact size. Diffing two samples names the
-// exact allocation size that a leak is made of, which locates its owner.
-std::string heapHistogram(std::size_t topCount)
-{
-#if defined(_WIN32)
-	std::unordered_map<std::size_t, std::pair<std::uint64_t, std::uint64_t>> buckets;
-	HANDLE heaps[64] = {};
-	const DWORD heapCount = GetProcessHeaps(64, heaps);
-	for (DWORD i = 0; i < heapCount && i < 64; i++)
-	{
-		PROCESS_HEAP_ENTRY entry = {};
-		HeapLock(heaps[i]);
-		while (HeapWalk(heaps[i], &entry))
-		{
-			if ((entry.wFlags & PROCESS_HEAP_ENTRY_BUSY) == 0)
-				continue;
-			auto &bucket = buckets[entry.cbData];
-			bucket.first++;
-			bucket.second += entry.cbData;
-		}
-		HeapUnlock(heaps[i]);
-	}
-	std::vector<std::pair<std::size_t, std::pair<std::uint64_t, std::uint64_t>>> rows(
-		buckets.begin(), buckets.end());
-	std::sort(rows.begin(), rows.end(), [](const auto &a, const auto &b)
-	{
-		return a.second.second > b.second.second;
-	});
-	if (rows.size() > topCount)
-		rows.resize(topCount);
-	std::string result;
-	for (const auto &row : rows)
-	{
-		result += " size=" + std::to_string(row.first) +
-			" count=" + std::to_string(row.second.first) +
-			" bytes=" + std::to_string(row.second.second);
-	}
-	return result;
-#else
-	(void)topCount;
-	return std::string();
-#endif
-}
 
 struct TravelPosition
 {
@@ -481,8 +396,8 @@ try
 	emit("chunk_updates " + std::to_string(measuredChunkUpdates));
 	emit("mean_ms " + std::to_string(mean));
 	emit("min_ms " + std::to_string(sorted.empty() ? 0.0 : sorted.front()));
-	emit("p50_ms " + std::to_string(signbench::percentile(sorted, 0.5)));
-	emit("p95_ms " + std::to_string(signbench::percentile(sorted, 0.95)));
+	emit("p50_ms " + std::to_string(benchutil::percentile(sorted, 0.5)));
+	emit("p95_ms " + std::to_string(benchutil::percentile(sorted, 0.95)));
 	emit("game_ticks " + std::to_string(gameTicks));
 	emit("ticks_per_second " + std::to_string(loopSeconds > 0.0 ? gameTicks / loopSeconds : 0.0));
 	emit("max_ms " + std::to_string(sorted.empty() ? 0.0 : sorted.back()));
@@ -495,37 +410,7 @@ try
 	// Phase attribution, present only when A126_PHASE_PROFILE is set. The
 	// harness picks these up from the metric block automatically, so a run
 	// that shows a backend is slow also shows which phase owns the cost.
-	if (legacygl::phaseProfileEnabled)
-	{
-		std::uint64_t backendCycles = 0;
-		for (std::size_t i = 0; i < static_cast<std::size_t>(legacygl::DrawPhase::Count); i++)
-		{
-			const legacygl::DrawPhase phase = static_cast<legacygl::DrawPhase>(i);
-			const legacygl::PhaseAccumulator &accumulator = legacygl::phaseAccumulators[i];
-			// CoreMatrices and CorePrimitives are nested inside CoreResolve, so
-			// they are core detail rather than backend cost; GeometryUpload is
-			// nested inside Geometry for the same reason.
-			if (phase != legacygl::DrawPhase::CoreResolve &&
-				phase != legacygl::DrawPhase::CoreMatrices &&
-				phase != legacygl::DrawPhase::CoreLighting &&
-				phase != legacygl::DrawPhase::CoreTexture &&
-				phase != legacygl::DrawPhase::CorePrimitives &&
-				phase != legacygl::DrawPhase::GeometryUpload)
-				backendCycles += accumulator.cycles;
-			emit(std::string("phase_") + legacygl::phaseName(phase) + "_cycles " +
-				std::to_string(accumulator.cycles));
-			emit(std::string("phase_") + legacygl::phaseName(phase) + "_calls " +
-				std::to_string(accumulator.calls));
-		}
-		// CoreResolve brackets the sink call, so the core's own share is the
-		// difference. Reported explicitly to keep the split unambiguous.
-		const std::uint64_t totalCycles =
-			legacygl::phaseAccumulators[static_cast<std::size_t>(
-				legacygl::DrawPhase::CoreResolve)].cycles;
-		emit("phase_core_only_cycles " + std::to_string(
-			totalCycles > backendCycles ? totalCycles - backendCycles : 0));
-		emit("phase_backend_cycles " + std::to_string(backendCycles));
-	}
+	benchutil::emitPhaseProfile(emit);
 
 	// A126_SIGN_BENCH_CAPTURE=<dir> writes the final frame twice: once through
 	// the batched region lists and once through Alpha's per-sign chain, so the
@@ -665,7 +550,7 @@ try
 	int_t baselineChunkUpdates = 0;
 	renderFrames(origin, settleFrames, nullptr, baselineChunkUpdates);
 	glFinish();
-	const signbench::ProcessMemory baseline = signbench::processMemory();
+	const benchutil::ProcessMemory baseline = benchutil::processMemory();
 
 	std::unique_ptr<File> logFile(File::open(u"chunk-travel-bench.log"));
 	std::unique_ptr<std::ostream> out(logFile->toStreamOut());
@@ -700,7 +585,7 @@ try
 		renderFrames(origin, settleFrames, &timings, chunkUpdates);
 		glFinish();
 
-		const signbench::ProcessMemory memory = signbench::processMemory();
+		const benchutil::ProcessMemory memory = benchutil::processMemory();
 		std::vector<double> sorted = timings;
 		std::sort(sorted.begin(), sorted.end());
 		double total = 0.0;
@@ -715,7 +600,7 @@ try
 		emit(prefix + "chunk_updates " + std::to_string(chunkUpdates));
 		emit(prefix + "mean_ms " + std::to_string(mean));
 		emit(prefix + "p95_ms " +
-			std::to_string(signbench::percentile(sorted, 0.95)));
+			std::to_string(benchutil::percentile(sorted, 0.95)));
 		emit(prefix + "private_bytes " + std::to_string(memory.privateBytes));
 		emit(prefix + "private_growth_bytes " + std::to_string(privateGrowth));
 		emit(prefix + "working_set_bytes " + std::to_string(memory.workingSetBytes));
@@ -831,7 +716,7 @@ try
 	int_t settleChunkUpdates = 0;
 	renderFrames(signbench::TravelPosition{}, 120, settleChunkUpdates);
 	glFinish();
-	const signbench::ProcessMemory baseline = signbench::processMemory();
+	const benchutil::ProcessMemory baseline = benchutil::processMemory();
 
 	std::unique_ptr<File> logFile(File::open(u"chunk-march-bench.log"));
 	std::unique_ptr<std::ostream> out(logFile->toStreamOut());
@@ -862,7 +747,7 @@ try
 		if (step % sampleEveryChunks == 0 || step == chunks)
 		{
 			glFinish();
-			const signbench::ProcessMemory memory = signbench::processMemory();
+			const benchutil::ProcessMemory memory = benchutil::processMemory();
 			const std::int64_t privateGrowth =
 				static_cast<std::int64_t>(memory.privateBytes) -
 				static_cast<std::int64_t>(baseline.privateBytes);
@@ -877,7 +762,7 @@ try
 			emit(prefix + "light_updates_capacity " +
 				std::to_string(level->lightUpdates.capacity()));
 			emit(prefix + "heap_top" +
-				signbench::heapHistogram(12));
+				benchutil::heapHistogram(12));
 			emit(prefix + "live_level_chunks " +
 				std::to_string(LevelChunk::liveInstances));
 			emit(prefix + "scheduled_ticks " +

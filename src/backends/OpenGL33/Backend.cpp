@@ -957,8 +957,33 @@ public:
 		}
 
 		CoreResidentPage &page = residentPages[pageIndex];
-		glBindBuffer(GL_ARRAY_BUFFER, page.buffer);
-		glBufferSubData(GL_ARRAY_BUFFER, offset, size, vertices.bytes.data());
+		// Staging takes at most half the region so a rebuild burst cannot push
+		// the frame's own transient draws into the drain path.
+		GLsizeiptr staged = 0;
+		if (streamMapped != nullptr && streamCursor + size <= CORE_STREAM_REGION_BYTES / 2 &&
+			tryReserveStreamBytes(size, 4, staged))
+		{
+			// Stage through the fence-ringed persistent stream and let the GPU
+			// copy into the page. glBufferSubData into a page that in-flight
+			// draws are reading made nouveau (Switch) wait for those draws:
+			// measured ~11 ms per rebuilt section, ~40 ms of an 83 ms frame at
+			// idle. The copy is ordered in the command stream after the reads
+			// of whatever previously occupied the range, so freed ranges can be
+			// reused without a fence. A rebuild burst that outgrows the region
+			// (world load) takes the direct path rather than draining the GPU.
+			std::memcpy(streamMapped + staged, vertices.bytes.data(),
+				static_cast<std::size_t>(size));
+			glBindBuffer(GL_COPY_READ_BUFFER, vertexBuffer);
+			glBindBuffer(GL_COPY_WRITE_BUFFER, page.buffer);
+			glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, staged, offset, size);
+			residentStagedUploads++;
+		}
+		else
+		{
+			glBindBuffer(GL_ARRAY_BUFFER, page.buffer);
+			glBufferSubData(GL_ARRAY_BUFFER, offset, size, vertices.bytes.data());
+			residentDirectUploads++;
+		}
 
 		CoreResidentGeometryEntry entry;
 		entry.page = pageIndex;
@@ -1018,11 +1043,14 @@ public:
 			static_cast<unsigned long long>(uniformOverflows),
 			static_cast<unsigned long long>(uniformFenceWaits));
 		std::fprintf(stdout,
-			"gl33: vertex stream=%s region=%lld peak_bytes=%lld overflows=%llu\n",
+			"gl33: vertex stream=%s region=%lld peak_bytes=%lld overflows=%llu"
+			" resident staged=%llu direct=%llu\n",
 			streamMapped != nullptr ? "persistent" : "glBufferData",
 			static_cast<long long>(CORE_STREAM_REGION_BYTES),
 			static_cast<long long>(streamPeakBytes),
-			static_cast<unsigned long long>(streamOverflows));
+			static_cast<unsigned long long>(streamOverflows),
+			static_cast<unsigned long long>(residentStagedUploads),
+			static_cast<unsigned long long>(residentDirectUploads));
 		releaseAllCanonicalGeometry();
 		residentCacheHits = 0;
 		residentCacheMisses = 0;
@@ -1120,6 +1148,35 @@ public:
 		return offset;
 	}
 
+	// Reserves size bytes in the current persistent stream region, aligned to
+	// align, and returns the absolute byte offset within vertexBuffer. False
+	// when the region has no room left this frame.
+	bool tryReserveStreamBytes(GLsizeiptr size, GLsizeiptr align, GLsizeiptr &absolute)
+	{
+		const GLsizeiptr regionBase = static_cast<GLsizeiptr>(uniformRegion) *
+			CORE_STREAM_REGION_BYTES;
+		absolute = (regionBase + streamCursor + align - 1) / align * align;
+		if (absolute + size > regionBase + CORE_STREAM_REGION_BYTES)
+			return false;
+		streamCursor = absolute + size - regionBase;
+		return true;
+	}
+
+	// The transient-draw form: a frame that outgrows its region drains the
+	// GPU and reuses it. Counted so the shutdown line shows it rather than
+	// hiding it.
+	GLsizeiptr reserveStreamBytes(GLsizeiptr size, GLsizeiptr align)
+	{
+		GLsizeiptr absolute = 0;
+		if (tryReserveStreamBytes(size, align, absolute))
+			return absolute;
+		streamOverflows++;
+		glFinish();
+		streamCursor = 0;
+		tryReserveStreamBytes(size, align, absolute);
+		return absolute;
+	}
+
 	void writeUniformSlot(GLintptr offset, const CoreGPUState &state)
 	{
 		if (uniformMode == CoreUniformMode::Persistent)
@@ -1162,22 +1219,10 @@ public:
 			{
 				// First-vertex addressing needs the absolute offset to be a
 				// multiple of the stride, so align it as such within the region.
-				const GLsizeiptr regionBase = static_cast<GLsizeiptr>(uniformRegion) *
-					CORE_STREAM_REGION_BYTES;
-				GLsizeiptr absolute = regionBase + streamCursor;
-				absolute = (absolute + stride - 1) / stride * stride;
-				if (absolute + vertices.byteSize() > regionBase + CORE_STREAM_REGION_BYTES)
-				{
-					// A frame outgrew its region: drain, then reuse it. Counted so
-					// the shutdown line shows it rather than hiding it.
-					streamOverflows++;
-					glFinish();
-					absolute = (regionBase + stride - 1) / stride * stride;
-				}
+				const GLsizeiptr absolute = reserveStreamBytes(vertices.byteSize(), stride);
 				std::memcpy(streamMapped + absolute, vertices.bytes.data(),
 					static_cast<std::size_t>(vertices.byteSize()));
 				drawFirstVertex = static_cast<GLint>(absolute / stride);
-				streamCursor = absolute + vertices.byteSize() - regionBase;
 			}
 			else if (streamMapped != nullptr)
 			{
@@ -1228,7 +1273,7 @@ public:
 			}
 			else
 			{
-				legacygl::PhaseScope upload(legacygl::DrawPhase::GeometryUpload);
+				legacygl::PhaseScope upload(legacygl::DrawPhase::GeometryResidentUpload);
 				if (geometry.vertices.empty())
 				{
 					throw std::runtime_error(
@@ -1963,6 +2008,10 @@ private:
 	GLsizeiptr streamCursor = 0;
 	GLsizeiptr streamPeakBytes = 0;
 	std::uint64_t streamOverflows = 0;
+	// Resident misses uploaded through the stream (staged) versus straight
+	// into their page (direct); the difference is what the Switch stalls on.
+	std::uint64_t residentStagedUploads = 0;
+	std::uint64_t residentDirectUploads = 0;
 	// Mutable buffer for the rare transient draw larger than a ring region.
 	GLuint streamOverflowBuffer = 0;
 	bool pipelineStateValid = false;

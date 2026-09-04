@@ -47,7 +47,7 @@ bool WorldGenReed::generate(Level &level, Random &random, int_t x, int_t y, int_
 					if (py + h < Level::DEPTH && level.getTile(px, py + h, pz) == 0 &&
 					    (belowId == Tile::grass.id || belowId == Tile::dirt.id || belowId == reedId))
 					{
-						level.setTile(px, py + h, pz, reedId);  // setTile(x, y, z, tile)
+						level.setTileNoUpdate(px, py + h, pz, reedId);  // Alpha: setBlock, no notify (WorldGenReed.java:27)
 					}
 					else
 					{

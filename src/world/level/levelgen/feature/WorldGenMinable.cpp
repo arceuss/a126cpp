@@ -61,7 +61,7 @@ bool WorldGenMinable::generate(Level &level, Random &random, int_t x, int_t y, i
 					
 					if (distX * distX + distY * distY + distZ * distZ < 1.0 && canReplace)
 					{
-						level.setTile(dx, dy, dz, minableBlockId);
+						level.setTileNoUpdate(dx, dy, dz, minableBlockId);  // Alpha: setBlock, no notify (WorldGenMinable.java:40)
 					}
 				}
 			}

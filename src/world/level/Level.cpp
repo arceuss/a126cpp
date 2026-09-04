@@ -3,7 +3,10 @@
 #include "world/level/Level.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <iostream>
+#include <string>
+#include <unordered_map>
 
 #include "world/level/ChunkPos.h"
 #include "world/level/LightLayer.h"
@@ -470,10 +473,31 @@ bool Level::setDataNoUpdate(int_t x, int_t y, int_t z, int_t data)
 	return true;
 }
 
+#ifdef A126_ENABLE_MEMORY_PROBE
+// Block changes counted as old->new id pairs, so the report says whether a
+// random tick is converting grass, dropping gravel, or rewriting a block
+// with its own id (which Alpha never does).
+static const char *tileTransitionCounterName(int_t from, int_t to)
+{
+	static std::unordered_map<int, std::string> names;
+	const int key = ((from & 0xFF) << 8) | (to & 0xFF);
+	auto it = names.find(key);
+	if (it == names.end())
+		it = names.emplace(key, "chg_" + std::to_string(from & 0xFF) + "_" + std::to_string(to & 0xFF)).first;
+	return it->second.c_str();
+}
+#endif
+
 bool Level::setTile(int_t x, int_t y, int_t z, int_t tile)
 {
+#ifdef A126_ENABLE_MEMORY_PROBE
+	const int_t before = getTile(x, y, z);
+#endif
 	if (setTileNoUpdate(x, y, z, tile))
 	{
+#ifdef A126_ENABLE_MEMORY_PROBE
+		A126_PROBE_COUNT(tileTransitionCounterName(before, tile), 1);
+#endif
 		tileUpdated(x, y, z, tile);
 		return true;
 	}
@@ -482,8 +506,14 @@ bool Level::setTile(int_t x, int_t y, int_t z, int_t tile)
 
 bool Level::setTileAndData(int_t x, int_t y, int_t z, int_t tile, int_t data)
 {
+#ifdef A126_ENABLE_MEMORY_PROBE
+	const int_t before = getTile(x, y, z);
+#endif
 	if (setTileAndDataNoUpdate(x, y, z, tile, data))
 	{
+#ifdef A126_ENABLE_MEMORY_PROBE
+		A126_PROBE_COUNT(tileTransitionCounterName(before, tile), 1);
+#endif
 		tileUpdated(x, y, z, tile);
 		return true;
 	}
@@ -528,12 +558,31 @@ bool Level::mayPlace(int_t tileId, int_t x, int_t y, int_t z, bool flag)
 
 void Level::sendTileUpdated(int_t x, int_t y, int_t z)
 {
+	A126_PROBE_COUNT("dirty_src_block_change", 1);
+	A126_PROBE_DIRTY_SOURCE("dirty_sections_block_change");
 	for (auto &l : listeners)
 		l->tileChanged(x, y, z);
+	A126_PROBE_DIRTY_SOURCE("dirty_sections_other");
 }
+
+#ifdef A126_ENABLE_MEMORY_PROBE
+// Per-tile-id change counter names, so the report says which tiles the
+// random ticks are rewriting while the player stands still.
+static const char *tileChangeCounterName(int_t tile)
+{
+	static char names[256][12];
+	const int_t id = tile & 0xFF;
+	if (names[id][0] == '\0')
+		std::snprintf(names[id], sizeof(names[id]), "blk_%d", static_cast<int>(id));
+	return names[id];
+}
+#endif
 
 void Level::tileUpdated(int_t x, int_t y, int_t z, int_t tile)
 {
+#ifdef A126_ENABLE_MEMORY_PROBE
+	A126_PROBE_COUNT(tileChangeCounterName(tile), 1);
+#endif
 	sendTileUpdated(x, y, z);
 	updateNeighborsAt(x, y, z, tile);
 }
@@ -551,14 +600,20 @@ void Level::lightColumnChanged(int_t x, int_t z, int_t y0, int_t y1)
 
 void Level::setTileDirty(int_t x, int_t y, int_t z)
 {
+	A126_PROBE_COUNT("dirty_src_tile_dirty", 1);
+	A126_PROBE_DIRTY_SOURCE("dirty_sections_tile_dirty");
 	for (auto &l : listeners)
 		l->setTilesDirty(x, y, z, x, y, z);
+	A126_PROBE_DIRTY_SOURCE("dirty_sections_other");
 }
 
 void Level::setTilesDirty(int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1)
 {
+	A126_PROBE_COUNT("dirty_src_region_dirty", 1);
+	A126_PROBE_DIRTY_SOURCE("dirty_sections_region_dirty");
 	for (auto &l : listeners)
 		l->setTilesDirty(x0, y0, z0, x1, y1, z1);
+	A126_PROBE_DIRTY_SOURCE("dirty_sections_other");
 }
 
 void Level::swap(int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1)
@@ -776,8 +831,11 @@ void Level::setBrightness(int_t layer, int_t x, int_t y, int_t z, int_t brightne
 
 	getChunk(x >> 4, z >> 4)->setBrightness(layer, x & 0xF, y, z & 0xF, brightness);
 
+	A126_PROBE_COUNT("dirty_src_light_change", 1);
+	A126_PROBE_DIRTY_SOURCE("dirty_sections_light_change");
 	for (auto &l : listeners)
 		l->tileChanged(x, y, z);
+	A126_PROBE_DIRTY_SOURCE("dirty_sections_other");
 }
 
 float Level::getBrightness(int_t x, int_t y, int_t z)
@@ -1629,7 +1687,8 @@ bool Level::updateLights()
 		return false;
 	maxRecurse++;
 
-	int_t limit = 500;
+	// Alpha: World.func_6465_g, sipush 5000 per call.
+	int_t limit = 5000;
 	while (!lightUpdates.empty())
 	{
 		if (--limit <= 0)
@@ -1666,15 +1725,13 @@ void Level::updateLight(int_t layer, int_t x0, int_t y0, int_t z0, int_t x1, int
 		return;
 	}
 
+	// Alpha: World.func_627_a (bytecode: blockExists(xm, 64, zm); merge scan
+	// iconst_4; ldc 100000). blockExists is true for the blank placeholder
+	// chunk too, so a range whose centre column is not loaded yet is still
+	// queued and later applied to whichever chunks in it are real.
 	int_t xm = (x1 + x0) / 2;
 	int_t zm = (z1 + z0) / 2;
 	if (!hasChunkAt(xm, 64, zm))
-	{
-		maxLoop--;
-		return;
-	}
-
-	if (getChunkAt(xm, zm)->isEmpty())
 	{
 		maxLoop--;
 		return;
@@ -1684,7 +1741,7 @@ void Level::updateLight(int_t layer, int_t x0, int_t y0, int_t z0, int_t x1, int
 	if (checkExpansion)
 	{
 		// Check if this light update can be handled by another nearby one
-		int_t checkLimit = 5;
+		int_t checkLimit = 4;
 		if (checkLimit > updates)
 			checkLimit = updates;
 
@@ -1702,12 +1759,8 @@ void Level::updateLight(int_t layer, int_t x0, int_t y0, int_t z0, int_t x1, int
 	// Create a new light update
 	lightUpdates.emplace_back(layer, x0, y0, z0, x1, y1, z1);
 
-	int_t limit = 1000000;
-	if (lightUpdates.size() > limit)
-	{
-		std::cout << "More than " << limit << " updates, aborting lighting updates\n";
+	if (lightUpdates.size() > 100000)
 		lightUpdates.clear();
-	}
 
 	maxLoop--;
 }

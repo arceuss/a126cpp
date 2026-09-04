@@ -54,14 +54,22 @@ void reap()
 
 void joinAll()
 {
-	std::lock_guard<std::mutex> guard(tasksMutex);
-
-	for (std::unique_ptr<Task> &task : tasks)
+	// Join outside the lock: a task may spawn another task while it winds
+	// down (the connection close thread starts the master thread from
+	// networkShutdown), and run() needs the mutex to register it.
+	for (;;)
 	{
+		std::unique_ptr<Task> task;
+		{
+			std::lock_guard<std::mutex> guard(tasksMutex);
+			if (tasks.empty())
+				return;
+			task = std::move(tasks.front());
+			tasks.erase(tasks.begin());
+		}
 		if (task->thread.joinable())
 			task->thread.join();
 	}
-	tasks.clear();
 }
 
 }

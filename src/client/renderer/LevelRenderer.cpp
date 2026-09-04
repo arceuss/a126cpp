@@ -460,7 +460,10 @@ void LevelRenderer::resortChunks(int_t xc, int_t yc, int_t zc)
 				bool wasDirty = chunk->dirty;
 				chunk->setPos(xx, yy, zz);
 				if (!wasDirty && chunk->dirty)
+				{
+					A126_PROBE_COUNT("dirty_readd_resort", 1);
 					dirtyChunks.push_back(chunk);
+				}
 			}
 		}
 	}
@@ -485,7 +488,10 @@ int_t LevelRenderer::render(Player &player, int_t layer, double alpha)
 			}
 
 			if (!in_dirty)
+			{
+				A126_PROBE_COUNT("dirty_readd_scan", 1);
 				dirtyChunks.push_back(c);
+			}
 		}
 	}
 
@@ -1287,6 +1293,8 @@ void LevelRenderer::setDirty(int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, i
 				auto &chunk = chunks[(zz * yChunks + yy) * xChunks + xx];
 				if (!chunk->dirty)
 				{
+					A126_PROBE_COUNT("dirty_sections_marked", 1);
+					A126_PROBE_COUNT_DIRTY_SOURCE();
 					dirtyChunks.push_back(chunk);
 					chunk->setDirty();
 				}
@@ -1462,6 +1470,7 @@ void LevelRenderer::skyColorChanged()
 	{
 		if (i->skyLit && !i->dirty)
 		{
+			A126_PROBE_COUNT("dirty_skycolor", 1);
 			dirtyChunks.push_back(i);
 			i->setDirty();
 		}

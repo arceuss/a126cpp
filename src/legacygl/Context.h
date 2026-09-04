@@ -615,4 +615,9 @@ void setSink(Sink *sink);
 // exactly as they do with a real backend.
 Sink *nullSink();
 
+// A null sink that confirms residency for every list geometry, so the core
+// releases CPU vertices as it does under a packet backend. This is the
+// GPU-free baseline the stress harness compares real backends against.
+Sink *residentNullSink();
+
 }

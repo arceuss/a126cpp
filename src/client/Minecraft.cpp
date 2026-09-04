@@ -509,9 +509,22 @@ void Minecraft::run()
 		glEnable(GL_TEXTURE_2D);
 		glEnable(GL_ALPHA_TEST);
 
-			// Update lights once per frame (was being called twice before)
+			// Alpha: Minecraft frame tick drains the light queue completely in
+			// singleplayer (`while (theWorld.func_6465_g());`) and calls it once
+			// per frame in multiplayer (bytecode 243-297).
 			if (level != nullptr)
-				level->updateLights();
+			{
+				if (!level->isOnline)
+				{
+					while (level->updateLights())
+					{
+					}
+				}
+				else
+				{
+					level->updateLights();
+				}
+			}
 
 			if (options.limitFramerate)
 				std::this_thread::sleep_for(std::chrono::milliseconds(5));

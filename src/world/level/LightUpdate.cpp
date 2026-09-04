@@ -45,17 +45,16 @@ void LightUpdate::update(Level &level)
 			}
 			else
 			{
-				hasChunk = level.hasChunksAt(x, 0, z, 1);
-				if (hasChunk)
-				{
-					auto chunk = level.getChunk(x >> 4, z >> 4);
-					if (chunk->isEmpty())
-						hasChunk = false;
-				}
-
+				// Alpha: MetadataChunkBlock.func_4127_a checks blockExists(x, 0, z)
+				// for the containing column only. The 3x3 hasChunksAt(x, 0, z, 1)
+				// previously required unavailable neighbours and skipped valid
+				// edge columns; the isEmpty guard dropped updates Alpha applies
+				// to its blank placeholder chunk.
+				hasChunk = level.hasChunkAt(x, 0, z);
 				hasLastChunk = hasChunk;
 				lastChunkX = xc;
 				lastChunkZ = zc;
+				checkLastChunk = true;
 			}
 
 			if (hasChunk)

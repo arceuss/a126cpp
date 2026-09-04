@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -60,6 +61,9 @@ static const char *bucketName(Bucket bucket)
 		case Bucket::Tick: return "tick";
 		case Bucket::LightUpdate: return "light-update";
 		case Bucket::ChunkLoad: return "chunk-load";
+		case Bucket::ChunkGenerate: return "chunk-generate";
+		case Bucket::ChunkPopulate: return "chunk-populate";
+		case Bucket::ChunkSave: return "chunk-save";
 		case Bucket::ChunkRebuild: return "chunk-rebuild";
 		case Bucket::ChunkCapture: return "chunk-capture";
 		case Bucket::ChunkRegion: return "chunk-region";
@@ -98,6 +102,47 @@ void addTally(const char *name, std::uint64_t draws, std::int64_t nanoseconds)
 	tally.draws += draws;
 	tally.nanoseconds += nanoseconds;
 	tally.samples++;
+}
+
+// Insertion order kept so the report reads in a stable order; a handful of
+// literal names, so a linear scan beats a map.
+static std::vector<CountEntry> counts;
+
+void addCount(const char *name, std::int64_t count)
+{
+	for (CountEntry &entry : counts)
+	{
+		if (entry.name == name || std::strcmp(entry.name, name) == 0)
+		{
+			entry.count += count;
+			return;
+		}
+	}
+	counts.push_back(CountEntry{ name, count });
+}
+
+std::size_t counters(CountEntry *out, std::size_t capacity)
+{
+	std::size_t n = 0;
+	for (const CountEntry &entry : counts)
+	{
+		if (n >= capacity)
+			break;
+		out[n++] = entry;
+	}
+	return n;
+}
+
+static const char *currentDirtySource = "dirty_sections_other";
+
+void setDirtySource(const char *name)
+{
+	currentDirtySource = name;
+}
+
+const char *dirtySource()
+{
+	return currentDirtySource;
 }
 
 void addSample(Bucket bucket, std::int64_t nanoseconds)
@@ -429,6 +474,14 @@ void writeReport(const char *reason)
 				static_cast<double>(rows[i].second.nanoseconds) / 1.0e6);
 		}
 		tallies.clear();
+	}
+
+	if (!counts.empty())
+	{
+		std::fprintf(file, "counters over the last interval:\n");
+		for (const CountEntry &entry : counts)
+			std::fprintf(file, "    %-28s %12lld\n", entry.name, static_cast<long long>(entry.count));
+		counts.clear();
 	}
 
 	std::fprintf(file, "timings over the last interval:\n");

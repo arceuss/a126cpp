@@ -35,7 +35,7 @@ bool WorldGenCactus::generate(Level &level, Random &random, int_t x, int_t y, in
 					    !Tile::solid[level.getTile(px, py + h, pz - 1)] &&
 					    !Tile::solid[level.getTile(px, py + h, pz + 1)])
 					{
-						level.setTile(px, py + h, pz, cactusId);  // setTile(x, y, z, tile)
+						level.setTileNoUpdate(px, py + h, pz, cactusId);  // Alpha: setBlock, no notify (WorldGenCactus.java:21)
 					}
 					else
 					{

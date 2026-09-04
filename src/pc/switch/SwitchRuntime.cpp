@@ -105,6 +105,13 @@ void initialize()
 	// File::mkdirs never has to stat the bare "sdmc:" device root.
 	::mkdir("sdmc:/switch", 0755);
 
+	// Mesa's KHR_no_error dispatch: skips per-call validation in the GL
+	// front end, which the devkitPro OpenGL examples recommend for production
+	// (setMesaConfig). The game issues ~1,200 draws per frame, each several
+	// GL calls, on a 1 GHz A57. glGetError reports nothing in this mode; the
+	// desktop builds keep validation.
+	setenv("MESA_NO_ERROR", "1", 1);
+
 	// There is no console on a real unit and emulators do not surface
 	// svcOutputDebugString, so stdout and stderr go to the SD card. Unbuffered
 	// so a crash cannot lose the tail.
