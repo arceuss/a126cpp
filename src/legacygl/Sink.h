@@ -158,6 +158,12 @@ public:
 		std::uint64_t pageCapacityBytes = 0;
 		std::size_t entries = 0;
 		std::size_t pages = 0;
+		// Cumulative resident-draw batching counters since startup: draws
+		// folded into multidraws, multidraw calls issued, and matrix-block
+		// arena overflows (each one drains the GPU).
+		std::uint64_t batchedDraws = 0;
+		std::uint64_t multidraws = 0;
+		std::uint64_t batchBlockOverflows = 0;
 	};
 	virtual bool queryResidentStats(ResidentStats &out) const
 	{

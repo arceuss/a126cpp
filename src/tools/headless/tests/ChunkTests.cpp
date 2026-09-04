@@ -16,16 +16,19 @@
 #include "client/multiplayer/MultiPlayerLevel.h"
 #include "nbt/CompoundTag.h"
 #include "nbt/ListTag.h"
+#include "nbt/NbtIo.h"
 #include "world/level/tile/FluidFlowingTile.h"
 #include "world/level/tile/SandTile.h"
 
 #include "tools/headless/TestFramework.h"
 #include "tools/headless/TestWorld.h"
+#include "util/ProgressListener.h"
 #include "world/entity/animal/Pig.h"
-#include "world/level/Level.h"
+#include "world/level/SaveConverterMcRegion.h"
 #include "world/level/chunk/LevelChunk.h"
 #include "world/level/chunk/storage/OldChunkStorage.h"
 #include "world/level/dimension/Dimension.h"
+#include "world/level/tile/StoneTile.h"
 #include "world/level/tile/Tile.h"
 #include "world/level/tile/SignTile.h"
 #include "world/level/tile/entity/SignTileEntity.h"
@@ -328,4 +331,76 @@ HEADLESS_TEST(chunks, storage_retains_more_than_127_entities)
 	headless::initGameRegistries();
 	// The pre-fix byte_t loop counter wrapped at 128 and never finished.
 	checkStoredEntityCount(ctx, 130);
+}
+
+// Old file-per-chunk saves migrate to McRegion on open and stay readable.
+// One chunk written through the legacy layout must survive conversion and
+// load back through the production McRegion path with its blocks intact.
+namespace {
+
+class NullProgress : public ProgressListener
+{
+public:
+	void progressStartNoAbort(const jstring &) override {}
+	void progressStart(const jstring &) override {}
+	void progressStage(const jstring &) override {}
+	void progressStagePercentage(int_t) override {}
+};
+
+}
+
+HEADLESS_TEST(chunks, old_file_chunks_convert_to_mcregion)
+{
+	headless::initGameRegistries();
+	headless::TempDir directory(ctx, "chunks-mcregion-convert");
+
+	std::unique_ptr<File> world(File::open(directory.file(), u"ConvertWorld"));
+	world->mkdirs();
+
+	// level.dat without the version stamp: a pre-McRegion save.
+	{
+		CompoundTag root;
+		std::unique_ptr<CompoundTag> data = std::make_unique<CompoundTag>();
+		data->putLong(u"RandomSeed", 0x5EEDLL);
+		data->putInt(u"SpawnX", 0);
+		data->putInt(u"SpawnY", 64);
+		data->putInt(u"SpawnZ", 0);
+		data->putLong(u"Time", 0);
+		data->putLong(u"SizeOnDisk", 0);
+		root.putCompound(u"Data", std::move(data));
+		std::unique_ptr<File> levelFile(File::open(*world, u"level.dat"));
+		std::unique_ptr<std::ostream> output(levelFile->toStreamOut());
+		NbtIo::writeCompressed(root, *output);
+		output.reset();
+	}
+
+	// One chunk stored the old way: base36 folders plus c.0.0.dat.
+	{
+		Level level(directory.newHandle(), u"ConvertWorld", 1LL);
+		if (!ctx.check(level.setTile(1, 100, 1, Tile::rock.id), "place block in generated chunk"))
+			return;
+		std::shared_ptr<File> oldDir(File::open(directory.file(), u"ConvertWorld"));
+		OldChunkStorage oldStorage(oldDir, true);
+		oldStorage.save(level, *level.getChunk(0, 0));
+	}
+
+	SaveConverterMcRegion converter(directory.file());
+	ctx.check(converter.isOldMapFormat(u"ConvertWorld"), "versionless world must read as old format");
+	NullProgress progress;
+	if (!ctx.check(converter.convertMapFormat(u"ConvertWorld", progress), "conversion must succeed"))
+		return;
+	ctx.check(!converter.isOldMapFormat(u"ConvertWorld"), "converted world must read as McRegion format");
+
+	std::unique_ptr<File> converted(File::open(directory.file(), u"ConvertWorld"));
+	std::unique_ptr<File> legacyDir(File::open(*converted, u"0"));
+	ctx.check(!legacyDir->exists(), "base36 chunk folders must be gone after conversion");
+	std::unique_ptr<File> regionDir(File::open(*converted, u"region"));
+	ctx.check(regionDir->exists(), "region directory must exist after conversion");
+	std::unique_ptr<File> regionFile(File::open(*regionDir, u"r.0.0.mcr"));
+	ctx.check(regionFile->exists(), "chunk 0,0 must land in r.0.0.mcr");
+
+	// The reopened world goes through Dimension's McRegion storage.
+	Level reopened(directory.newHandle(), u"ConvertWorld", 2LL);
+	ctx.checkEqual(reopened.getTile(1, 100, 1), Tile::rock.id,
+		"placed block after old-format conversion and McRegion reload");
 }

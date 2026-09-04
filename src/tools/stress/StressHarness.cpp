@@ -595,6 +595,9 @@ try
 		emit("resident_entries " + std::to_string(resident.entries));
 		emit("resident_pages " + std::to_string(resident.pages));
 		emit("resident_capacity_bytes " + std::to_string(resident.pageCapacityBytes));
+		emit("resident_batched_draws " + std::to_string(resident.batchedDraws));
+		emit("resident_multidraws " + std::to_string(resident.multidraws));
+		emit("resident_block_overflows " + std::to_string(resident.batchBlockOverflows));
 	}
 	emit("heap_top" + benchutil::heapHistogram(16));
 

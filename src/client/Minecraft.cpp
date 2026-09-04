@@ -34,6 +34,7 @@
 #include "world/phys/HitResult.h"
 #include "world/level/chunk/ChunkCache.h"
 #include "world/level/Level.h"
+#include "world/level/SaveConverterMcRegion.h"
 #include "world/level/Teleporter.h"
 #include "world/level/tile/Tile.h"
 #include "world/item/Items.h"
@@ -1179,6 +1180,13 @@ void Minecraft::selectLevel(const jstring &name)
 	setLevel(nullptr);
 
 	std::unique_ptr<File> saves(File::open(*getWorkingDirectory(), u"saves"));
+	SaveConverterMcRegion converter(*saves);
+	if (converter.isOldMapFormat(name))
+	{
+		progressRenderer->progressStart(u"Converting World to " + converter.getFormatName());
+		progressRenderer->progressStage(u"This may take a while :)");
+		converter.convertMapFormat(name, *progressRenderer);
+	}
 	std::shared_ptr<Level> new_level = Util::make_shared<Level>(saves.release(), name);
 	if (new_level->isNew)
 		setLevel(new_level, u"Generating level");

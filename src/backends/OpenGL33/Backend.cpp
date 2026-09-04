@@ -44,6 +44,10 @@ struct CoreGPUVertex
 	float color[4];
 	float normal[3];
 	float texCoord[2];
+	// Slot of this vertex's resident entry within its page, or 0 when the
+	// draw is not batched. Stamped at resident upload, read by the vertex
+	// shader only when a batch is being drawn.
+	std::uint32_t drawSlot;
 };
 
 // The one source mode rotation cannot serve: a legacy quad's provoking vertex
@@ -60,6 +64,7 @@ struct CoreGPUFlatVertex
 	float flatPosition[3];
 	float flatColor[4];
 	float flatNormal[3];
+	std::uint32_t drawSlot;
 };
 
 enum class CoreVertexLayout
@@ -96,6 +101,32 @@ struct CoreResidentFreeRange
 	GLsizeiptr size = 0;
 };
 
+// Matrix slots per batch block. GL 3.3 guarantees only 16 KiB per uniform
+// block; 128 model-view + 128 normal matrices is exactly that. Entries whose
+// page slot is at or above this draw unbatched.
+static const std::size_t CORE_BATCH_SLOTS = 128;
+// Batch blocks per ring region; a frame issuing more page runs than this
+// drains the GPU, like the state ring does on overflow.
+static const std::size_t CORE_BATCH_BLOCKS = 512;
+
+struct CoreBatchedDraw
+{
+	std::size_t page = 0;
+	std::uint32_t slot = 0;
+	GLint first = 0;
+	GLsizei count = 0;
+	Mat4 modelView;
+	Mat4 normal;
+};
+
+// std140 image of LegacyBatchBlock: two mat4 arrays, 16 KiB.
+struct alignas(16) CoreBatchBlock
+{
+	Mat4 modelView[CORE_BATCH_SLOTS];
+	Mat4 normal[CORE_BATCH_SLOTS];
+};
+static_assert(sizeof(CoreBatchBlock) == 16384, "Batch block must be the 16 KiB GL 3.3 minimum");
+
 struct CoreResidentPage
 {
 	GLuint buffer = 0;
@@ -105,6 +136,11 @@ struct CoreResidentPage
 	GLsizeiptr capacity = 0;
 	std::size_t liveEntries = 0;
 	std::vector<CoreResidentFreeRange> freeRanges;
+	// Slot ids are dense per page so a batch block indexes by them. Slots
+	// beyond CORE_BATCH_SLOTS exist (the page can hold more entries) but
+	// those entries draw unbatched.
+	std::vector<std::uint32_t> freeSlots;
+	std::uint32_t nextSlot = 0;
 };
 
 struct CoreResidentGeometryEntry
@@ -113,6 +149,7 @@ struct CoreResidentGeometryEntry
 	GLsizeiptr byteOffset = 0;
 	GLsizeiptr byteSize = 0;
 	GLint firstVertex = 0;
+	std::uint32_t slot = 0;
 	Topology topology = Topology::Triangles;
 	std::size_t vertexCount = 0;
 	bool hasColor = false;
@@ -120,7 +157,7 @@ struct CoreResidentGeometryEntry
 	bool hasTexCoord = false;
 };
 
-static const GLsizeiptr CORE_RESIDENT_PAGE_BYTES = 8 * 1024 * 1024;
+static const GLsizeiptr CORE_RESIDENT_PAGE_BYTES = 64 * 1024 * 1024;
 
 struct alignas(16) CoreGPUMaterial
 {
@@ -518,6 +555,7 @@ static CoreGPUVertex coreGPUVertex(const Vertex &vertex)
 	result.color[0] = vertex.r; result.color[1] = vertex.g; result.color[2] = vertex.b; result.color[3] = vertex.a;
 	result.normal[0] = vertex.nx; result.normal[1] = vertex.ny; result.normal[2] = vertex.nz;
 	result.texCoord[0] = vertex.s; result.texCoord[1] = vertex.t;
+	result.drawSlot = 0;
 	return result;
 }
 
@@ -531,6 +569,7 @@ static CoreGPUFlatVertex coreGPUFlatVertex(const Vertex &vertex, const Vertex &f
 	result.flatPosition[0] = flat.x; result.flatPosition[1] = flat.y; result.flatPosition[2] = flat.z;
 	result.flatColor[0] = flat.r; result.flatColor[1] = flat.g; result.flatColor[2] = flat.b; result.flatColor[3] = flat.a;
 	result.flatNormal[0] = flat.nx; result.flatNormal[1] = flat.ny; result.flatNormal[2] = flat.nz;
+	result.drawSlot = 0;
 	return result;
 }
 
@@ -823,6 +862,9 @@ public:
 			out.pages++;
 			out.pageCapacityBytes += static_cast<std::uint64_t>(page.capacity);
 		}
+		out.batchedDraws = batchedDraws;
+		out.multidraws = batchedDrawCalls;
+		out.batchBlockOverflows = batchBlockOverflows;
 		return true;
 	}
 
@@ -830,6 +872,7 @@ public:
 	{
 		if (residencyId == 0)
 			return;
+		flushBatch();
 		auto entry = residentGeometry.find(residencyId);
 		if (entry == residentGeometry.end())
 			return;
@@ -849,6 +892,7 @@ public:
 		if (page.buffer == 0 || page.liveEntries == 0)
 			return;
 		page.liveEntries--;
+		page.freeSlots.push_back(entry.slot);
 		if (page.liveEntries == 0)
 		{
 			if (boundVertexArray == page.vertexArray)
@@ -893,7 +937,7 @@ public:
 	// Sub-allocates from a page whose vertex array already describes this
 	// attribute set and vertex layout, uploading into the shared buffer.
 	CoreResidentGeometryEntry allocateResidentGeometry(const ResolvedDraw &command,
-		const Geometry &geometry, const CoreVertexData &vertices)
+		const Geometry &geometry, CoreVertexData &vertices)
 	{
 		const GLsizeiptr size = vertices.byteSize();
 		const unsigned int attributeMask = coreAttributeMask(geometry);
@@ -957,6 +1001,30 @@ public:
 		}
 
 		CoreResidentPage &page = residentPages[pageIndex];
+
+		// Dense per-page slot, stamped into every vertex so a batched draw can
+		// fetch its own matrices. The stride is the same for both layouts'
+		// trailing field, so one loop serves both.
+		std::uint32_t slot;
+		if (!page.freeSlots.empty())
+		{
+			slot = page.freeSlots.back();
+			page.freeSlots.pop_back();
+		}
+		else
+		{
+			slot = page.nextSlot++;
+		}
+		{
+			const std::size_t stride = static_cast<std::size_t>(coreVertexStride(layout));
+			const std::size_t slotOffset = layout == CoreVertexLayout::Expanded ?
+				offsetof(CoreGPUFlatVertex, drawSlot) : offsetof(CoreGPUVertex, drawSlot);
+			for (std::size_t i = 0; i < vertices.count; i++)
+			{
+				const std::uint32_t stamped = slot & (CORE_BATCH_SLOTS - 1);
+				std::memcpy(vertices.bytes.data() + i * stride + slotOffset, &stamped, sizeof(stamped));
+			}
+		}
 		// Staging takes at most half the region so a rebuild burst cannot push
 		// the frame's own transient draws into the drain path.
 		GLsizeiptr staged = 0;
@@ -996,11 +1064,13 @@ public:
 		entry.hasColor = geometry.hasColor;
 		entry.hasNormal = geometry.hasNormal;
 		entry.hasTexCoord = geometry.hasTexCoord;
+		entry.slot = slot;
 		return entry;
 	}
 
 	void releaseAllCanonicalGeometry()
 	{
+		batchCount = 0;
 		for (CoreResidentPage &page : residentPages)
 		{
 			if (page.vertexArray != 0)
@@ -1015,6 +1085,7 @@ public:
 	}
 	void shutdown()
 	{
+		flushBatch();
 		std::size_t residentPageCount = 0;
 		std::uint64_t residentPageBytes = 0;
 		for (const CoreResidentPage &page : residentPages)
@@ -1051,6 +1122,18 @@ public:
 			static_cast<unsigned long long>(streamOverflows),
 			static_cast<unsigned long long>(residentStagedUploads),
 			static_cast<unsigned long long>(residentDirectUploads));
+		std::fprintf(stdout,
+			"gl33: resident batches: draws=%llu multidraws=%llu breaks topo=%llu state=%llu other=%llu block_overflows=%llu\n",
+			static_cast<unsigned long long>(batchedDraws),
+			static_cast<unsigned long long>(batchedDrawCalls),
+			static_cast<unsigned long long>(batchBreakTopology),
+			static_cast<unsigned long long>(batchBreakState),
+			static_cast<unsigned long long>(batchBreakOther),
+			static_cast<unsigned long long>(batchBlockOverflows));
+		batchedDrawCalls = 0;
+		batchedDraws = 0;
+		batchBreakTopology = batchBreakState = batchBreakOther = 0;
+		batchBlockOverflows = 0;
 		releaseAllCanonicalGeometry();
 		residentCacheHits = 0;
 		residentCacheMisses = 0;
@@ -1097,6 +1180,7 @@ public:
 	{
 		if (!initialized)
 			return;
+		flushBatch();
 		uniformPeakSlots = std::max(uniformPeakSlots, uniformCursor);
 		if (uniformMode == CoreUniformMode::Legacy)
 			return;
@@ -1121,6 +1205,7 @@ public:
 			uniformFences[uniformRegion] = nullptr;
 		}
 		uniformCursor = 0;
+		batchBlockCursor = 0;
 		streamPeakBytes = std::max(streamPeakBytes, streamCursor);
 		streamCursor = 0;
 	}
@@ -1145,6 +1230,25 @@ public:
 		const GLintptr offset =
 			static_cast<GLintptr>(regionBase + uniformCursor * uniformStride);
 		uniformCursor++;
+		return offset;
+	}
+
+	// One 16 KiB matrix block per page run. The arena rotates with the state
+	// regions, so the same fence protects both. Overflow drains like the
+	// state ring does.
+	GLintptr reserveBatchBlock()
+	{
+		if (uniformMode == CoreUniformMode::Legacy)
+			return 0;
+		if (batchBlockCursor >= CORE_BATCH_BLOCKS)
+		{
+			batchBlockOverflows++;
+			glFinish();
+			batchBlockCursor = 0;
+		}
+		const GLintptr offset = batchArenaBase +
+			static_cast<GLintptr>((uniformRegion * CORE_BATCH_BLOCKS + batchBlockCursor) * sizeof(CoreBatchBlock));
+		batchBlockCursor++;
 		return offset;
 	}
 
@@ -1187,6 +1291,180 @@ public:
 		glBufferSubData(GL_UNIFORM_BUFFER, offset,
 			static_cast<GLsizeiptr>(sizeof(state)), &state);
 	}
+	// Whether two resolved draws can share one glMultiDrawArrays: everything
+	// the uniform block and pipeline carry must match except the two matrices
+	// the batch block supplies per slot.
+	static bool coreBatchCompatible(const CoreGPUState &left, const CoreGPUState &right)
+	{
+		const std::size_t skipBegin = offsetof(CoreGPUState, modelView);
+		const std::size_t skipEnd = skipBegin + sizeof(left.modelView);
+		const std::size_t normalBegin = offsetof(CoreGPUState, normal);
+		const std::size_t normalEnd = normalBegin + sizeof(left.normal);
+		const unsigned char *l = reinterpret_cast<const unsigned char *>(&left);
+		const unsigned char *r = reinterpret_cast<const unsigned char *>(&right);
+		// Layout: modelView, projection, texture, normal, then everything else.
+		// Compare the projection+texture span and the tail separately.
+		return std::memcmp(l + skipEnd, r + skipEnd, normalBegin - skipEnd) == 0 &&
+			std::memcmp(l + normalEnd, r + normalEnd, sizeof(CoreGPUState) - normalEnd) == 0;
+	}
+
+	// Resident hit with a page slot inside the batch block: append to the
+	// pending batch if it is compatible, else flush and start a new one.
+	bool tryBatchResidentDraw(const ResolvedDraw &command, std::size_t vertexCount)
+	{
+		auto found = residentGeometry.find(command.geometryResidencyId);
+		if (found == residentGeometry.end())
+			return false;
+		const CoreResidentGeometryEntry &entry = found->second;
+		if (entry.topology != command.primitives->topology || entry.vertexCount != vertexCount)
+			throw std::runtime_error("OpenGL 3.3 resident geometry identity changed while cached");
+		residentCacheHits++;
+
+		CoreGPUState state = {};
+		{
+		legacygl::PhaseScope phase(legacygl::DrawPhase::StatePack);
+		fillGPUState(command, state);
+		}
+
+		const bool joins = batchCount > 0 &&
+			batchTopology == entry.topology && coreBatchCompatible(batchState, state) &&
+			coreSameEnables(batchCommand.enables, command.enables) &&
+			coreSamePipeline(batchCommand.pipeline, command.pipeline) &&
+			batchCommand.texture.name == command.texture.name &&
+			std::memcmp(&batchCommand.currentAttributes, &command.currentAttributes,
+				sizeof(Vertex)) == 0;
+		if (!joins && batchCount > 0)
+		{
+			if (batchTopology != entry.topology) batchBreakTopology++;
+			else if (!coreBatchCompatible(batchState, state)) batchBreakState++;
+			else batchBreakOther++;
+		}
+		if (!joins)
+		{
+			flushBatch();
+			batchTopology = entry.topology;
+			batchState = state;
+			batchCommand = command;
+		}
+		CoreBatchedDraw &draw = batchDraws[batchCount++];
+		draw.page = entry.page;
+		draw.slot = entry.slot;
+		draw.first = entry.firstVertex;
+		draw.count = static_cast<GLsizei>(vertexCount);
+		std::memcpy(draw.modelView.m, command.modelView.m, sizeof(Mat4));
+		std::memcpy(draw.normal.m, command.normal.m, sizeof(Mat4));
+		if (batchCount == CORE_BATCH_SLOTS)
+			flushBatch();
+		return true;
+	}
+
+	// Issues the pending batch. One state upload with the batch flag; then,
+	// per run of draws sharing a page, one 16 KiB matrix block indexed by the
+	// entries' page slots and one glMultiDrawArrays. Slots not in the run keep
+	// stale matrices, which no vertex reads. The matrix block lives in the
+	// same fence-ringed persistent buffer as the state blocks, one region
+	// ahead of the state slots.
+	void flushBatch()
+	{
+		if (batchCount == 0)
+			return;
+		const std::size_t count = batchCount;
+		batchCount = 0;
+		batchedDraws += count;
+
+		{
+		legacygl::PhaseScope phase(legacygl::DrawPhase::Bind);
+		applyPipeline(batchCommand);
+		bindTexture(batchCommand, batchState);
+		glUseProgram(program);
+		}
+		{
+		legacygl::PhaseScope phase(legacygl::DrawPhase::StateUpload);
+		batchState.flags0[3] |= 4u;
+		const GLintptr uniformOffset = reserveUniformSlot();
+		writeUniformSlot(uniformOffset, batchState);
+		if (uniformMode != CoreUniformMode::Legacy)
+		{
+			glBindBufferRange(GL_UNIFORM_BUFFER, 0, uniformBuffer, uniformOffset,
+				static_cast<GLsizeiptr>(sizeof(CoreGPUState)));
+		}
+		}
+		applyCurrentAttributes(batchCommand);
+
+		std::size_t runStart = 0;
+		while (runStart < count)
+		{
+			const std::size_t page = batchDraws[runStart].page;
+			std::size_t runEnd = runStart + 1;
+			// A run shares one matrix block, indexed by the low 7 bits of the
+			// page slot; a run must therefore not contain two entries that
+			// alias. Split there.
+			std::uint64_t used[2] = { 0, 0 };
+			{
+				const std::uint32_t b = batchDraws[runStart].slot & (CORE_BATCH_SLOTS - 1);
+				used[b >> 6] |= 1ull << (b & 63);
+			}
+			while (runEnd < count && batchDraws[runEnd].page == page)
+			{
+				const std::uint32_t b = batchDraws[runEnd].slot & (CORE_BATCH_SLOTS - 1);
+				if (used[b >> 6] & (1ull << (b & 63)))
+					break;
+				used[b >> 6] |= 1ull << (b & 63);
+				runEnd++;
+			}
+			const std::size_t runCount = runEnd - runStart;
+			batchedDrawCalls++;
+			batchPageRuns++;
+
+			{
+			legacygl::PhaseScope phase(legacygl::DrawPhase::StateUpload);
+			const GLintptr blockOffset = reserveBatchBlock();
+			// Only the rows this run indexes are written; the shader never
+			// reads the others, so stale rows in the mapping are harmless.
+			unsigned char *block = uniformMode == CoreUniformMode::Persistent ?
+				uniformMapped + blockOffset : reinterpret_cast<unsigned char *>(&batchBlock);
+			for (std::size_t i = 0; i < runCount; i++)
+			{
+				const CoreBatchedDraw &draw = batchDraws[runStart + i];
+				batchFirst[i] = draw.first;
+				batchCounts[i] = draw.count;
+				const std::size_t row = draw.slot & (CORE_BATCH_SLOTS - 1);
+				std::memcpy(block + offsetof(CoreBatchBlock, modelView) + row * sizeof(Mat4),
+					&draw.modelView, sizeof(Mat4));
+				std::memcpy(block + offsetof(CoreBatchBlock, normal) + row * sizeof(Mat4),
+					&draw.normal, sizeof(Mat4));
+			}
+			if (uniformMode == CoreUniformMode::Persistent)
+			{
+				glBindBufferRange(GL_UNIFORM_BUFFER, 1, uniformBuffer, blockOffset,
+					static_cast<GLsizeiptr>(sizeof(batchBlock)));
+			}
+			else
+			{
+				glBindBuffer(GL_UNIFORM_BUFFER, batchUniformBuffer);
+				glBufferData(GL_UNIFORM_BUFFER, sizeof(batchBlock), &batchBlock, GL_STREAM_DRAW);
+				glBindBufferBase(GL_UNIFORM_BUFFER, 1, batchUniformBuffer);
+				glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer);
+			}
+			}
+			{
+			legacygl::PhaseScope phase(legacygl::DrawPhase::Bind);
+			const GLuint pageArray = residentPages[page].vertexArray;
+			if (boundVertexArray != pageArray)
+			{
+				glBindVertexArray(pageArray);
+				boundVertexArray = pageArray;
+			}
+			}
+			{
+			legacygl::PhaseScope phase(legacygl::DrawPhase::Draw);
+			glMultiDrawArrays(coreTopology(batchTopology), batchFirst, batchCounts,
+				static_cast<GLsizei>(runCount));
+			}
+			runStart = runEnd;
+		}
+	}
+
 	void resolvedDraw(const ResolvedDraw &command) override
 	{
 		initialize();
@@ -1200,6 +1478,13 @@ public:
 			static_cast<std::size_t>(verticesPerPrimitive);
 		if (vertexCount == 0)
 			return;
+
+		// A resident hit whose state matches the pending batch joins it and
+		// returns; anything else is a batch boundary. Ordering is preserved
+		// because the batch is always flushed before the draw that broke it.
+		if (command.geometryResidencyId != 0 && tryBatchResidentDraw(command, vertexCount))
+			return;
+		flushBatch();
 
 		GLuint drawVertexArray = vertexArray;
 		GLint drawFirstVertex = 0;
@@ -1280,7 +1565,7 @@ public:
 						"OpenGL 3.3 resident geometry source was released before upload");
 				}
 				residentCacheMisses++;
-				const CoreVertexData vertices = coreGPUVertices(command, verticesPerPrimitive);
+				CoreVertexData vertices = coreGPUVertices(command, verticesPerPrimitive);
 				found = residentGeometry.emplace(command.geometryResidencyId,
 					allocateResidentGeometry(command, geometry, vertices)).first;
 				residentGeometryBytes += static_cast<std::uint64_t>(found->second.byteSize);
@@ -1334,6 +1619,7 @@ public:
 	void resolvedClear(const ResolvedClear &command) override
 	{
 		initialize();
+		flushBatch();
 		glColorMask(command.colorWrite[0], command.colorWrite[1], command.colorWrite[2], command.colorWrite[3]);
 		glDepthMask(command.depthWrite);
 		if (command.scissorTest) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
@@ -1349,6 +1635,7 @@ public:
 	void resolvedTextureUpload(const ResolvedTextureUpload &command) override
 	{
 		initialize();
+		flushBatch();
 		CoreTexture &texture = ensureTexture(command.texture);
 		if (command.level < 0 || command.level >= CORE_TEXTURE_LEVELS)
 			return;
@@ -1402,6 +1689,7 @@ public:
 	void resolvedReadback(const ResolvedReadback &command) override
 	{
 		initialize();
+		flushBatch();
 		if (command.width == 0 || command.height == 0)
 			return;
 
@@ -1508,6 +1796,12 @@ private:
 		glEnableVertexAttribArray(4);
 		glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, stride,
 			reinterpret_cast<const void *>(flatPositionOffset));
+
+		const std::size_t drawSlotOffset = expanded ?
+			offsetof(CoreGPUFlatVertex, drawSlot) : offsetof(CoreGPUVertex, drawSlot);
+		glEnableVertexAttribArray(7);
+		glVertexAttribIPointer(7, 1, GL_UNSIGNED_INT, stride,
+			reinterpret_cast<const void *>(drawSlotOffset));
 	}
 
 	static void applyCurrentAttributes(const ResolvedDraw &command)
@@ -1570,6 +1864,14 @@ private:
 		if (!coreValidateUniformLayout(program))
 			std::exit(EXIT_FAILURE);
 		glUniformBlockBinding(program, block, 0);
+		const GLuint batchBlock = glGetUniformBlockIndex(program, "LegacyBatchBlock");
+		if (batchBlock == GL_INVALID_INDEX)
+		{
+			std::fprintf(stderr, "LegacyGL gl33: LegacyBatchBlock missing from program\n");
+			std::exit(EXIT_FAILURE);
+		}
+		glUniformBlockBinding(program, batchBlock, 1);
+		glGenBuffers(1, &batchUniformBuffer);
 		// The sampler's texture unit came from a 4.20 `binding` qualifier; in
 		// 3.30 it is assigned here instead. Sampler uniforms default to unit 0,
 		// so this is explicit rather than load-bearing.
@@ -1594,8 +1896,11 @@ private:
 		glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer);
 		if (uniformMode == CoreUniformMode::Persistent)
 		{
-			const GLsizeiptr total = static_cast<GLsizeiptr>(
-				uniformStride * uniformSlots * CORE_UNIFORM_REGIONS);
+			// State slots for every region, then a batch-block arena for every
+			// region, in one mapping.
+			batchArenaBase = static_cast<GLsizeiptr>(uniformStride * uniformSlots * CORE_UNIFORM_REGIONS);
+			const GLsizeiptr total = batchArenaBase +
+				static_cast<GLsizeiptr>(sizeof(CoreBatchBlock) * CORE_BATCH_BLOCKS * CORE_UNIFORM_REGIONS);
 			const GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT |
 				GL_MAP_COHERENT_BIT;
 			glBufferStorage(GL_UNIFORM_BUFFER, total, nullptr, flags);
@@ -1978,6 +2283,26 @@ private:
 	GLuint vertexArray = 0;
 	GLuint vertexBuffer = 0;
 	GLuint uniformBuffer = 0;
+	// Pending glMultiDrawArrays over resident entries of one page: see
+	// tryBatchResidentDraw. Matrices are indexed by entry slot.
+	GLuint batchUniformBuffer = 0;
+	GLsizeiptr batchArenaBase = 0;
+	std::size_t batchBlockCursor = 0;
+	std::uint64_t batchBlockOverflows = 0;
+	std::uint64_t batchPageRuns = 0;
+	std::size_t batchCount = 0;
+	Topology batchTopology = Topology::Triangles;
+	CoreGPUState batchState = {};
+	ResolvedDraw batchCommand;
+	CoreBatchedDraw batchDraws[CORE_BATCH_SLOTS];
+	GLint batchFirst[CORE_BATCH_SLOTS] = {};
+	GLsizei batchCounts[CORE_BATCH_SLOTS] = {};
+	CoreBatchBlock batchBlock;
+	std::uint64_t batchedDrawCalls = 0;
+	std::uint64_t batchedDraws = 0;
+	std::uint64_t batchBreakTopology = 0;
+	std::uint64_t batchBreakState = 0;
+	std::uint64_t batchBreakOther = 0;
 	GLuint fallbackTexture = 0;
 	GLuint boundTexture = 0;
 	GLuint boundSampler = 0;
@@ -2058,6 +2383,7 @@ static void openGL33Initialize()
 
 static void openGL33Present()
 {
+	legacygl::theCoreGLSink.flushBatch();
 	openglbackend::present();
 	// Frame boundary: recycle the uniform arena here, never in the draw path.
 	legacygl::theCoreGLSink.beginFrame();

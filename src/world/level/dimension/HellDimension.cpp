@@ -3,7 +3,7 @@
 #include "world/level/Level.h"
 #include "world/level/tile/Tile.h"
 #include "world/level/tile/UnbreakableTile.h"
-#include "world/level/chunk/storage/OldChunkStorage.h"
+#include "world/level/chunk/storage/McRegionChunkStorage.h"
 #include "world/level/levelgen/HellRandomLevelSource.h"
 #include "world/level/biome/BiomeSource.h"
 #include "world/level/biome/FixedBiomeSource.h"
@@ -60,26 +60,17 @@ ChunkSource *HellDimension::createRandomLevelSource()
 	return new HellRandomLevelSource(level, level.seed);
 }
 
-// Beta 1.2: HellDimension.createStorage() - creates storage in DIM-1 directory
-// Java: public ChunkStorage createStorage(File var1) {
-//         File var2 = new File(var1, "DIM-1");
-//         var2.mkdirs();
-//         return new OldChunkStorage(var2, true);
-//       }
+// McRegion: same DIM-1 subdirectory layout as the old per-chunk storage,
+// with region files instead of base36 chunk folders.
 ChunkStorage *HellDimension::createStorage(std::shared_ptr<File> dir)
 {
 	if (dir == nullptr)
 	{
 		return nullptr;  // Multiplayer levels don't use file storage
 	}
-	
-	// Beta 1.2: File var2 = new File(var1, "DIM-1");
-	//           var2.mkdirs();
-	//           return new OldChunkStorage(var2, true);
-	// File::open returns File*, wrap it in shared_ptr
 	std::shared_ptr<File> dimDir(File::open(*dir, u"DIM-1"), [](File* f) { delete f; });
 	dimDir->mkdirs();
-	return new OldChunkStorage(dimDir, true);
+	return new McRegionChunkStorage(dimDir, true);
 }
 
 // Beta 1.2: HellDimension.isValidSpawn() - checks if position is valid spawn

@@ -154,9 +154,23 @@ vec4 computeLighting(MaterialState material, vec3 normalEye, vec3 eyePosition)
 	return clamp(vec4(rgb, alpha), 0.0, 1.0);
 }
 
+// Resident terrain batches: one glMultiDrawArrays over sections whose draw
+// state differs only by model-view. Each vertex carries its entry's slot, and
+// the per-slot matrices live in a second block. uFlags0.w bit 2 selects.
+layout(std140) uniform LegacyBatchBlock
+{
+	mat4 uBatchModelView[128];
+	mat4 uBatchNormal[128];
+};
+
+layout(location = 7) in uint inDrawSlot;
+
+mat4 gModelView;
+mat4 gNormalMatrix;
+
 vec3 transformNormal(vec3 objectNormal)
 {
-	vec3 normalEye = (uNormalMatrix * vec4(objectNormal, 0.0)).xyz;
+	vec3 normalEye = (gNormalMatrix * vec4(objectNormal, 0.0)).xyz;
 	if (uFlags1.x == NORMAL_RESCALE)
 		normalEye *= uNormalParams.x;
 	else if (uFlags1.x == NORMAL_NORMALIZE)
@@ -176,13 +190,23 @@ vec4 computePrimary(vec3 objectPosition, vec4 color, vec3 objectNormal)
 		applyColorMaterial(material, color, uFlags3.y);
 	}
 
-	vec3 eyePosition = (uModelView * vec4(objectPosition, 1.0)).xyz;
+	vec3 eyePosition = (gModelView * vec4(objectPosition, 1.0)).xyz;
 	return computeLighting(material, transformNormal(objectNormal), eyePosition);
 }
 
 void main()
 {
-	vec4 eyePosition = uModelView * vec4(inPosition, 1.0);
+	if ((uFlags0.w & 4u) != 0u)
+	{
+		gModelView = uBatchModelView[inDrawSlot];
+		gNormalMatrix = uBatchNormal[inDrawSlot];
+	}
+	else
+	{
+		gModelView = uModelView;
+		gNormalMatrix = uNormalMatrix;
+	}
+	vec4 eyePosition = gModelView * vec4(inPosition, 1.0);
 	gl_Position = uProjection * eyePosition;
 
 	vec4 transformedTexCoord = uTexture * vec4(inTexCoord, 0.0, 1.0);

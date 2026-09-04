@@ -447,6 +447,11 @@ void writeReport(const char *reason)
 			static_cast<double>(resident.logicalBytes) / megabyte,
 			resident.entries, resident.pages,
 			static_cast<double>(resident.pageCapacityBytes) / megabyte);
+		std::fprintf(file,
+			"backend batching:  %llu draws in %llu multidraws, %llu block overflows (cumulative)\n",
+			static_cast<unsigned long long>(resident.batchedDraws),
+			static_cast<unsigned long long>(resident.multidraws),
+			static_cast<unsigned long long>(resident.batchBlockOverflows));
 	}
 
 	// Chunk block storage: 16*128*16 blocks plus three nibble layers.

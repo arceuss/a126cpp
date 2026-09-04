@@ -308,6 +308,9 @@ void Level::saveLevelData()
 	data->putLong(u"Time", time);
 	data->putLong(u"SizeOnDisk", sizeOnDisk);
 	data->putLong(u"LastPlayed", System::currentTimeMillis());
+	// McRegion version stamp. Worlds without it are treated as file-per-chunk
+	// saves and converted on open (SaveConverterMcRegion::isOldMapFormat).
+	data->putInt(u"version", 19132);
 
 	std::shared_ptr<Player> player;
 	if (!players.empty())
