@@ -345,6 +345,10 @@ void LevelChunk::setData(int_t x, int_t y, int_t z, int_t data)
 
 int_t LevelChunk::getBrightness(int_t lightLayer, int_t x, int_t y, int_t z)
 {
+	// Fullbright stress mode (Level::lightingEnabled): the arrays stay empty
+	// because nothing propagates, so answer maximum here instead.
+	if (!level.lightingEnabled)
+		return 15;
 	if (lightLayer == LightLayer::Sky)
 		return skyLight.get(x, y, z);
 	if (lightLayer == LightLayer::Block)
@@ -363,6 +367,8 @@ void LevelChunk::setBrightness(int_t lightLayer, int_t x, int_t y, int_t z, int_
 
 int_t LevelChunk::getRawBrightness(int_t x, int_t y, int_t z, int_t darken)
 {
+	if (!level.lightingEnabled)
+		return 15;
 	int_t light = skyLight.get(x, y, z);
 	if (light > 0)
 		touchedSky = true;

@@ -86,6 +86,11 @@ protected:
 public:
 	bool noNeighborUpdate = false;
 
+	// Fullbright stress mode: light propagation is skipped and every
+	// brightness read returns maximum. Set by the stress harness
+	// (--no-lighting); never touched by the game or its tests.
+	bool lightingEnabled = true;
+
 private:
 	long_t sessionId = System::currentTimeMillis();
 

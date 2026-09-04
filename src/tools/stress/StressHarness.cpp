@@ -133,9 +133,16 @@ try
 	// "all" runs every offline scenario in one process for unattended runs:
 	// one fresh level per scenario, one log per scenario. The server-driven
 	// "command" scenario is excluded; use it explicitly with --server.
-	std::vector<std::string> runNames;
+	// Every scenario runs twice, lit and fullbright (--no-lighting), so the
+	// lighting engine's share falls out of the log diff.
+	struct Run
+	{
+		std::string scenario;
+		bool noLighting = false;
+	};
+	std::vector<Run> runs;
 	if (options.scenario != "all")
-		runNames.push_back(options.scenario);
+		runs.push_back({ options.scenario, options.noLighting });
 
 	const int frameWidth = 854;
 	const int frameHeight = 480;
@@ -170,14 +177,18 @@ try
 			std::cerr << "stress: 'all' runs offline scenarios only; use single scenarios with --server" << std::endl;
 			return 2;
 		}
-		runNames = { "idle", "spin", "daycycle", "cave", "walk", "travel", "farlands",
-			"building", "lighting", "fluids", "mobs", "entities", "tnt", "sounds" };
-	}
-	for (const std::string &name : runNames)
-	{
-		if (makeScenario(name) == nullptr)
+		for (const char *name : { "idle", "spin", "daycycle", "cave", "walk", "travel", "farlands",
+			"building", "lighting", "fluids", "mobs", "entities", "tnt", "sounds" })
 		{
-			std::cerr << "stress: unknown scenario '" << name << "'; known:";
+			runs.push_back({ name, false });
+			runs.push_back({ name, true });
+		}
+	}
+	for (const Run &run : runs)
+	{
+		if (makeScenario(run.scenario) == nullptr)
+		{
+			std::cerr << "stress: unknown scenario '" << run.scenario << "'; known:";
 			for (const std::string &known : scenarioNames())
 				std::cerr << ' ' << known;
 			std::cerr << std::endl;
@@ -187,11 +198,12 @@ try
 	if (!options.user.empty())
 		minecraft.options.username = String::fromUTF8(options.user);
 
-	for (std::size_t runIndex = 0; runIndex < runNames.size(); runIndex++)
+	for (std::size_t runIndex = 0; runIndex < runs.size(); runIndex++)
 	{
-		std::unique_ptr<Scenario> scenario = makeScenario(runNames[runIndex]);
-		std::cerr << "stress: scenario " << scenario->name()
-			<< " (" << (runIndex + 1) << '/' << runNames.size() << ')' << std::endl;
+		const bool noLighting = runs[runIndex].noLighting;
+		std::unique_ptr<Scenario> scenario = makeScenario(runs[runIndex].scenario);
+		std::cerr << "stress: scenario " << scenario->name() << (noLighting ? " (no lighting)" : "")
+			<< " (" << (runIndex + 1) << '/' << runs.size() << ')' << std::endl;
 		if (online && !scenario->supportsMultiplayer())
 		{
 			std::cerr << "stress: scenario '" << scenario->name()
@@ -273,6 +285,13 @@ try
 		std::cerr << "stress: the world produced no player" << std::endl;
 		return 1;
 	}
+	if (noLighting)
+	{
+		if (online)
+			std::cerr << "stress: --no-lighting ignored for server-driven levels" << std::endl;
+		else
+			level->lightingEnabled = false;
+	}
 	const double levelMs = millisBetween(levelStart, Clock::now());
 	minecraft.setScreen(nullptr);
 	minecraft.options.showDebugInfo = true;
@@ -304,10 +323,10 @@ try
 		Chunk::updates = 0;
 	}
 
-	// In all-mode each scenario gets its own log; a single scenario keeps
-	// --log (or its default).
-	const std::string runLogPath = runNames.size() > 1
-		? std::string("stress-") + scenario->name() + "-" +
+	// In all-mode each scenario gets its own log, with -nolight on the
+	// fullbright variant; a single scenario keeps --log (or its default).
+	const std::string runLogPath = runs.size() > 1
+		? std::string("stress-") + scenario->name() + (noLighting ? "-nolight-" : "-") +
 			(options.nullSink ? std::string("null") : std::string(renderbackend::configuration().recordName)) + ".log"
 		: options.logPath;
 	std::unique_ptr<File> logFile(File::open(String::fromUTF8(runLogPath)));
@@ -335,6 +354,7 @@ try
 	emit("height " + std::to_string(minecraft.height));
 	emit("view_distance " + std::to_string(options.viewDistance));
 	emit("fancy_graphics " + std::to_string(minecraft.options.fancyGraphics ? 1 : 0));
+	emit(std::string("lighting ") + (noLighting ? "0" : "1"));
 	emit("tick_interval_frames " + std::to_string(options.tickInterval));
 	emit("warmup_frames " + std::to_string(options.warmupFrames));
 	emit("requested_measured_frames " + std::to_string(measuredFrames));
@@ -633,8 +653,7 @@ try
 	}
 	// Release the level and its player before the next scenario binds its
 	// own; the window, context, and backend stay up for the whole process.
-	minecraft.setLevel(nullptr);
-	} // for each scenario in runNames
+	} // for each lit/unlit scenario run
 	minecraft.stop();
 	BackgroundTask::joinAll();
 	return 0;

@@ -1717,6 +1717,10 @@ void Level::updateLight(int_t layer, int_t x0, int_t y0, int_t z0, int_t x1, int
 
 void Level::updateLight(int_t layer, int_t x0, int_t y0, int_t z0, int_t x1, int_t y1, int_t z1, bool checkExpansion)
 {
+	// Fullbright stress mode: nothing is ever queued, so the drain below is
+	// trivial and no chunk is dirtied by light.
+	if (!lightingEnabled)
+		return;
 	A126_PROBE_SCOPE(memoryprobe::Bucket::LightUpdate);
 
 	if (dimension->hasCeiling && layer == LightLayer::Sky)

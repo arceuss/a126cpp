@@ -51,6 +51,10 @@ struct Options
 	std::string world;
 	// Rendering sink: real backend or legacygl's resident null sink.
 	bool nullSink = false;
+	// Fullbright comparison run: Level::lightingEnabled is cleared, so light
+	// never propagates and every brightness read returns maximum. Offline
+	// levels only; ignored with a warning for server-driven ones.
+	bool noLighting = false;
 	// Frames rendered after warm-up; 0 = scenario default.
 	int frames = 0;
 	// Frames between game ticks. 3 approximates a 60 Hz client at 20 TPS.

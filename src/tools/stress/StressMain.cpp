@@ -162,11 +162,11 @@ static void onTerminate()
 }
 
 // Usage:
-//   a126cpp-stress [--backend <name>] [--null-sink] [--frames N]
-//                  [--tick-interval N] [--warmup N] [--sample-every N]
-//                  [--view-distance 0-3] [--no-finish] [--log <path>]
-//                  [--server host[:port]] [--user name] [--world <save>]
-//                  <scenario> [--<param> <value>]...
+	//   a126cpp-stress [--backend <name>] [--null-sink] [--frames N]
+	//                  [--tick-interval N] [--warmup N] [--sample-every N]
+	//                  [--view-distance 0-3] [--no-finish] [--no-lighting] [--log <path>]
+	//                  [--server host[:port]] [--user name] [--world <save>]
+	//                  <scenario> [--<param> <value>]...
 //
 // --backend must come first, as in the client. --null-sink keeps that
 // backend's window but routes every draw to legacygl's resident null sink,
@@ -182,7 +182,8 @@ static void usage()
 		"                      [--view-distance 0-3] [--no-finish] [--log <path>]\n"
 		"                      [--server host[:port]] [--user name] [--world <save>]\n"
 		"                      <scenario|all> [--<param> <value>]...\n"
-		"all runs every offline scenario in one process (one log per scenario).\n"
+		"all runs every offline scenario twice, lit and fullbright, in one process\n"
+		"(one log per scenario run; the fullbright log adds -nolight).\n"
 		"scenarios:");
 	for (const std::string &name : stress::scenarioNames())
 		std::fprintf(stderr, " %s", name.c_str());
@@ -257,6 +258,7 @@ int main(int argc, char *argv[])
 		}
 		else if (std::strcmp(arg, "--fancy") == 0) { if (!intArg(options.fancyGraphics)) return 2; }
 		else if (std::strcmp(arg, "--no-occlusion") == 0) { OcclusionCuller::enabled = false; i++; }
+		else if (std::strcmp(arg, "--no-lighting") == 0) { options.noLighting = true; i++; }
 		else if (std::strcmp(arg, "--frames") == 0) { if (!intArg(options.frames)) return 2; }
 		else if (std::strcmp(arg, "--tick-interval") == 0) { if (!intArg(options.tickInterval)) return 2; }
 		else if (std::strcmp(arg, "--warmup") == 0) { if (!intArg(options.warmupFrames)) return 2; }
