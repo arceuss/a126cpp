@@ -12,18 +12,30 @@
 #include <memory>
 #include <fstream>
 
-// newb12: HttpTexture constructor - downloads image in background thread (HttpTexture.java:14-43)
-HttpTexture::HttpTexture(const jstring &url, HttpTextureProcessor *processor)
+HttpTexture::HttpTexture(const jstring &url, std::unique_ptr<HttpTextureProcessor> processor)
+	: download(std::make_shared<Download>())
 {
-	// Start download in background thread
-	// Not detached: see BackgroundTask.
-	BackgroundTask::run([this, url, processor]() {
-		downloadThread(url, processor);
+	download->processor = std::move(processor);
+	// Each request owns its result. Erasing/replacing a texture cannot publish
+	// an old request into a new object, and no worker retains the texture.
+	const std::shared_ptr<Download> result = download;
+	BackgroundTask::run([result, url]() {
+		downloadThread(url, *result);
+		result->ready.store(true, std::memory_order_release);
 	});
 }
 
-void HttpTexture::downloadThread(const jstring &url, HttpTextureProcessor *processor)
+BufferedImage *HttpTexture::image()
 {
+	if (!download->ready.load(std::memory_order_acquire))
+		return nullptr;
+	return &download->image;
+}
+
+void HttpTexture::downloadThread(const jstring &url, Download &result)
+{
+	BufferedImage &loadedImage = result.image;
+	HttpTextureProcessor *processor = result.processor.get();
 	try
 	{
 		// Convert URL to UTF-8
@@ -187,8 +199,7 @@ void HttpTexture::downloadThread(const jstring &url, HttpTextureProcessor *proce
 				}
 			}
 			
-			// Note: isLoaded is set to true in Textures::loadHttpTexture() after uploading to OpenGL
-			// Don't set it here - the download thread only sets loadedImage
+			// The caller publishes readiness only after processing and cache writes finish.
 		}
 	}
 	catch (const std::exception &e)

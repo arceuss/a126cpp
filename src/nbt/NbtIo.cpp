@@ -52,6 +52,7 @@ CompoundTag *read(std::istream &is)
 void writeCompressed(CompoundTag &tag, std::ostream &os)
 {
 	std::stringstream ss;
+	ss.exceptions(std::ios::badbit | std::ios::failbit);
 	write(tag, ss);
 	std::string sstr = ss.str();
 	std::string compressed = gzip::compress(sstr.data(), sstr.size());

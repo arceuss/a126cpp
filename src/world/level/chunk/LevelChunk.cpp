@@ -118,12 +118,10 @@ void LevelChunk::lightLava()
 					blockLight.set(x, y, z, emission);
 			}
 
-			// Propogate upwards
+			// Alpha starts at Y=31. Bound the accessed Y, not its pre-increment value.
 			int_t light = 15;
-			for (int_t y = my - 2; my < Level::DEPTH && light > 0;)
+			for (int_t y = my - 1; y < Level::DEPTH && light > 0; ++y)
 			{
-				y++;
-
 				ubyte_t b = blocks[i + y];
 				int_t block = Tile::lightBlock[b];
 				int_t emission = Tile::lightEmission[b];

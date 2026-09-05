@@ -1436,14 +1436,13 @@ void LevelRenderer::entityAdded(std::shared_ptr<Entity> entity)
 	if (entity != nullptr)
 	{
 		entity->prepareCustomTextures();
-		static MobSkinTextureProcessor processor;
 		if (!entity->customTextureUrl.empty())
 		{
-			textures.addHttpTexture(entity->customTextureUrl, &processor);
+			textures.addHttpTexture(entity->customTextureUrl, std::make_unique<MobSkinTextureProcessor>());
 		}
 		if (!entity->customTextureUrl2.empty())
 		{
-			textures.addHttpTexture(entity->customTextureUrl2, &processor);
+			textures.addHttpTexture(entity->customTextureUrl2, std::make_unique<MobSkinTextureProcessor>());
 		}
 	}
 }

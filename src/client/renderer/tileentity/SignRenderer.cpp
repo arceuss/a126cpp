@@ -169,9 +169,9 @@ GLuint SignRenderer::compileRegionList(const RegionKey &key, const std::vector<Q
 
 	const float size = 0.6666667f;
 	const float textScale = 0.016666668f * size;
-	const float originX = static_cast<float>(key.x * REGION_SIZE);
-	const float originY = static_cast<float>(key.y * REGION_SIZE);
-	const float originZ = static_cast<float>(key.z * REGION_SIZE);
+	const long_t originX = static_cast<long_t>(key.x) * REGION_SIZE;
+	const long_t originY = static_cast<long_t>(key.y) * REGION_SIZE;
+	const long_t originZ = static_cast<long_t>(key.z) * REGION_SIZE;
 	Font *font = getFont();
 	Tesselator &t = Tesselator::instance;
 
@@ -186,9 +186,9 @@ GLuint SignRenderer::compileRegionList(const RegionKey &key, const std::vector<Q
 		frame.loadIdentity();
 		if (underOuterScale)
 			frame.scale(1.0f / size, -1.0f / size, -1.0f / size);
-		frame.translate(static_cast<float>(sign.x) - originX + 0.5f,
-			static_cast<float>(sign.y) - originY + 0.75f * size,
-			static_cast<float>(sign.z) - originZ + 0.5f);
+		frame.translate(static_cast<float>(static_cast<long_t>(sign.x) - originX) + 0.5f,
+			static_cast<float>(static_cast<long_t>(sign.y) - originY) + 0.75f * size,
+			static_cast<float>(static_cast<long_t>(sign.z) - originZ) + 0.5f);
 		if (post)
 		{
 			float rot = sign.data * 360 / 16.0f;

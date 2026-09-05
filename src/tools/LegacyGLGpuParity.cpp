@@ -18,6 +18,10 @@
 #include "legacygl/LegacyGL.h"
 #include "lwjgl/GLContext.h"
 
+#ifdef A126_HAS_BACKEND_OPENGL33
+void runOpenGL33SyncTests();
+#endif
+
 namespace gpuparity
 {
 
@@ -1554,6 +1558,9 @@ ResultSet recordCases()
 	recordReadbackCases(results, enforceExpected);
 	recordPolygonOffsetCases(results);
 	recordLineCases(results);
+#ifdef A126_HAS_BACKEND_OPENGL33
+	runOpenGL33SyncTests();
+#endif
 	return results;
 }
 

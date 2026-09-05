@@ -127,24 +127,9 @@ HEADLESS_TEST(signs, font_metrics_match_java_oracle)
 	}
 }
 
-// Sign text is centred on the measured width and stacked ten units apart, with
-// the block of four lines centred on the board
-// (TileEntitySignRenderer.java:56-64).
-HEADLESS_TEST(signs, wall_text_layout_matches_alpha)
+HEADLESS_TEST(signs, color_codes_and_edit_markers_keep_alpha_widths)
 {
 	std::array<int_t, 256> widths = productionCharWidths();
-
-	SignTileEntity sign;
-	fillWallText(sign, 1);
-
-	for (int_t line = 0; line < 4; line++)
-	{
-		int_t expectedY = line * 10 - 4 * 5;
-		ctx.checkEqual(expectedY, line * 10 - 20, "line " + std::to_string(line) + " baseline");
-
-		int_t width = Font::widthOf(widths, sign.messages[line]);
-		ctx.checkEqual(-width / 2, -(width / 2), "line " + std::to_string(line) + " centring");
-	}
 
 	// Colour codes must not widen a line: the coloured copy measures the same
 	// as the plain text it wraps.

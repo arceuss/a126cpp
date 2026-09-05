@@ -78,6 +78,15 @@ Numeric block/item IDs always work. Common names such as `stone`, `sand`,
 `tnt`, `bow`, `arrow`, `boat`, `minecart`, `painting`, and `saddle` are also
 accepted by `/give`; common block names are accepted by `/setblock`.
 
+## world saves
+
+Corrupt region chunks are reported as errors instead of being treated as missing
+terrain. Failed saves keep chunks dirty, and a failed format conversion preserves
+the original chunk files. Decoded chunk NBT is limited to 64 MiB.
+
+Save writes and flushes are checked, but this does not guarantee recovery from
+power loss during a filesystem write. Keep backups of important worlds.
+
 ## resources
 
 already included so you can be lazy
@@ -90,7 +99,7 @@ everything is included as submodules or in the external folder:
 - stb for image loading
 - miniaudio for sound (though we also have openal-soft)
 - openal-soft for audio (modified version that actually compiles)
-- cpp-httplib for http stuff (downloading skins, etc)
+- built-in HTTP client for skin and cape downloads
 - gzip-hpp for gzip compression
 
 thats about it. if something breaks let me know i guess.

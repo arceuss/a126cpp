@@ -32,7 +32,7 @@ int_t Region::getTile(int_t x, int_t y, int_t z)
 
 	int_t xc = (x >> 4) - xc1;
 	int_t zc = (z >> 4) - zc1;
-	std::shared_ptr<LevelChunk> chunk = chunks[xc * h + zc];
+	const std::shared_ptr<LevelChunk> &chunk = chunks[xc * h + zc];
 	return (chunk == nullptr) ? 0 : chunk->getTile(x & 0xF, y, z & 0xF);
 }
 
@@ -40,7 +40,7 @@ std::shared_ptr<TileEntity> Region::getTileEntity(int_t x, int_t y, int_t z)
 {
 	int_t xc = (x >> 4) - xc1;
 	int_t zc = (z >> 4) - zc1;
-	std::shared_ptr<LevelChunk> chunk = chunks[xc * h + zc];
+	const std::shared_ptr<LevelChunk> &chunk = chunks[xc * h + zc];
 	return (chunk == nullptr) ? nullptr : chunk->getTileEntity(x & 0xF, y, z & 0xF);
 }
 

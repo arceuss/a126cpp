@@ -6,6 +6,7 @@
 #include "world/level/tile/StoneTile.h"
 #include "world/level/tile/GrassTile.h"
 #include "world/level/tile/DirtTile.h"
+#include "world/level/tile/UnbreakableTile.h"
 #include "world/level/tile/SandTile.h"
 #include "world/level/tile/GravelTile.h"
 #include "world/level/tile/FlowerTile.h"
@@ -103,17 +104,7 @@ void RandomLevelSource::prepareHeights(int_t x, int_t z, ubyte_t *tiles, double 
 							int_t yCoord = yi * CHUNK_HEIGHT + cyi;
 							if (yCoord < Level::SEA_LEVEL + 1)
 							{
-								// Alpha: Ice generation logic (ChunkProviderGenerate.java:81-87)
-								// Condition: var53 < 0.5D && var13 * 8 + var32 >= var7 - 1
-								// var53 = temperature, var7 = 64 (SEA_LEVEL + 1)
-								// So: temperature < 0.5 AND Y >= 63 (SEA_LEVEL)
-								// Alpha uses raw temperature for this check, but we use biome classification for accuracy
-								int_t tempIndex = (cxi + CHUNK_WIDTH * xi) * 16 + (czi + zi * CHUNK_WIDTH);
-								double downfall = level.getBiomeSource().downfalls[tempIndex];
-								BiomeType biome = BiomeSource::getBiome(static_cast<float>(temperature), static_cast<float>(downfall));
-								
-								// Alpha: Only freeze at surface (Y == 63, SEA_LEVEL) in cold biomes
-								if (BiomeSource::isCold(biome) && yCoord >= Level::SEA_LEVEL)
+								if (temperature < 0.5 && yCoord >= Level::SEA_LEVEL)
 								{
 									tile = Tile::ice.id;  // Alpha: Block.blockIce.blockID (ID 79)
 								}
@@ -163,7 +154,7 @@ void RandomLevelSource::buildSurfaces(int_t x, int_t z, ubyte_t *tiles)
 			bool isGravel = (gravelBuffer[x + z * 16] + random.nextDouble() * 0.2) > 3.0;
 
 			int_t depth = static_cast<int_t>(depthBuffer[x + z * 16] / 3.0 + 3.0 + random.nextDouble() * 0.25);
-			int_t depthI = 0;
+			int_t depthI = -1;
 
 			int_t topTile = Tile::grass.id;
 			int_t fillerTile = Tile::dirt.id;
@@ -175,6 +166,7 @@ void RandomLevelSource::buildSurfaces(int_t x, int_t z, ubyte_t *tiles)
 				// Bedrock
 				if (y <= 0 + random.nextInt(5))
 				{
+					tiles[i] = Tile::unbreakable.id;
 					continue;
 				}
 
@@ -205,6 +197,8 @@ void RandomLevelSource::buildSurfaces(int_t x, int_t z, ubyte_t *tiles)
 							if (isSand) topTile = Tile::sand.id;
 							if (isSand) fillerTile = Tile::sand.id;
 						}
+						if (y < seaLevel && topTile == 0)
+							topTile = Tile::calmWater.id;
 
 						depthI = depth;
 						if (y >= seaLevel - 1)
@@ -403,32 +397,44 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	for (int_t i = 0; i < 10; ++i)
 	{
 		WorldGenMinable clayVein(82, 32);  // Clay block ID 82
-		clayVein.generate(level, random, cx + random.nextInt(16), random.nextInt(128), cz + random.nextInt(16));
+		const int_t px = cx + random.nextInt(16);
+		const int_t py = random.nextInt(128);
+		const int_t pz = cz + random.nextInt(16);
+		clayVein.generate(level, random, px, py, pz);
 	}
 
 	// Dirt veins - 20 attempts, vein size 32 (ChunkProviderGenerate.java:346-351)
 	for (int_t i = 0; i < 20; ++i)
 	{
 		WorldGenMinable dirtVein(Tile::dirt.id, 32);
-		dirtVein.generate(level, random, cx + random.nextInt(16), random.nextInt(128), cz + random.nextInt(16));
+		const int_t px = cx + random.nextInt(16);
+		const int_t py = random.nextInt(128);
+		const int_t pz = cz + random.nextInt(16);
+		dirtVein.generate(level, random, px, py, pz);
 	}
 
 	// Gravel veins - 10 attempts, vein size 32 (ChunkProviderGenerate.java:353-358)
 	for (int_t i = 0; i < 10; ++i)
 	{
 		WorldGenMinable gravelVein(Tile::gravel.id, 32);
-		gravelVein.generate(level, random, cx + random.nextInt(16), random.nextInt(128), cz + random.nextInt(16));
+		const int_t px = cx + random.nextInt(16);
+		const int_t py = random.nextInt(128);
+		const int_t pz = cz + random.nextInt(16);
+		gravelVein.generate(level, random, px, py, pz);
 	}
 
 	// Coal ore - 20 attempts, vein size 16, Y 0-127 (ChunkProviderGenerate.java:360-365)
 	for (int_t i = 0; i < 20; ++i)
 	{
 		WorldGenMinable coalVein(Tile::getOreCoalId(), 16);
+		const int_t px = cx + random.nextInt(16);
+		const int_t py = random.nextInt(128);
+		const int_t pz = cz + random.nextInt(16);
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (coalVein.generate(level, random, cx + random.nextInt(16), random.nextInt(128), cz + random.nextInt(16)))
+		if (coalVein.generate(level, random, px, py, pz))
 			oreBlocksPlaced += 16;
 		#else
-		coalVein.generate(level, random, cx + random.nextInt(16), random.nextInt(128), cz + random.nextInt(16));
+		coalVein.generate(level, random, px, py, pz);
 		#endif
 	}
 
@@ -436,11 +442,14 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	for (int_t i = 0; i < 20; ++i)
 	{
 		WorldGenMinable ironVein(Tile::getOreIronId(), 8);
+		const int_t px = cx + random.nextInt(16);
+		const int_t py = random.nextInt(64);
+		const int_t pz = cz + random.nextInt(16);
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (ironVein.generate(level, random, cx + random.nextInt(16), random.nextInt(64), cz + random.nextInt(16)))
+		if (ironVein.generate(level, random, px, py, pz))
 			oreBlocksPlaced += 8;
 		#else
-		ironVein.generate(level, random, cx + random.nextInt(16), random.nextInt(64), cz + random.nextInt(16));
+		ironVein.generate(level, random, px, py, pz);
 		#endif
 	}
 
@@ -448,11 +457,14 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	for (int_t i = 0; i < 2; ++i)
 	{
 		WorldGenMinable goldVein(Tile::getOreGoldId(), 8);
+		const int_t px = cx + random.nextInt(16);
+		const int_t py = random.nextInt(32);
+		const int_t pz = cz + random.nextInt(16);
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (goldVein.generate(level, random, cx + random.nextInt(16), random.nextInt(32), cz + random.nextInt(16)))
+		if (goldVein.generate(level, random, px, py, pz))
 			oreBlocksPlaced += 8;
 		#else
-		goldVein.generate(level, random, cx + random.nextInt(16), random.nextInt(32), cz + random.nextInt(16));
+		goldVein.generate(level, random, px, py, pz);
 		#endif
 	}
 
@@ -522,11 +534,14 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	for (int_t i = 0; i < 2; ++i)
 	{
 		WorldGenFlowers yellowFlowers(Tile::getPlantYellowId());
+		const int_t px = cx + random.nextInt(16) + 8;
+		const int_t py = random.nextInt(128);
+		const int_t pz = cz + random.nextInt(16) + 8;
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (yellowFlowers.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (yellowFlowers.generate(level, random, px, py, pz))
 			flowersYellowPlaced++;
 		#else
-		yellowFlowers.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		yellowFlowers.generate(level, random, px, py, pz);
 		#endif
 	}
 
@@ -534,11 +549,14 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	if (random.nextInt(2) == 0)
 	{
 		WorldGenFlowers redFlowers(Tile::getPlantRedId());
+		const int_t px = cx + random.nextInt(16) + 8;
+		const int_t py = random.nextInt(128);
+		const int_t pz = cz + random.nextInt(16) + 8;
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (redFlowers.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (redFlowers.generate(level, random, px, py, pz))
 			flowersRedPlaced++;
 		#else
-		redFlowers.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		redFlowers.generate(level, random, px, py, pz);
 		#endif
 	}
 
@@ -550,11 +568,14 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	if (random.nextInt(4) == 0)
 	{
 		WorldGenFlowers brownMushrooms(Tile::getMushroomBrownId());
+		const int_t px = cx + random.nextInt(16) + 8;
+		const int_t py = random.nextInt(128);
+		const int_t pz = cz + random.nextInt(16) + 8;
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (brownMushrooms.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (brownMushrooms.generate(level, random, px, py, pz))
 			mushroomsBrownPlaced++;
 		#else
-		brownMushrooms.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		brownMushrooms.generate(level, random, px, py, pz);
 		#endif
 	}
 
@@ -562,11 +583,14 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	if (random.nextInt(8) == 0)
 	{
 		WorldGenFlowers redMushrooms(Tile::getMushroomRedId());
+		const int_t px = cx + random.nextInt(16) + 8;
+		const int_t py = random.nextInt(128);
+		const int_t pz = cz + random.nextInt(16) + 8;
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (redMushrooms.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (redMushrooms.generate(level, random, px, py, pz))
 			mushroomsRedPlaced++;
 		#else
-		redMushrooms.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		redMushrooms.generate(level, random, px, py, pz);
 		#endif
 	}
 
@@ -577,11 +601,14 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	for (int_t i = 0; i < 10; ++i)
 	{
 		WorldGenReed reeds;
+		const int_t px = cx + random.nextInt(16) + 8;
+		const int_t py = random.nextInt(128);
+		const int_t pz = cz + random.nextInt(16) + 8;
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (reeds.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (reeds.generate(level, random, px, py, pz))
 			reedsPlaced++;
 		#else
-		reeds.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		reeds.generate(level, random, px, py, pz);
 		#endif
 	}
 
@@ -603,11 +630,14 @@ void RandomLevelSource::postProcess(ChunkSource &parent, int_t x, int_t z)
 	for (int_t i = 0; i < cactusCount; ++i)
 	{
 		WorldGenCactus cactus;
+		const int_t px = cx + random.nextInt(16) + 8;
+		const int_t py = random.nextInt(128);
+		const int_t pz = cz + random.nextInt(16) + 8;
 		#ifdef ENABLE_DECORATION_DEBUG
-		if (cactus.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8))
+		if (cactus.generate(level, random, px, py, pz))
 			cactusPlaced++;
 		#else
-		cactus.generate(level, random, cx + random.nextInt(16) + 8, random.nextInt(128), cz + random.nextInt(16) + 8);
+		cactus.generate(level, random, px, py, pz);
 		#endif
 	}
 

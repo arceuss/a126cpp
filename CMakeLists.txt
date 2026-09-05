@@ -1658,10 +1658,11 @@ if(A126_ENABLE_GL_GPU_TESTS)
 	add_executable(a126cpp-legacygl-gpu-parity-gl33
 		"src/backends/Backend.cpp"
 		"src/tools/LegacyGLGpuParity.cpp"
+		"src/backends/OpenGL33/tests/SyncTests.cpp"
 	)
 	target_compile_definitions(a126cpp-legacygl-gpu-parity-gl33 PRIVATE A126_HAS_BACKEND_OPENGL33=1)
 	target_link_libraries(a126cpp-legacygl-gpu-parity-gl33 PRIVATE
-		Alpha126CppCore a126cpp-render-backend-opengl33
+		Alpha126CppCore a126cpp-render-backend-opengl33 glad
 	)
 
 	set(A126_GL_GPU_PARITY_TARGETS

@@ -1,7 +1,21 @@
 #include "util/Mth.h"
+#include "util/MthSinTable.h"
 
 #include <cmath>
 #include <iostream>
+#include <limits>
+
+// Java floating-to-int conversion saturates and maps NaN to zero.
+static int_t trigIndex(float value)
+{
+	if (std::isnan(value))
+		return 0;
+	if (value >= 2147483648.0f)
+		return std::numeric_limits<int_t>::max();
+	if (value <= -2147483648.0f)
+		return std::numeric_limits<int_t>::min();
+	return static_cast<int_t>(value);
+}
 
 static constexpr int_t BIG_ENOUGH_INT = 1024;
 static constexpr float BIG_ENOUGH_FLOAT = 1024.0f;
@@ -11,13 +25,11 @@ namespace Mth
 
 float sin(float angle)
 {
-	// TODO
-	return std::sin(angle);
+	return mthSinTable[static_cast<uint_t>(trigIndex(angle * 10430.378f)) & 65535U];
 }
 float cos(float angle)
 {
-	// TODO
-	return std::cos(angle);
+	return mthSinTable[static_cast<uint_t>(trigIndex(angle * 10430.378f + 16384.0f)) & 65535U];
 }
 
 float sqrt(float value)

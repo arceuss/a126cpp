@@ -1190,20 +1190,25 @@ public:
 		if (uniformFences[uniformRegion] != nullptr)
 			glDeleteSync(uniformFences[uniformRegion]);
 		uniformFences[uniformRegion] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-		uniformRegion = (uniformRegion + 1) % CORE_UNIFORM_REGIONS;
-		if (uniformFences[uniformRegion] != nullptr)
+		if (uniformFences[uniformRegion] == nullptr)
+			throw std::runtime_error("OpenGL 3.3 failed to fence persistent storage");
+		const std::size_t nextRegion = (uniformRegion + 1) % CORE_UNIFORM_REGIONS;
+		if (uniformFences[nextRegion] != nullptr)
 		{
-			const GLenum waited = glClientWaitSync(uniformFences[uniformRegion],
+			GLenum waited = glClientWaitSync(uniformFences[nextRegion],
 				GL_SYNC_FLUSH_COMMANDS_BIT, 0);
-			if (waited == GL_TIMEOUT_EXPIRED)
+			while (waited == GL_TIMEOUT_EXPIRED)
 			{
 				uniformFenceWaits++;
-				glClientWaitSync(uniformFences[uniformRegion],
+				waited = glClientWaitSync(uniformFences[nextRegion],
 					GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
 			}
-			glDeleteSync(uniformFences[uniformRegion]);
-			uniformFences[uniformRegion] = nullptr;
+			if (waited != GL_ALREADY_SIGNALED && waited != GL_CONDITION_SATISFIED)
+				throw std::runtime_error("OpenGL 3.3 failed to wait for persistent storage");
+			glDeleteSync(uniformFences[nextRegion]);
+			uniformFences[nextRegion] = nullptr;
 		}
+		uniformRegion = nextRegion;
 		uniformCursor = 0;
 		batchBlockCursor = 0;
 		streamPeakBytes = std::max(streamPeakBytes, streamCursor);

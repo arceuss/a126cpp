@@ -54,10 +54,10 @@ std::shared_ptr<LevelChunk> ChunkCache::getChunk(int_t x, int_t z)
 	{
 		if (chunks[ri] != nullptr)
 		{
-			chunks[ri]->unload();
 			A126_PROBE_SCOPE(memoryprobe::Bucket::ChunkSave);
 			save(*chunks[ri]);
 			saveEntities(*chunks[ri]);
+			chunks[ri]->unload();
 		}
 
 		std::shared_ptr<LevelChunk> chunk = load(x, z);
@@ -121,8 +121,8 @@ void ChunkCache::saveEntities(LevelChunk &chunk)
 void ChunkCache::save(LevelChunk &chunk)
 {
 	if (storage == nullptr) return;
-	chunk.lastSaveTime = level.time;
 	storage->save(level, chunk);
+	chunk.lastSaveTime = level.time;
 }
 
 void ChunkCache::postProcess(ChunkSource &parent, int_t x, int_t z)

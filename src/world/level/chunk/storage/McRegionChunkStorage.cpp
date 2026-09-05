@@ -16,6 +16,8 @@
 
 #include <sstream>
 #include <iostream>
+#include <stdexcept>
+#include <limits>
 
 #include "zlib.h"
 
@@ -68,13 +70,11 @@ std::shared_ptr<LevelChunk> McRegionChunkStorage::load(Level &level, int_t x, in
 
 	if (!rootTag->contains(u"Level"))
 	{
-		std::cout << "Chunk file at " << x << "," << z << " is missing level data, skipping\n";
-		return nullptr;
+		throw std::runtime_error("Region chunk is missing Level data at " + std::to_string(x) + "," + std::to_string(z));
 	}
 	if (!rootTag->getCompound(u"Level")->contains(u"Blocks"))
 	{
-		std::cout << "Chunk file at " << x << "," << z << " is missing block data, skipping\n";
-		return nullptr;
+		throw std::runtime_error("Region chunk is missing Blocks data at " + std::to_string(x) + "," + std::to_string(z));
 	}
 
 	// Reuse OldChunkStorage's NBT-to-chunk deserialization; the chunk compound
@@ -106,8 +106,11 @@ void McRegionChunkStorage::save(Level &level, LevelChunk &chunk)
 
 	// Write NBT to buffer
 	std::stringstream ss;
+	ss.exceptions(std::ios::badbit | std::ios::failbit);
 	NbtIo::write(*rootTag, ss);
 	std::string nbtData = ss.str();
+	if (nbtData.size() > RegionFile::MAX_CHUNK_BYTES)
+		throw std::runtime_error("Chunk NBT exceeds region decoded size limit");
 
 	// Zlib compress
 	uLongf compBound = compressBound(static_cast<uLong>(nbtData.size()));
@@ -122,9 +125,10 @@ void McRegionChunkStorage::save(Level &level, LevelChunk &chunk)
 
 	if (ret != Z_OK)
 	{
-		std::cerr << "Failed to compress chunk at " << chunk.x << "," << chunk.z << std::endl;
-		return;
+		throw std::runtime_error("Failed to compress chunk at " + std::to_string(chunk.x) + "," + std::to_string(chunk.z));
 	}
+	if (compSize > static_cast<uLongf>(std::numeric_limits<int_t>::max()))
+		throw std::runtime_error("Compressed chunk exceeds region size limit");
 
 	// Write to region file
 	auto regionFile = RegionFileCache::getRegionFile(baseDir, chunk.x, chunk.z);

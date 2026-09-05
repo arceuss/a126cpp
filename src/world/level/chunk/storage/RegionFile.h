@@ -31,13 +31,16 @@ private:
 	void writeSectors(int_t sectorNumber, const byte_t *data, int_t length);
 
 public:
+	// Resource limit for decoded chunk NBT, not a McRegion format limit.
+	static const std::size_t MAX_CHUNK_BYTES = 64 * 1024 * 1024;
+
 	RegionFile(const std::string &path);
 	~RegionFile();
 
-	// Returns the chunk data as decompressed bytes, or empty vector if not present
+	// Empty only when absent. Corrupt data and I/O failures throw std::runtime_error.
 	std::vector<byte_t> getChunkData(int_t x, int_t z);
 
-	// Writes compressed chunk data to the region file
+	// Returns only after a checked write and flush; failures throw.
 	void writeChunkData(int_t x, int_t z, const byte_t *data, int_t length);
 
 	bool hasChunk(int_t x, int_t z);

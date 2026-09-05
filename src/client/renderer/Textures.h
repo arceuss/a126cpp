@@ -64,7 +64,7 @@ public:
 	void releaseTexture(int_t id);
 	int_t loadHttpTexture(const jstring &url, const jstring *backup);
 	int_t loadHttpTexture(const jstring &url);
-	HttpTexture *addHttpTexture(const jstring &url, HttpTextureProcessor *processor);
+	HttpTexture *addHttpTexture(const jstring &url, std::unique_ptr<HttpTextureProcessor> processor);
 	void removeHttpTexture(const jstring &url);
 
 	void tick();

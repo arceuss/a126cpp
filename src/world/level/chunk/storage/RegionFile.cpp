@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <stdexcept>
 
 #include "zlib.h"
 
@@ -23,8 +24,9 @@ static void writeBE32(std::fstream &f, int_t value)
 
 static int_t readBE32(std::fstream &f)
 {
-	byte_t buf[4];
-	f.read(reinterpret_cast<char *>(buf), 4);
+	byte_t buf[4] = {};
+	if (!f.read(reinterpret_cast<char *>(buf), 4))
+		throw std::runtime_error("Short region integer read");
 	return (static_cast<int_t>(buf[0] & 0xFF) << 24) |
 	       (static_cast<int_t>(buf[1] & 0xFF) << 16) |
 	       (static_cast<int_t>(buf[2] & 0xFF) << 8) |
@@ -44,28 +46,25 @@ RegionFile::RegionFile(const std::string &path)
 	filePath = path;
 	sizeDelta = 0;
 
-	// Open or create the file
+	const bool existed = std::filesystem::exists(std::filesystem::u8path(path));
+	if (!existed)
+	{
+		std::ofstream created(std::filesystem::u8path(path), std::ios::binary);
+		if (!created)
+			throw std::runtime_error("Failed to create region file: " + path);
+	}
 	openRegionStream(dataFile, path, std::ios::in | std::ios::out | std::ios::binary);
 	if (!dataFile.is_open())
-	{
-		// File doesn't exist, create it
-		openRegionStream(dataFile, path, std::ios::out | std::ios::binary);
-		dataFile.close();
-		openRegionStream(dataFile, path, std::ios::in | std::ios::out | std::ios::binary);
-	}
-
-	if (!dataFile.is_open())
-	{
-		std::cerr << "Failed to open region file: " << path << std::endl;
-		return;
-	}
+		throw std::runtime_error("Failed to open region file: " + path);
+	dataFile.exceptions(std::ios::badbit | std::ios::failbit);
 
 	// Get file size
 	dataFile.seekg(0, std::ios::end);
 	long_t fileLength = static_cast<long_t>(dataFile.tellg());
 
-	// If file is too small, write empty header (two 4KB sectors)
-	if (fileLength < 4096L)
+	if (existed && fileLength < 8192)
+		throw std::runtime_error("Truncated region header: " + path);
+	if (!existed)
 	{
 		dataFile.seekp(0, std::ios::beg);
 		for (int_t i = 0; i < 1024; ++i)
@@ -80,19 +79,8 @@ RegionFile::RegionFile(const std::string &path)
 		fileLength = static_cast<long_t>(dataFile.tellg());
 	}
 
-	// Pad to 4KB boundary. Vanilla pads by the remainder, which never lands
-	// on the boundary and regrows the file on every open; pad up to it.
-	if ((fileLength & 4095L) != 0L)
-	{
-		dataFile.seekp(0, std::ios::end);
-		long_t pad = 4096L - (fileLength & 4095L);
-		for (long_t i = 0; i < pad; ++i)
-			dataFile.put(0);
-		dataFile.flush();
-
-		dataFile.seekg(0, std::ios::end);
-		fileLength = static_cast<long_t>(dataFile.tellg());
-	}
+	// Ignore an unreferenced partial tail left by a failed append. Referenced
+	// sectors must still fit completely; opening a save never rewrites it.
 
 	// Build sector free list
 	int_t totalSectors = static_cast<int_t>(fileLength / 4096);
@@ -111,12 +99,16 @@ RegionFile::RegionFile(const std::string &path)
 		offsets[i] = offset;
 		if (offset != 0)
 		{
-			int_t sectorStart = offset >> 8;
-			int_t sectorCount = offset & 255;
-			if (sectorStart + sectorCount <= static_cast<int_t>(sectorFree.size()))
+			const uint_t sectorStart = static_cast<uint_t>(offset) >> 8;
+			const uint_t sectorCount = static_cast<uint_t>(offset) & 255U;
+			if (sectorStart < 2 || sectorCount == 0 ||
+				sectorStart + sectorCount > sectorFree.size())
+				throw std::runtime_error("Invalid region sector allocation: " + path);
+			for (uint_t s = 0; s < sectorCount; ++s)
 			{
-				for (int_t s = 0; s < sectorCount; ++s)
-					sectorFree[sectorStart + s] = false;
+				if (!sectorFree[sectorStart + s])
+					throw std::runtime_error("Overlapping region sector allocation: " + path);
+				sectorFree[sectorStart + s] = false;
 			}
 		}
 	}
@@ -128,7 +120,11 @@ RegionFile::RegionFile(const std::string &path)
 
 RegionFile::~RegionFile()
 {
-	close();
+	try { close(); }
+	catch (const std::exception &error)
+	{
+		std::cerr << "Failed to close region " << filePath << ": " << error.what() << '\n';
+	}
 }
 
 void RegionFile::close()
@@ -170,184 +166,121 @@ bool RegionFile::hasChunk(int_t x, int_t z)
 std::vector<byte_t> RegionFile::getChunkData(int_t x, int_t z)
 {
 	std::lock_guard<std::recursive_mutex> lock(mutex);
-
 	if (outOfBounds(x, z))
-		return {};
-
-	int_t offset = getOffset(x, z);
+		throw std::out_of_range("Region chunk coordinates");
+	const int_t offset = getOffset(x, z);
 	if (offset == 0)
 		return {};
 
-	int_t sectorNumber = offset >> 8;
-	int_t numSectors = offset & 255;
-
-	if (sectorNumber + numSectors > static_cast<int_t>(sectorFree.size()))
-		return {};
-
+	const uint_t sectorNumber = static_cast<uint_t>(offset) >> 8;
+	const uint_t numSectors = static_cast<uint_t>(offset) & 255U;
+	const std::string location = filePath + " chunk " + std::to_string(x) + "," + std::to_string(z);
+	if (sectorNumber < 2 || numSectors == 0 || sectorNumber + numSectors > sectorFree.size())
+		throw std::runtime_error("Invalid region allocation: " + location);
 	dataFile.seekg(static_cast<long_t>(sectorNumber) * 4096);
+	const int_t length = readBE32(dataFile);
+	if (length <= 1 || static_cast<uint_t>(length) > 4096 * numSectors - 4)
+		throw std::runtime_error("Invalid region record length: " + location);
 
-	int_t length = readBE32(dataFile);
-	if (length > 4096 * numSectors || length <= 0)
-		return {};
-
-	byte_t compressionType;
+	byte_t compressionType = 0;
 	dataFile.read(reinterpret_cast<char *>(&compressionType), 1);
+	if (compressionType != 1 && compressionType != 2)
+		throw std::runtime_error("Unsupported region compression: " + location);
+	std::vector<byte_t> compressedData(static_cast<std::size_t>(length - 1));
+	dataFile.read(reinterpret_cast<char *>(compressedData.data()), length - 1);
 
-	int_t dataLength = length - 1;
-	std::vector<byte_t> compressedData(dataLength);
-	dataFile.read(reinterpret_cast<char *>(compressedData.data()), dataLength);
-
-	// Decompress
-	if (compressionType == 1)
+	z_stream stream = {};
+	stream.next_in = reinterpret_cast<Bytef *>(compressedData.data());
+	stream.avail_in = static_cast<uInt>(compressedData.size());
+	if (inflateInit2(&stream, compressionType == 1 ? MAX_WBITS + 16 : MAX_WBITS) != Z_OK)
+		throw std::runtime_error("Region inflate initialization failed: " + location);
+	struct InflateEnd
 	{
-		// GZip - use gzip decompression (inflate with gzip header)
-		z_stream strm = {};
-		strm.next_in = reinterpret_cast<Bytef *>(compressedData.data());
-		strm.avail_in = static_cast<uInt>(dataLength);
+		z_stream &stream;
+		~InflateEnd() { inflateEnd(&stream); }
+	} cleanup{stream};
 
-		if (inflateInit2(&strm, 16 + MAX_WBITS) != Z_OK)
-			return {};
-
-		std::vector<byte_t> result;
-		byte_t outbuf[16384];
-		int ret;
-		do
-		{
-			strm.next_out = reinterpret_cast<Bytef *>(outbuf);
-			strm.avail_out = sizeof(outbuf);
-			ret = inflate(&strm, Z_NO_FLUSH);
-			if (ret == Z_STREAM_ERROR || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR)
-			{
-				inflateEnd(&strm);
-				return {};
-			}
-			size_t have = sizeof(outbuf) - strm.avail_out;
-			result.insert(result.end(), outbuf, outbuf + have);
-		} while (ret != Z_STREAM_END);
-
-		inflateEnd(&strm);
-		return result;
-	}
-	else if (compressionType == 2)
+	std::vector<byte_t> result;
+	byte_t output[16384];
+	for (;;)
 	{
-		// Zlib (deflate with zlib header)
-		z_stream strm = {};
-		strm.next_in = reinterpret_cast<Bytef *>(compressedData.data());
-		strm.avail_in = static_cast<uInt>(dataLength);
-
-		if (inflateInit(&strm) != Z_OK)
-			return {};
-
-		std::vector<byte_t> result;
-		byte_t outbuf[16384];
-		int ret;
-		do
+		stream.next_out = reinterpret_cast<Bytef *>(output);
+		stream.avail_out = sizeof(output);
+		const uInt inputBefore = stream.avail_in;
+		const int status = inflate(&stream, Z_NO_FLUSH);
+		const std::size_t produced = sizeof(output) - stream.avail_out;
+		if (status == Z_NEED_DICT)
+			throw std::runtime_error("Region stream requires a dictionary: " + location);
+		if (status != Z_OK && status != Z_STREAM_END && status != Z_BUF_ERROR)
+			throw std::runtime_error("Corrupt region compressed stream: " + location);
+		if (produced > MAX_CHUNK_BYTES - result.size())
+			throw std::runtime_error("Region decoded chunk exceeds size limit: " + location);
+		result.insert(result.end(), output, output + produced);
+		if (status == Z_STREAM_END)
 		{
-			strm.next_out = reinterpret_cast<Bytef *>(outbuf);
-			strm.avail_out = sizeof(outbuf);
-			ret = inflate(&strm, Z_NO_FLUSH);
-			if (ret == Z_STREAM_ERROR || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR)
-			{
-				inflateEnd(&strm);
-				return {};
-			}
-			size_t have = sizeof(outbuf) - strm.avail_out;
-			result.insert(result.end(), outbuf, outbuf + have);
-		} while (ret != Z_STREAM_END);
-
-		inflateEnd(&strm);
-		return result;
+			if (result.empty())
+				throw std::runtime_error("Empty region chunk payload: " + location);
+			return result;
+		}
+		if (stream.avail_in == inputBefore && produced == 0)
+			throw std::runtime_error("Truncated region compressed stream: " + location);
 	}
-
-	return {};
 }
 
 void RegionFile::writeChunkData(int_t x, int_t z, const byte_t *data, int_t length)
 {
 	std::lock_guard<std::recursive_mutex> lock(mutex);
-
 	if (outOfBounds(x, z))
-		return;
+		throw std::out_of_range("Region chunk coordinates");
+	if (!dataFile.is_open() || !dataFile)
+		throw std::runtime_error("Region stream is not writable: " + filePath);
+	if (length <= 0 || data == nullptr || length > 255 * 4096 - 5)
+		throw std::runtime_error("Invalid or oversized compressed region chunk: " + filePath);
 
-	int_t offset = getOffset(x, z);
-	int_t sectorNumber = offset >> 8;
-	int_t existingSectors = offset & 255;
+	const uint_t oldOffset = static_cast<uint_t>(getOffset(x, z));
+	const uint_t oldSector = oldOffset >> 8;
+	const uint_t oldCount = oldOffset & 255U;
+	const int_t neededSectors = (length + 5 + 4095) / 4096;
 
-	// +5 for the header: 4 bytes length + 1 byte compression type
-	int_t neededSectors = (length + 5) / 4096 + 1;
-
-	if (neededSectors >= 256)
-		return;
-
-	if (sectorNumber != 0 && existingSectors == neededSectors)
+	// Keep the old record allocated until the replacement is written and flushed.
+	int_t runStart = -1;
+	int_t runLength = 0;
+	for (int_t i = 2; i < static_cast<int_t>(sectorFree.size()); ++i)
 	{
-		// Rewrite in place
-		writeSectors(sectorNumber, data, length);
-	}
-	else
-	{
-		// Free old sectors
-		for (int_t i = 0; i < existingSectors; ++i)
+		if (sectorFree[i])
 		{
-			if (sectorNumber + i < static_cast<int_t>(sectorFree.size()))
-				sectorFree[sectorNumber + i] = true;
-		}
-
-		// Find a contiguous run of free sectors
-		int_t runStart = -1;
-		int_t runLength = 0;
-
-		for (int_t i = 2; i < static_cast<int_t>(sectorFree.size()); ++i)
-		{
-			if (sectorFree[i])
-			{
-				if (runLength == 0)
-					runStart = i;
-				++runLength;
-				if (runLength >= neededSectors)
-					break;
-			}
-			else
-			{
-				runLength = 0;
-			}
-		}
-
-		if (runLength >= neededSectors)
-		{
-			// Reuse existing sectors
-			sectorNumber = runStart;
-			setOffset(x, z, runStart << 8 | neededSectors);
-
-			for (int_t i = 0; i < neededSectors; ++i)
-				sectorFree[sectorNumber + i] = false;
-
-			writeSectors(sectorNumber, data, length);
+			if (runLength == 0)
+				runStart = i;
+			if (++runLength == neededSectors)
+				break;
 		}
 		else
-		{
-			// Grow file
-			dataFile.seekp(0, std::ios::end);
-			sectorNumber = static_cast<int_t>(sectorFree.size());
-
-			for (int_t i = 0; i < neededSectors; ++i)
-			{
-				dataFile.write(reinterpret_cast<const char *>(emptySector), 4096);
-				sectorFree.push_back(false);
-			}
-
-			sizeDelta += 4096 * neededSectors;
-			writeSectors(sectorNumber, data, length);
-			setOffset(x, z, sectorNumber << 8 | neededSectors);
-		}
+			runLength = 0;
+	}
+	int_t sectorNumber = runLength == neededSectors ? runStart : static_cast<int_t>(sectorFree.size());
+	if (sectorNumber > 0xFFFFFF)
+		throw std::runtime_error("Region sector offset exceeds format limit: " + filePath);
+	if (runLength != neededSectors)
+	{
+		// Allocate memory before writing so allocation failure cannot follow publication.
+		sectorFree.resize(static_cast<std::size_t>(sectorNumber) + neededSectors, true);
+		dataFile.seekp(static_cast<long_t>(sectorNumber) * 4096);
+		for (int_t i = 0; i < neededSectors; ++i)
+			dataFile.write(reinterpret_cast<const char *>(emptySector), 4096);
+		sizeDelta += 4096 * neededSectors;
 	}
 
-	// Update timestamp
-	auto now = std::chrono::system_clock::now();
-	int_t timestamp = static_cast<int_t>(std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count());
-	setTimestamp(x, z, timestamp);
-
+	writeSectors(sectorNumber, data, length);
 	dataFile.flush();
+	const std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+	const int_t timestamp = static_cast<int_t>(
+		std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count());
+	setTimestamp(x, z, timestamp);
+	setOffset(x, z, static_cast<int_t>((static_cast<uint_t>(sectorNumber) << 8) | neededSectors));
+	for (int_t i = 0; i < neededSectors; ++i)
+		sectorFree[sectorNumber + i] = false;
+	for (uint_t i = 0; i < oldCount; ++i)
+		sectorFree[oldSector + i] = true;
 }
 
 void RegionFile::writeSectors(int_t sectorNumber, const byte_t *data, int_t length)
@@ -368,14 +301,16 @@ void RegionFile::writeSectors(int_t sectorNumber, const byte_t *data, int_t leng
 
 void RegionFile::setOffset(int_t x, int_t z, int_t val)
 {
-	offsets[x + z * 32] = val;
 	dataFile.seekp(static_cast<long_t>((x + z * 32)) * 4);
 	writeBE32(dataFile, val);
+	dataFile.flush();
+	offsets[x + z * 32] = val;
 }
 
 void RegionFile::setTimestamp(int_t x, int_t z, int_t val)
 {
-	timestamps[x + z * 32] = val;
 	dataFile.seekp(4096 + static_cast<long_t>((x + z * 32)) * 4);
 	writeBE32(dataFile, val);
+	dataFile.flush();
+	timestamps[x + z * 32] = val;
 }

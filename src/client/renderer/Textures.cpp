@@ -204,19 +204,19 @@ int_t Textures::loadHttpTexture(const jstring &url, const jstring *backup)
 	if (it != httpTextures.end())
 	{
 		HttpTexture *texture = it->second.get();
-		// Check if download completed (image has dimensions) but not yet uploaded to OpenGL
-		if (texture->loadedImage.getWidth() > 0 && texture->loadedImage.getHeight() > 0 && !texture->isLoaded.load())
+		BufferedImage *image = texture->image();
+		if (image != nullptr && image->getWidth() > 0 && image->getHeight() > 0 && !texture->isLoaded)
 		{
 			// Upload the processed image to OpenGL
 			if (texture->id < 0)
 			{
-				texture->id = getTexture(texture->loadedImage);
+				texture->id = getTexture(*image);
 			}
 			else
 			{
-				loadTexture(texture->loadedImage, texture->id);
+				loadTexture(*image, texture->id);
 			}
-			texture->isLoaded.store(true);
+			texture->isLoaded = true;
 		}
 		
 		// Return texture ID if it's ready, otherwise fall back to backup
@@ -232,26 +232,25 @@ int_t Textures::loadHttpTexture(const jstring &url, const jstring *backup)
 		// Check if it's a skin URL (contains "/skin/")
 		if (url.find(u"/skin/") != jstring::npos)
 		{
-			static MobSkinTextureProcessor processor;
-			addHttpTexture(url, &processor);
+			addHttpTexture(url, std::make_unique<MobSkinTextureProcessor>());
 			// Try again after adding (but it won't be ready immediately, so will fall back to backup)
 			it = httpTextures.find(url);
 			if (it != httpTextures.end())
 			{
 				HttpTexture *texture = it->second.get();
-				// Check if download completed (image has dimensions) but not yet uploaded to OpenGL
-				if (texture->loadedImage.getWidth() > 0 && texture->loadedImage.getHeight() > 0 && !texture->isLoaded.load())
+				BufferedImage *image = texture->image();
+				if (image != nullptr && image->getWidth() > 0 && image->getHeight() > 0 && !texture->isLoaded)
 				{
 					// Upload the processed image to OpenGL
 					if (texture->id < 0)
 					{
-						texture->id = getTexture(texture->loadedImage);
+						texture->id = getTexture(*image);
 					}
 					else
 					{
-						loadTexture(texture->loadedImage, texture->id);
+						loadTexture(*image, texture->id);
 					}
-					texture->isLoaded.store(true);
+					texture->isLoaded = true;
 				}
 				
 				// Return texture ID if it's ready
@@ -277,7 +276,7 @@ int_t Textures::loadHttpTexture(const jstring &url)
 }
 
 // newb12: Textures.addHttpTexture() - adds HTTP texture (Textures.java:196-205)
-HttpTexture *Textures::addHttpTexture(const jstring &url, HttpTextureProcessor *processor)
+HttpTexture *Textures::addHttpTexture(const jstring &url, std::unique_ptr<HttpTextureProcessor> processor)
 {
 	auto it = httpTextures.find(url);
 	if (it != httpTextures.end())
@@ -287,7 +286,7 @@ HttpTexture *Textures::addHttpTexture(const jstring &url, HttpTextureProcessor *
 	}
 	else
 	{
-		auto texture = Util::make_unique<HttpTexture>(url, processor);
+		auto texture = Util::make_unique<HttpTexture>(url, std::move(processor));
 		HttpTexture *ptr = texture.get();
 		httpTextures.emplace(url, std::move(texture));
 		return ptr;

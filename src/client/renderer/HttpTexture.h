@@ -1,8 +1,6 @@
 #pragma once
 
 #include <memory>
-#include <thread>
-#include <mutex>
 #include <atomic>
 
 #include "java/BufferedImage.h"
@@ -13,13 +11,21 @@
 class HttpTexture
 {
 public:
-	BufferedImage loadedImage;
 	int_t count = 1;
 	int_t id = -1;
-	std::atomic<bool> isLoaded{false};
+	bool isLoaded = false;
 
-	HttpTexture(const jstring &url, HttpTextureProcessor *processor);
+	HttpTexture(const jstring &url, std::unique_ptr<HttpTextureProcessor> processor);
+	// Owner thread only. The worker never touches the image after publication.
+	BufferedImage *image();
 	
 private:
-	void downloadThread(const jstring &url, HttpTextureProcessor *processor);
+	struct Download
+	{
+		BufferedImage image;
+		std::unique_ptr<HttpTextureProcessor> processor;
+		std::atomic<bool> ready{false};
+	};
+	std::shared_ptr<Download> download;
+	static void downloadThread(const jstring &url, Download &result);
 };

@@ -52,8 +52,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: main
           submodules: recursive
+
+      - name: Verify tested revision
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          actual_sha=$(git rev-parse HEAD)
+          echo "Testing $actual_sha"
+          test "$actual_sha" = "$EXPECTED_SHA"
 
       - name: Setup Ninja
         uses: seanmiddleditch/gha-setup-ninja@v5
@@ -171,7 +179,7 @@ jobs:
       - name: Test
         shell: bash
         run: |
-          ctest --test-dir "${{ steps.strings.outputs.build-output-dir }}" --output-on-failure --timeout 300 || true
+          ctest --test-dir "${{ steps.strings.outputs.build-output-dir }}" --output-on-failure --no-tests=error --timeout 300
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -184,4 +192,5 @@ jobs:
             ${{ steps.strings.outputs.bin-dir }}/*.dll
             ${{ steps.strings.outputs.bin-dir }}/*.so
             ${{ steps.strings.outputs.bin-dir }}/*.dylib
+            ${{ steps.strings.outputs.build-output-dir }}/Testing/Temporary/
           retention-days: 30

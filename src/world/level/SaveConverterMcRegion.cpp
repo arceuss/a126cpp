@@ -77,18 +77,21 @@ void writeLevelData(File &worldDirectory, const std::shared_ptr<CompoundTag> &da
 	std::unique_ptr<std::ostream> output(fileNew->toStreamOut());
 	if (!output)
 		throw std::runtime_error("Failed to open level.dat_new for writing");
+	output->exceptions(std::ios::badbit | std::ios::failbit);
 	NbtIo::writeCompressed(*root, *output);
 	output->flush();
 	output.reset();
 
-	if (fileOld->exists())
-		fileOld->remove();
-	fileDat->renameTo(*fileOld);
-	if (fileDat->exists())
-		fileDat->remove();
-	fileNew->renameTo(*fileDat);
-	if (fileNew->exists())
-		fileNew->remove();
+	if (fileOld->exists() && !fileOld->remove())
+		throw std::runtime_error("Failed to remove previous level.dat backup");
+	if (fileDat->exists() && !fileDat->renameTo(*fileOld))
+		throw std::runtime_error("Failed to back up level.dat");
+	if (!fileNew->renameTo(*fileDat))
+	{
+		if (fileOld->exists() && !fileOld->renameTo(*fileDat))
+			throw std::runtime_error("Failed to publish level.dat; previous data remains in level.dat_old");
+		throw std::runtime_error("Failed to publish level.dat; previous data restored");
+	}
 }
 
 void scanDimension(File &directory, std::vector<ChunkFile> &chunks, std::vector<jstring> &folders)
@@ -160,6 +163,7 @@ void convertChunks(File &directory, std::vector<ChunkFile> &chunks, int_t conver
 			catch (const std::exception &exception)
 			{
 				std::cerr << "Failed to convert old chunk " << String::toUTF8(chunk.path) << ": " << exception.what() << '\n';
+				throw;
 			}
 		}
 

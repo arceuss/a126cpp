@@ -5,6 +5,8 @@
 #include "world/level/tile/DirtTile.h"
 #include "world/level/tile/GrassTile.h"
 #include "world/level/tile/StoneTile.h"
+#include "world/level/tile/FluidFlowingTile.h"
+#include "world/level/tile/FluidStationaryTile.h"
 
 #include "util/Mth.h"
 
@@ -38,7 +40,7 @@ void LargeCaveFeature::addTunnel(int_t cx, int_t cz, std::array<ubyte_t, 16 * 16
 	int_t i = random.nextInt(paramInt4 / 2) + paramInt4 / 4;
 	bool bool2 = (random.nextInt(6) == 0) ? true : false;
 
-	while (paramInt3 < paramInt4)
+	for (; paramInt3 < paramInt4; ++paramInt3)
 	{
 		double d3 = 1.5 + (Mth::sin(paramInt3 * Mth::PI / paramInt4) * paramFloat1 * 1.0f);
 		double d4 = d3 * paramDouble4;
@@ -60,8 +62,14 @@ void LargeCaveFeature::addTunnel(int_t cx, int_t cz, std::array<ubyte_t, 16 * 16
 		
 		f2 *= 0.9f;
 		f1 *= 0.75f;
-		f2 += (random.nextFloat() - random.nextFloat()) * random.nextFloat() * 2.0f;
-		f1 += (random.nextFloat() - random.nextFloat()) * random.nextFloat() * 4.0f;
+		const float pitch0 = random.nextFloat();
+		const float pitch1 = random.nextFloat();
+		const float pitch2 = random.nextFloat();
+		f2 += (pitch0 - pitch1) * pitch2 * 2.0f;
+		const float yaw0 = random.nextFloat();
+		const float yaw1 = random.nextFloat();
+		const float yaw2 = random.nextFloat();
+		f1 += (yaw0 - yaw1) * yaw2 * 4.0f;
 		
 		if (!is_room && paramInt3 == i && paramFloat1 > 1.0f)
 		{
@@ -107,8 +115,8 @@ void LargeCaveFeature::addTunnel(int_t cx, int_t cz, std::array<ubyte_t, 16 * 16
 						for (int_t i5 = n + 1; !has_water &&i5 >= m - 1; i5--) {
 							int_t i6 = (i3 * 16 + i4) * 128 + i5;
 							if (i5 >= 0 && i5 < 128) {
-								// if (blocks[i6] == Tile::water.id || blocks[i6] == Tile::calmWater.id)
-								// 	has_water = true;
+								if (blocks[i6] == Tile::water.id || blocks[i6] == Tile::calmWater.id)
+									has_water = true;
 								if (i5 != m - 1 && i3 != j && i3 != k - 1 && i4 != i1 && i4 != i2 - 1)
 									i5 = m;
 							}
@@ -142,7 +150,7 @@ void LargeCaveFeature::addTunnel(int_t cx, int_t cz, std::array<ubyte_t, 16 * 16
 									{
 										if (i6 < 10)
 										{
-											// blocks[i5] = (byte)Tile.lava.id;
+											blocks[i5] = Tile::lava.id;
 										}
 										else
 										{
@@ -162,7 +170,6 @@ void LargeCaveFeature::addTunnel(int_t cx, int_t cz, std::array<ubyte_t, 16 * 16
 					break;
 			}
 		}
-		paramInt3++;
 	}
 }
 
@@ -187,7 +194,9 @@ void LargeCaveFeature::addFeature(Level &level, int_t xx, int_t zz, int_t x, int
 		{
 			float f1 = random.nextFloat() * Mth::PI * 2.0f;
 			float f2 = (random.nextFloat() - 0.5f) * 2.0f / 8.0f;
-			float f3 = random.nextFloat() * 2.0f + random.nextFloat();
+			const float width0 = random.nextFloat();
+			const float width1 = random.nextFloat();
+			float f3 = width0 * 2.0f + width1;
 			addTunnel(x, z, blocks, d1, d2, d3, f3, f1, f2, 0, 0, 1.0);
 		}
 	}

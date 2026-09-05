@@ -331,18 +331,23 @@ void Level::saveLevelData()
 	std::unique_ptr<File> fileDat(File::open(*dir, u"level.dat"));
 
 	std::unique_ptr<std::ostream> os(fileNewDat->toStreamOut());
+	if (!os)
+		throw std::runtime_error("Failed to open level.dat_new for writing");
+	os->exceptions(std::ios::badbit | std::ios::failbit);
 	NbtIo::writeCompressed(*root, *os);
 	os->flush();
 	os.reset();
 
-	if (fileOldDat->exists())
-		fileOldDat->remove();
-	fileDat->renameTo(*fileOldDat);
-	if (fileDat->exists())
-		fileDat->remove();
-	fileNewDat->renameTo(*fileDat);
-	if (fileNewDat->exists())
-		fileNewDat->remove();
+	if (fileOldDat->exists() && !fileOldDat->remove())
+		throw std::runtime_error("Failed to remove previous level.dat backup");
+	if (fileDat->exists() && !fileDat->renameTo(*fileOldDat))
+		throw std::runtime_error("Failed to back up level.dat");
+	if (!fileNewDat->renameTo(*fileDat))
+	{
+		if (fileOldDat->exists() && !fileOldDat->renameTo(*fileDat))
+			throw std::runtime_error("Failed to publish level.dat; previous data remains in level.dat_old");
+		throw std::runtime_error("Failed to publish level.dat; previous data restored");
+	}
 }
 
 bool Level::pauseSave(int_t saveStep)

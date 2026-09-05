@@ -8,6 +8,7 @@
 #include "nbt/NbtIo.h"
 #include "nbt/CompoundTag.h"
 #include "nbt/ListTag.h"
+#include <stdexcept>
 
 OldChunkStorage::OldChunkStorage(std::shared_ptr<File> dir, bool create)
 {
@@ -87,11 +88,15 @@ void OldChunkStorage::save(Level &level, LevelChunk &chunk)
 	level.checkSession();
 
 	std::unique_ptr<File> file = getFile(chunk.x, chunk.z);
-	if (file->exists())
-		level.sizeOnDisk -= file->length();
+	if (!file)
+		throw std::runtime_error("No writable old chunk path");
+	const long_t oldLength = file->exists() ? file->length() : 0;
 
 	std::unique_ptr<File> tmp_file(File::open(*dir, u"tmp_chunk.dat"));
 	std::unique_ptr<std::ostream> os(tmp_file->toStreamOut());
+	if (!os)
+		throw std::runtime_error("Failed to open temporary chunk file");
+	os->exceptions(std::ios::badbit | std::ios::failbit);
 	
 	std::unique_ptr<CompoundTag> rootTag = Util::make_unique<CompoundTag>();
 	std::shared_ptr<CompoundTag> levelTag = Util::make_shared<CompoundTag>();
@@ -107,11 +112,18 @@ void OldChunkStorage::save(Level &level, LevelChunk &chunk)
 	os->flush();
 	os.reset();
 
-	if (file->exists())
-		file->remove();
-	tmp_file->renameTo(*file);
-
-	level.sizeOnDisk += file->length();
+	std::unique_ptr<File> backup(File::open(file->toString() + u".old"));
+	if (backup->exists() && !backup->remove())
+		throw std::runtime_error("Failed to remove previous chunk backup");
+	if (file->exists() && !file->renameTo(*backup))
+		throw std::runtime_error("Failed to back up old chunk file");
+	if (!tmp_file->renameTo(*file))
+	{
+		if (backup->exists() && !backup->renameTo(*file))
+			throw std::runtime_error("Failed to save chunk; previous data remains in .old backup");
+		throw std::runtime_error("Failed to save chunk; previous data restored");
+	}
+	level.sizeOnDisk += file->length() - oldLength;
 }
 
 void OldChunkStorage::save(LevelChunk &chunk, Level &level, CompoundTag &tag)

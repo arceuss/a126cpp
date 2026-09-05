@@ -133,8 +133,8 @@ try
 	// "all" runs every offline scenario in one process for unattended runs:
 	// one fresh level per scenario, one log per scenario. The server-driven
 	// "command" scenario is excluded; use it explicitly with --server.
-	// Every scenario runs twice, lit and fullbright (--no-lighting), so the
-	// lighting engine's share falls out of the log diff.
+	// Every scenario runs twice, lit and fullbright (--no-lighting). A frame
+	// time delta is not an isolated measurement of light propagation.
 	struct Run
 	{
 		std::string scenario;

@@ -51,9 +51,9 @@ struct Options
 	std::string world;
 	// Rendering sink: real backend or legacygl's resident null sink.
 	bool nullSink = false;
-	// Fullbright comparison run: Level::lightingEnabled is cleared, so light
-	// never propagates and every brightness read returns maximum. Offline
-	// levels only; ignored with a warning for server-driven ones.
+	// Fullbright comparison mode. Use explicit propagation timings rather than
+	// treating its frame-time delta as the lighting engine's cost.
+	// Offline levels only; ignored with a warning for server-driven ones.
 	bool noLighting = false;
 	// Frames rendered after warm-up; 0 = scenario default.
 	int frames = 0;
